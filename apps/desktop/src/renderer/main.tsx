@@ -10,6 +10,7 @@ import { installClientToolIngress } from "./services/clientToolIngress";
 import { startOutboxReconcile } from "./services/outboxReconcile";
 import { installSidecarEventPump } from "./services/sidecarEventPump";
 import { installSidecarStatusListener } from "./services/sidecarStatus";
+import { installQueuedSidecarTurnListener } from "./services/turns/queuedSidecarStart";
 import { liveStagingIds } from "./stores/composer";
 import { useUIStore } from "./stores/ui";
 import "./styles/globals.css";
@@ -22,6 +23,8 @@ installSidecarStatusListener();
 // Single App-lifetime `sidecar:event` subscription; turns claim sinks (叠字根因：
 // 多 onEvent listener). See services/sidecarEventPump.
 installSidecarEventPump();
+// 本机 FIFO 出队：渲染进程先认领 turn，再 startTurn。
+installQueuedSidecarTurnListener();
 // Fulfill channels (云 device stream + 本机 sidecar push) → CLIENT_TOOL
 // perform/settle; the cloud transport itself is started in AppShell.
 installClientToolIngress();

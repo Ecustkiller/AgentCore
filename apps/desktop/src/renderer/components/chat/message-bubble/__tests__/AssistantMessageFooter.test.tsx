@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Message } from "@/stores/conversation";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -30,14 +30,11 @@ vi.mock("@/hooks/useConversations", () => ({
   useDuplicateConversation: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-vi.mock("@/services/messages", () => ({
-  setMessageFeedback: vi.fn(),
-}));
-
+import { copyText } from "@/lib/clipboard";
 import {
   AssistantMessageFooter,
   AssistantMessageMetaSummary,
-  MessageMoreMenu,
+  AssistantTurnInspect,
 } from "../AssistantMessageFooter";
 
 const message: Message = {
@@ -54,20 +51,62 @@ afterEach(() => {
   cleanup();
 });
 
-describe("MessageMoreMenu 复制排查包", () => {
-  it("打开更多后露出复制排查包", async () => {
+describe("底栏复制排查包", () => {
+  it("直接露出复制排查包，点一下就复制", async () => {
     render(
       <TooltipProvider>
-        <MessageMoreMenu message={message} captainContext={[]} />
+        <AssistantTurnInspect message={message} captainContext={[]} />
       </TooltipProvider>,
     );
-    const more = screen.getByRole("button", { name: "更多" });
-    fireEvent.pointerDown(more);
-    expect(
-      await screen.findByRole("menuitem", { name: "复制排查包" }),
-    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "更多" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "收到的上下文" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "复制排查包" }));
+    await waitFor(() => {
+      expect(copyText).toHaveBeenCalledWith(
+        expect.stringContaining("trace_id: trace-1"),
+      );
+    });
+  });
+
+  it("有快照才露出收到的上下文", () => {
+    const { rerender } = render(
+      <TooltipProvider>
+        <AssistantTurnInspect message={message} captainContext={[]} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "收到的上下文" })).toBeNull();
+    rerender(
+      <TooltipProvider>
+        <AssistantTurnInspect
+          message={message}
+          captainContext={[
+            {
+              channel: "request",
+              heading: "本轮",
+              body: "你好",
+              chars: 2,
+              truncated: false,
+              source_role: "",
+              source_run_id: "",
+              fidelity: "",
+              files: [],
+            },
+          ]}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole("button", { name: "收到的上下文" })).toBeTruthy();
   });
 });
+
+function insideHoverReveal(el: HTMLElement): boolean {
+  let node: HTMLElement | null = el;
+  while (node) {
+    if (node.className.includes("md:opacity-0")) return true;
+    node = node.parentElement;
+  }
+  return false;
+}
 
 describe("气泡脚不挂轮次", () => {
   it("meta summary 只有费用和用时，没有 N 轮", () => {
@@ -80,10 +119,10 @@ describe("气泡脚不挂轮次", () => {
     expect(screen.queryByText(/轮/)).toBeNull();
   });
 
-  it("更多 · 用量详情仍展示 ReAct 轮次", async () => {
+  it("用量弹出层仍展示 ReAct 轮次", async () => {
     render(
       <TooltipProvider>
-        <MessageMoreMenu
+        <AssistantTurnInspect
           message={{
             ...message,
             rounds: 3,
@@ -99,15 +138,16 @@ describe("气泡脚不挂轮次", () => {
         />
       </TooltipProvider>,
     );
-    fireEvent.pointerDown(screen.getByRole("button", { name: "更多" }));
+    expect(screen.queryByText("3 轮")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "用量" }));
     expect(await screen.findByText("ReAct 轮次")).toBeTruthy();
     expect(screen.getByText("3 轮")).toBeTruthy();
   });
 
-  it("更多 · 用量详情展示输出速度", async () => {
+  it("用量弹出层展示输出速度", async () => {
     render(
       <TooltipProvider>
-        <MessageMoreMenu
+        <AssistantTurnInspect
           message={{
             ...message,
             generationMs: 2_000,
@@ -123,15 +163,15 @@ describe("气泡脚不挂轮次", () => {
         />
       </TooltipProvider>,
     );
-    fireEvent.pointerDown(screen.getByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("button", { name: "用量" }));
     expect(await screen.findByText("输出速度")).toBeTruthy();
     expect(screen.getByText("40/秒")).toBeTruthy();
   });
 
-  it("更多 · 缺 generationMs 不编输出速度", async () => {
+  it("用量弹出层缺 generationMs 不编输出速度", async () => {
     render(
       <TooltipProvider>
-        <MessageMoreMenu
+        <AssistantTurnInspect
           message={{
             ...message,
             usage: {
@@ -146,7 +186,7 @@ describe("气泡脚不挂轮次", () => {
         />
       </TooltipProvider>,
     );
-    fireEvent.pointerDown(screen.getByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("button", { name: "用量" }));
     expect(await screen.findByText("输出")).toBeTruthy();
     expect(screen.queryByText("输出速度")).toBeNull();
   });
@@ -191,7 +231,29 @@ describe("AssistantMessageFooter regenerate gate", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "有帮助" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "有帮助" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "没帮助" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
+  });
+
+  it("欠包时复制排查包常显，复制仍在悬停组", () => {
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <AssistantMessageFooter
+            message={body}
+            captainContext={[]}
+            costText={null}
+            onRegenerate={() => {}}
+            pinSupportPack
+            showRegenerate={false}
+          />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+    const pack = screen.getByRole("button", { name: "复制排查包" });
+    const copy = screen.getByRole("button", { name: "复制" });
+    expect(insideHoverReveal(pack)).toBe(false);
+    expect(insideHoverReveal(copy)).toBe(true);
   });
 });

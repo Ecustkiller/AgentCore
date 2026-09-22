@@ -3,7 +3,7 @@
 from typing import Literal, cast
 
 from agentcore.config import settings
-from agentcore.core.types import PermissionAxes
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.tools.registration import (
     AUDIENCE_CEO,
     ToolSurface,
@@ -91,16 +91,17 @@ def _sidecar_process_hosts_no_cloud_sandbox() -> bool:
 
 def execution_class_enabled_for(
     backend: WorkspaceBackend | None,
-    permission_axes: "PermissionAxes | None" = None,
+    permission_axes: "WorkspaceBoundary | None" = None,
 ) -> bool:
-    """Final include_execution predicate for worker registry + capability lines.
+    """Environment can exec, and this conversation's boundary includes it.
 
-    ``code_execution_enabled_for(backend)`` ∧ ¬``command=ask`` withhold. Same bit
-    ``build_worker_registry`` uses so ``workspace_context`` never claims
-    ``code_execute=已装配`` while the toolset / identity says 未装配
-    (案 20260803-docx-office-exec-capability-lie A).
+    ``read`` withholds the class. ``folder`` / ``computer`` follow
+    :func:`code_execution_enabled_for` (sandbox / local). Same bit the worker
+    registry uses, so the workspace fact line does not claim a tool the table
+    omitted.
     """
-    if permission_axes is not None and permission_axes.withholds_execution_tools:
+    boundary = permission_axes if permission_axes is not None else WorkspaceBoundary.FOLDER
+    if not boundary.allows_execution:
         return False
     return code_execution_enabled_for(backend)
 
@@ -217,6 +218,7 @@ def build_builtin_registry(
     include_execution_tools: bool = True,
     include_host_tools: bool = False,
     include_browser: bool = False,
+    include_file_mutations: bool = True,
     include_desktop_online_tools: bool = False,
     location: Literal["server", "local"] | None = None,
     languages: tuple[str, ...] | list[str] | None = None,
@@ -251,8 +253,11 @@ def build_builtin_registry(
     (cloud / catalog leave ``None`` → full fixed surface).
     """
     registry = ToolRegistry()
+    mutation_names = file_mutation_tool_names()
     for cls in declared_tools(surface=ToolSurface.BUILTIN):
         reg = tool_registration(cls)
+        if not include_file_mutations and declared_tool_name(cls) in mutation_names:
+            continue
         if reg.browser_class:
             if not include_browser:
                 continue
@@ -273,23 +278,21 @@ def build_builtin_registry(
 def build_worker_registry(
     *,
     backend: WorkspaceBackend | None = None,
-    permission_axes: "PermissionAxes | None" = None,
+    permission_axes: "WorkspaceBoundary | None" = None,
     languages: tuple[str, ...] | list[str] | None = None,
     desktop_online: bool = False,
 ) -> ToolRegistry:
     """The delegated worker's toolset: builtins PLUS worker-only declarations.
 
-    ``command=ask`` withholds the entire execution class
-    (``code_execute`` / ``test_run`` / ``terminal``) — read-only retrieval stays on.
-    Host tools gate on ``host≠off`` (orthogonal to command and desktop heartbeat).
+    ``read`` withholds writes and the execution class. ``folder`` includes
+    both. ``computer`` also includes Host. A missing desktop heartbeat does
+    not withhold Host — execute refuses without a channel.
     """
     location = backend.location if backend is not None else None
-    include_execution = execution_class_enabled_for(backend, permission_axes)
-    ask_withhold = (
-        permission_axes is not None and permission_axes.withholds_execution_tools
-    )
-    include_browser = (not ask_withhold) and browser_execution_enabled_for(backend)
-    include_host = permission_axes is None or not permission_axes.host_disabled
+    boundary = permission_axes if permission_axes is not None else WorkspaceBoundary.FOLDER
+    include_execution = execution_class_enabled_for(backend, boundary)
+    include_browser = boundary.allows_execution and browser_execution_enabled_for(backend)
+    include_host = boundary.allows_host
     del desktop_online  # heartbeat is execute-deny; signature kept for callers
     # Prefer explicit languages; else reuse a probe cached on the backend by
     # ``resolve_exec_languages`` (prepare / resume). Cloud stays untrimmed.
@@ -301,6 +304,7 @@ def build_worker_registry(
     registry = build_builtin_registry(
         include_execution_tools=include_execution,
         include_host_tools=include_host,
+        include_file_mutations=boundary.allows_write,
         include_desktop_online_tools=True,
         include_browser=include_browser,
         location=location,
@@ -317,6 +321,8 @@ def build_worker_registry(
                 continue
         elif reg.execution_class and not include_execution:
             continue
+        if not boundary.allows_write and declared_tool_name(cls) in file_mutation_tool_names():
+            continue
         if reg.host_class and not include_host:
             continue
         if reg.local_only and (backend is None or backend.location != "local"):
@@ -328,7 +334,7 @@ def build_worker_registry(
 def build_ceo_tool_registry(
     *,
     desktop_online: bool = False,
-    permission_axes: "PermissionAxes | None" = None,
+    permission_axes: "WorkspaceBoundary | None" = None,
     backend_location: str | None = None,
     include_browser: bool = False,
     include_execution_tools: bool = True,
@@ -348,7 +354,8 @@ def build_ceo_tool_registry(
     Host tools appear when ``host≠off``. Desktop heartbeat does not shrink the
     table (execute refuses without a channel).
     """
-    include_host = permission_axes is None or not permission_axes.host_disabled
+    boundary = permission_axes if permission_axes is not None else WorkspaceBoundary.FOLDER
+    include_host = boundary.allows_host
     del desktop_online  # heartbeat is execute-deny; signature kept for callers
     location = cast(
         Literal["server", "local"] | None,
@@ -357,6 +364,7 @@ def build_ceo_tool_registry(
     full = build_builtin_registry(
         include_execution_tools=include_execution_tools,
         include_host_tools=include_host,
+        include_file_mutations=boundary.allows_write,
         include_desktop_online_tools=True,
         include_browser=include_browser,
         location=location,

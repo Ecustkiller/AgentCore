@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentcore.config import settings
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary
 from agentcore.llm.profiles import TurnProfiles
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.context import (
@@ -44,7 +44,7 @@ class AssembledTurn:
     """Phase-2 outputs: wired CEO tools + frozen node-0 system + in-history extra + envelope."""
 
     approval_gate: ApprovalGate | None
-    permission_axes: PermissionAxes
+    permission_axes: WorkspaceBoundary
     delegate_tool: Any
     debate_tool: Any
     chat_tools: ToolRegistry
@@ -65,7 +65,7 @@ async def assemble_ceo_turn(
     backend: WorkspaceBackend,
     folder_id: str | None,
     approvals_enabled: bool,
-    permission_axes: PermissionAxes | None,
+    permission_axes: WorkspaceBoundary | None,
     profiles: TurnProfiles,
     captain_run_id: str,
     message_id: str,
@@ -132,7 +132,7 @@ async def _assemble_ceo_wired(
     backend: WorkspaceBackend,
     folder_id: str | None,
     approvals_enabled: bool,
-    permission_axes: PermissionAxes | None,
+    permission_axes: WorkspaceBoundary | None,
     profiles: TurnProfiles,
     captain_run_id: str,
     message_id: str,

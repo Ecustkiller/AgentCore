@@ -69,9 +69,7 @@ export function conversationSummary(
     context_compacted: partial.context_compacted ?? false,
     compacted_through: partial.compacted_through ?? null,
     permission_axes: partial.permission_axes ?? {
-      file_write: "session",
-      command: "auto",
-      host: "session",
+      boundary: "folder",
     },
     model_profile_id: partial.model_profile_id ?? null,
   };

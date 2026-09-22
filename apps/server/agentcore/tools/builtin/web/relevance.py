@@ -250,8 +250,8 @@ class RelevanceFilterOutcome:
     dropped: list[SearchResult]
     truncated_snippets: bool
     # True when NOT ONE hit reached ``min_score`` — a uniformly weak SERP (全垃圾结果).
-    # Injection returns empty (no min_keep residual); the caller reuses this judgement
-    # for Tavily weak-retry and the model-facing quality note.
+    # Injection returns empty (no min_keep residual); the caller uses this judgement
+    # for the model-facing quality note.
     uniformly_weak: bool = False
     # Structured「证据差」signal (academic_literature / uniformly_weak junk): delivery
     # downgrade consumers read this — not just the model-facing note.

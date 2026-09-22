@@ -2,132 +2,229 @@ import {
   mapQueuedAttachments,
   mapQueuedMentions,
 } from "@/services/queuedTurnMap";
-import type {
-  OutgoingAgentMention,
-  OutgoingAttachment,
-} from "@/services/streamConversation";
+import { hasLocalConversationStream } from "@/services/turns/streamOwnership";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import {
   type QueuedTurnEntry,
   useQueuedTurnsStore,
 } from "@/stores/queuedTurns";
 
-type QueuedBubble = {
-  conversationId: string;
-  queueId: string;
-  localId: string;
-  bound: boolean;
-};
-
-/** 独立于 QueuedTurnsBar：条会被 fulfill 空快照清掉，出队插泡仍须幂等。 */
-const queuedBubbles = new Map<string, QueuedBubble>();
-
-function queueKey(conversationId: string, queueId: string): string {
-  return `${conversationId}\n${queueId}`;
-}
-
-function peekQueuedBubble(
+/**
+ * ``turn_saved``：把服务端用户行 id 记到还没有 id 的排队条上。
+ * 不改时间线。已是这个 id、或本会话没有未绑定的条 → 调用方不得再
+ * ``reconcileLastTurn``（会改掉上一轮最后一条 user）。
+ */
+export function bindQueuedTurnUserId(
   conversationId: string,
-  queueId: string,
-): QueuedBubble | null {
-  const entry = queuedBubbles.get(queueKey(conversationId, queueId));
-  if (!entry) return null;
-  const exists = getRuntime(conversationId).messages.some(
-    (m) => m.id === entry.localId,
-  );
-  if (!exists) {
-    queuedBubbles.delete(queueKey(conversationId, queueId));
-    return null;
-  }
-  return entry;
-}
-
-/** 把 ``queue_id`` 钉到已入场的用户泡上，出队 ``turn_queue_started`` 不再二次插泡。 */
-export function registerQueuedTurnUserBubble(
-  conversationId: string,
-  queueId: string,
-  localId: string,
-): void {
-  const qid = queueId.trim();
-  const lid = localId.trim();
-  if (!conversationId || !qid || !lid) return;
-  queuedBubbles.set(queueKey(conversationId, qid), {
-    conversationId,
-    queueId: qid,
-    localId: lid,
-    bound: false,
-  });
+  userMessageId: string,
+): boolean {
+  const serverId = userMessageId.trim();
+  if (!serverId) return false;
+  const queued = useQueuedTurnsStore.getState();
+  const list = queued.list(conversationId);
+  if (list.some((entry) => entry.messageId === serverId)) return true;
+  const unbound = [...list].reverse().find((entry) => !entry.messageId);
+  if (!unbound) return false;
+  queued.upsert({ ...unbound, messageId: serverId });
+  return true;
 }
 
 /**
- * 生成中再发 ack 后立刻入主时间线（排队 / 插队同一条用户泡）。
- * ``queueId`` 有值时登记出队幂等键。同 ``id`` 已在列表则只登记、不双泡。
+ * 按稳定 id 放入时间线，窗里已有则不动。
+ * 排队出队帧和插话被接住时共用。
  */
-export function paintMidFlightUserBubble(
+export function insertUserRowOnce(
   conversationId: string,
-  args: {
-    id?: string;
+  row: {
+    id: string;
     content: string;
-    attachments?: OutgoingAttachment[];
-    agentMentions?: OutgoingAgentMention[];
-    queueId?: string;
+    attachments?: readonly { name: string; workspacePath?: string }[];
+    agentMentions?: readonly { agentId: string; role: string }[];
   },
-): string {
-  const id = (args.id ?? "").trim() || crypto.randomUUID();
-  const exists = getRuntime(conversationId).messages.some((m) => m.id === id);
-  if (!exists) {
-    const attachments = args.attachments;
-    const agentMentions = args.agentMentions;
-    useConversationStore.getState().addMessage(
-      {
-        id,
-        role: "user",
-        content: args.content,
-        createdAt: new Date().toISOString(),
-        executionId: null,
-        isStreaming: false,
-        attachments:
-          attachments && attachments.length > 0
-            ? attachments.map((a, i) => ({
-                id: `mf-att-${i}`,
-                name: a.name,
-                path: a.path,
-                truncated: a.truncated,
-                kind: a.kind,
-                conversationId: a.conversation_id,
-                documentId: a.document_id,
-                workspacePath: a.workspace_path,
-              }))
-            : undefined,
-        agentMentions:
-          agentMentions && agentMentions.length > 0
-            ? agentMentions.map((a) => ({
-                agentId: a.agent_id,
-                role: a.role,
-              }))
-            : undefined,
-      },
-      conversationId,
-    );
+): string | null {
+  const id = row.id.trim();
+  if (!id) return null;
+  const messages = getRuntime(conversationId).messages;
+  if (messages.some((m) => m.id === id || m.serverMessageId === id)) return id;
+  const attachments = row.attachments?.filter((a) => a.name.trim()) ?? [];
+  const agentMentions =
+    row.agentMentions?.filter((a) => a.agentId.trim() && a.role.trim()) ?? [];
+  if (!row.content && attachments.length === 0 && agentMentions.length === 0) {
+    return null;
   }
-  if (args.queueId) {
-    registerQueuedTurnUserBubble(conversationId, args.queueId, id);
+  useConversationStore.getState().addMessage(
+    {
+      id,
+      role: "user",
+      content: row.content,
+      createdAt: new Date().toISOString(),
+      executionId: null,
+      isStreaming: false,
+      attachments:
+        attachments.length > 0
+          ? attachments.map((a, i) => ({
+              id: `caught-att-${i}`,
+              name: a.name.trim(),
+              path: a.workspacePath?.trim() || a.name.trim(),
+              truncated: false,
+              workspacePath: a.workspacePath,
+            }))
+          : undefined,
+      agentMentions:
+        agentMentions.length > 0
+          ? agentMentions.map((a) => ({
+              agentId: a.agentId.trim(),
+              role: a.role.trim(),
+            }))
+          : undefined,
+    },
+    conversationId,
+  );
+  return id;
+}
+
+/**
+ * 段首点名之后，这条用户行不再回到排队条上。
+ * 快照只知道「id 不在队里」，分不清出队、取消和重启；点名是出队的正面证据。
+ */
+const promotedUserMessageIds = new Map<string, Set<string>>();
+
+export function rememberPromotedUserRow(
+  conversationId: string,
+  userMessageId: string,
+): void {
+  const id = userMessageId.trim();
+  if (!conversationId || !id) return;
+  let set = promotedUserMessageIds.get(conversationId);
+  if (!set) {
+    set = new Set();
+    promotedUserMessageIds.set(conversationId, set);
+  }
+  set.add(id);
+}
+
+export function isPromotedUserRow(
+  conversationId: string,
+  userMessageId: string | undefined,
+): boolean {
+  const id = userMessageId?.trim();
+  if (!id) return false;
+  return promotedUserMessageIds.get(conversationId)?.has(id) ?? false;
+}
+
+export function resetPromotedUserRowsForTests(): void {
+  promotedUserMessageIds.clear();
+}
+
+/** 点名之后按用户行 id 摘掉排队条，并记住该 id，后来的快照不得放回。 */
+export function releaseNamedQueueEntry(
+  conversationId: string,
+  userMessageId: string,
+): void {
+  rememberPromotedUserRow(conversationId, userMessageId);
+  const queued = useQueuedTurnsStore.getState();
+  for (const entry of [...queued.list(conversationId)]) {
+    if (entry.messageId === userMessageId) {
+      queued.remove(conversationId, entry.queueId);
+    }
+  }
+}
+
+/**
+ * 出队开跑：按 ``user_message_id`` 把用户行放进时间线。
+ * ``turn_queue_started`` 与点名的 ``message_start`` 共用。窗里已有同一 id 则不动。
+ * 没有稳定 id 时不造一条临时泡（刷新会和落库行叠成两条）。
+ * ``beforeMessageId`` 把新行插到该助手泡之前，避免用户行变成尾部、吃掉 ``content_delta``。
+ */
+export function insertQueuedTurnUserBubble(
+  conversationId: string,
+  payload: unknown,
+  opts?: { beforeMessageId?: string },
+): string | null {
+  const p =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+  const queueId = typeof p.queue_id === "string" ? p.queue_id.trim() : "";
+  const fromFrame =
+    typeof p.user_message_id === "string" ? p.user_message_id.trim() : "";
+  const queued = queueId
+    ? useQueuedTurnsStore
+        .getState()
+        .list(conversationId)
+        .find((entry) => entry.queueId === queueId)
+    : undefined;
+  const id = fromFrame || queued?.messageId || "";
+  if (!id) return null;
+
+  const messages = getRuntime(conversationId).messages;
+  if (messages.some((m) => m.id === id || m.serverMessageId === id)) return id;
+
+  const hasContentField = typeof p.content === "string";
+  const content = hasContentField
+    ? (p.content as string)
+    : (queued?.content ?? "");
+  const attachments =
+    mapQueuedAttachments(p.attachments) ?? queued?.attachments;
+  const agentMentions =
+    mapQueuedMentions(p.agent_mentions) ?? queued?.agentMentions;
+  if (!hasContentField && !content && !attachments && !agentMentions) {
+    return null;
+  }
+
+  const message = {
+    id,
+    role: "user" as const,
+    content,
+    createdAt: new Date().toISOString(),
+    executionId: null,
+    isStreaming: false,
+    attachments:
+      attachments && attachments.length > 0
+        ? attachments.map((a, i) => ({
+            id: `mf-att-${i}`,
+            name: a.name,
+            path: a.path,
+            truncated: a.truncated,
+            kind: a.kind,
+            conversationId: a.conversation_id,
+            documentId: a.document_id,
+            workspacePath: a.workspace_path,
+          }))
+        : undefined,
+    agentMentions:
+      agentMentions && agentMentions.length > 0
+        ? agentMentions.map((a) => ({
+            agentId: a.agent_id,
+            role: a.role,
+          }))
+        : undefined,
+  };
+  const beforeId = opts?.beforeMessageId?.trim();
+  if (beforeId) {
+    useConversationStore
+      .getState()
+      .insertMessageBefore(message, beforeId, conversationId);
+  } else {
+    useConversationStore.getState().addMessage(message, conversationId);
   }
   return id;
 }
 
 /**
- * 本地清排队条（幂等）。有关联 messageId 时顺带删泡；无泡则只清条。
- * HTTP 取消成功 / 404、以及 SSE ``turn_queue_cancelled`` 共用。
+ * 本地清排队条（幂等）。
+ * ``dropBubble`` 缺省为真：确认取消删对应已在列表里的用户行。
+ * 已开跑（404 / ``not_found``）传 false：只清条，行留给正在跑的回合。
  */
 export function clearQueuedTurnLocally(
   conversationId: string,
   queueId: string,
+  opts?: { dropBubble?: boolean },
 ): QueuedTurnEntry | null {
   const removed = useQueuedTurnsStore
     .getState()
     .remove(conversationId, queueId);
-  if (removed?.messageId) {
+  if (opts?.dropBubble !== false && removed?.messageId) {
     useConversationStore
       .getState()
       .removeMessage(removed.messageId, conversationId);
@@ -136,117 +233,35 @@ export function clearQueuedTurnLocally(
 }
 
 /**
- * ``turn_queue_started`` 出队开跑：发送端 ack 已入场则只绑 ``queue_id``；
- * 他端 / 无泡才从帧 payload 插用户泡。按 ``conversationId+queue_id`` 防双泡。
+ * 快照里某个用户行 id 离开了队列，而时间线还没有这一行。
+ * 本端正占着这条对话的发送流时不补（出队帧会按 id 插入）。
+ * 其余情况用消息窗把落库行补上。
  */
-export function insertQueuedTurnUserBubble(
+export function backfillUserRowsLeftQueue(
   conversationId: string,
-  payload: unknown,
-): string | null {
-  const p =
-    payload && typeof payload === "object"
-      ? (payload as Record<string, unknown>)
-      : {};
-  const queueId = typeof p.queue_id === "string" ? p.queue_id.trim() : "";
-  if (!queueId) return null;
-
-  const existing = peekQueuedBubble(conversationId, queueId);
-  if (existing) return existing.localId;
-
-  const hasContentField = typeof p.content === "string";
-  const attachments = mapQueuedAttachments(p.attachments);
-  const agentMentions = mapQueuedMentions(p.agent_mentions);
-  if (!hasContentField && !attachments && !agentMentions) return null;
-
-  const id = crypto.randomUUID();
-  useConversationStore.getState().addMessage(
-    {
-      id,
-      role: "user",
-      content: hasContentField ? (p.content as string) : "",
-      createdAt: new Date().toISOString(),
-      executionId: null,
-      isStreaming: false,
-      attachments:
-        attachments && attachments.length > 0
-          ? attachments.map((a, i) => ({
-              id: `mf-att-${i}`,
-              name: a.name,
-              path: a.path,
-              truncated: a.truncated,
-              kind: a.kind,
-              conversationId: a.conversation_id,
-              documentId: a.document_id,
-              workspacePath: a.workspace_path,
-            }))
-          : undefined,
-      agentMentions:
-        agentMentions && agentMentions.length > 0
-          ? agentMentions.map((a) => ({
-              agentId: a.agent_id,
-              role: a.role,
-            }))
-          : undefined,
-    },
-    conversationId,
+  previous: readonly { queueId?: string; messageId?: string }[],
+  next: readonly { queueId?: string; messageId?: string }[],
+): void {
+  const stillIds = new Set(
+    next
+      .map((entry) => entry.messageId)
+      .filter((id): id is string => Boolean(id)),
   );
-  queuedBubbles.set(queueKey(conversationId, queueId), {
-    conversationId,
-    queueId,
-    localId: id,
-    bound: false,
+  const stillQueues = new Set(
+    next
+      .map((entry) => entry.queueId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const messages = getRuntime(conversationId).messages;
+  const missing = previous.some((entry) => {
+    const id = entry.messageId;
+    if (!id || stillIds.has(id)) return false;
+    // 同一条还在队里，只是 id 被快照纠正：继续留在排队条上，不补时间线。
+    if (entry.queueId && stillQueues.has(entry.queueId)) return false;
+    return !messages.some((m) => m.id === id || m.serverMessageId === id);
   });
-  return id;
-}
-
-/**
- * ``turn_saved``：若本会话有尚未绑服务端 id 的排队入场泡，只改那条。
- * 气泡 id 与 ``queuedTurns.messageId``（「排队中」徽标 / 取消删泡）一并换成服务端 id。
- * @returns 已绑上 → 调用方不得再 ``reconcileLastTurn``（会改掉上一轮最后一条 user）。
- */
-export function bindQueuedTurnUserId(
-  conversationId: string,
-  userMessageId: string,
-): boolean {
-  const serverId = userMessageId.trim();
-  if (!serverId) return false;
-
-  let hit: QueuedBubble | undefined;
-  for (const entry of queuedBubbles.values()) {
-    if (entry.conversationId === conversationId && !entry.bound) {
-      hit = entry;
-      break;
-    }
-  }
-  if (!hit) return false;
-
-  const exists = getRuntime(conversationId).messages.some(
-    (m) => m.id === hit.localId,
+  if (!missing || hasLocalConversationStream(conversationId)) return;
+  void import("@/services/messages").then(({ loadLatestWindow }) =>
+    loadLatestWindow(conversationId, { softRefresh: true }),
   );
-  if (!exists) {
-    queuedBubbles.delete(queueKey(hit.conversationId, hit.queueId));
-    return false;
-  }
-
-  if (hit.localId !== serverId) {
-    useConversationStore
-      .getState()
-      .updateMessage(hit.localId, { id: serverId }, conversationId);
-  }
-  hit.localId = serverId;
-  hit.bound = true;
-
-  const queued = useQueuedTurnsStore.getState();
-  const entry = queued
-    .list(conversationId)
-    .find((e) => e.queueId === hit.queueId);
-  if (entry && entry.messageId !== serverId) {
-    queued.upsert({ ...entry, messageId: serverId });
-  }
-  return true;
-}
-
-/** Test-only: drop in-memory queued-entry bubble keys. */
-export function resetQueuedTurnLocalForTests(): void {
-  queuedBubbles.clear();
 }

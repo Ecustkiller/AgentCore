@@ -3,8 +3,7 @@ import { handleMessageStreamEvent } from "@/services/sse/handlers/messageStream"
 import { handleMetaEvent } from "@/services/sse/handlers/meta";
 import {
   clearQueuedTurnLocally,
-  paintMidFlightUserBubble,
-  resetQueuedTurnLocalForTests,
+  resetPromotedUserRowsForTests,
 } from "@/services/turns/queuedTurnLocal";
 import { useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
@@ -21,7 +20,7 @@ const CID = "conv-turn-queued";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  resetQueuedTurnLocalForTests();
+  resetPromotedUserRowsForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useQueuedTurnsStore.setState({ byConversation: {} });
   useConversationStore.getState().switchConversation(CID);
@@ -222,7 +221,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     ).toMatchObject({ role: "user", content: "开跑这条" });
   });
 
-  it("无泡条：started 读帧 content 插用户泡再清条（不从条抄）", () => {
+  it("无泡条：started 按 user_message_id 插用户行再清条", () => {
     useQueuedTurnsStore.getState().upsert({
       queueId: "q-bar",
       conversationId: CID,
@@ -240,6 +239,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
           conversation_id: CID,
           remaining_depth: 0,
           content: "帧正文",
+          user_message_id: "u-frame",
         },
       },
       { conversationId: CID, source: "server" },
@@ -250,7 +250,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
       useConversationStore.getState().byId[CID]?.messages ?? []
     ).filter((m) => m.role === "user");
     expect(users).toHaveLength(1);
-    expect(users[0]?.content).toBe("帧正文");
+    expect(users[0]).toMatchObject({ id: "u-frame", content: "帧正文" });
   });
 
   it("空快照 replaceConversation([]) 清条后 started 带 content 仍插泡", () => {
@@ -272,6 +272,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
           conversation_id: CID,
           remaining_depth: 0,
           content: "出队正文",
+          user_message_id: "u-cleared",
         },
       },
       { conversationId: CID, source: "server" },
@@ -281,7 +282,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     const users = (
       useConversationStore.getState().byId[CID]?.messages ?? []
     ).filter((m) => m.role === "user" && m.content === "出队正文");
-    expect(users).toHaveLength(1);
+    expect(users).toEqual([expect.objectContaining({ id: "u-cleared" })]);
   });
 
   it("同 queue_id 再折 started 不双插", () => {
@@ -294,6 +295,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
           conversation_id: CID,
           remaining_depth: 0,
           content: "已有",
+          user_message_id: "u-exist",
         },
       },
       { conversationId: CID, source: "server" },
@@ -307,6 +309,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
           conversation_id: CID,
           remaining_depth: 0,
           content: "已有",
+          user_message_id: "u-exist",
         },
       },
       { conversationId: CID, source: "server" },
@@ -362,7 +365,53 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     expect(left[0]?.queueId).toBe("q-b");
   });
 
-  it("缺项无 content 仍 no-op；帧上有 content 则插入", () => {
+  it("点名的 message_start 按 id 插入并只摘掉该条，尾部仍是助手", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-a",
+      conversationId: CID,
+      content: "好的",
+      position: 1,
+      queueDepth: 2,
+      messageId: "u-a",
+    });
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-b",
+      conversationId: CID,
+      content: "下一条",
+      position: 2,
+      queueDepth: 2,
+      messageId: "u-b",
+    });
+
+    const named = {
+      type: "message_start" as const,
+      timestamp: "",
+      payload: {
+        message_id: "asst-1",
+        conversation_id: CID,
+        user_message_id: "u-a",
+        content: "好的",
+      },
+    };
+    handleMessageStreamEvent(named, { conversationId: CID, source: "server" });
+
+    const messages = useConversationStore.getState().byId[CID]?.messages ?? [];
+    const users = messages.filter((m) => m.role === "user" && m.id === "u-a");
+    expect(users).toHaveLength(1);
+    expect(users[0]?.content).toBe("好的");
+    expect(messages.at(-1)?.role).toBe("assistant");
+    expect(messages.at(-1)?.serverMessageId).toBe("asst-1");
+    expect(useQueuedTurnsStore.getState().list(CID).map((e) => e.queueId)).toEqual([
+      "q-b",
+    ]);
+
+    handleMessageStreamEvent(named, { conversationId: CID, source: "server" });
+    const again = useConversationStore.getState().byId[CID]?.messages ?? [];
+    expect(again.filter((m) => m.role === "user" && m.id === "u-a")).toHaveLength(1);
+    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
+  });
+
+  it("没有稳定用户行 id 时不插临时泡；有 id 才插入", () => {
     handleMessageStreamEvent(
       {
         type: "turn_queue_started",
@@ -389,6 +438,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
           conversation_id: CID,
           remaining_depth: 0,
           content: "帧上有正文",
+          user_message_id: "u-ghost",
         },
       },
       { conversationId: CID, source: "server" },
@@ -396,7 +446,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     const users = (
       useConversationStore.getState().byId[CID]?.messages ?? []
     ).filter((m) => m.role === "user" && m.content === "帧上有正文");
-    expect(users).toHaveLength(1);
+    expect(users).toEqual([expect.objectContaining({ id: "u-ghost" })]);
   });
 
   it("已有 user1：started + turn_saved 不改 user1 的 id", () => {
@@ -421,6 +471,7 @@ describe("turn_queue_started · 契约出队清轻态", () => {
           conversation_id: CID,
           remaining_depth: 0,
           content: "第二问",
+          user_message_id: "u-server",
         },
       },
       { conversationId: CID, source: "server" },
@@ -469,11 +520,23 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     expect(users[0]?.id).toBe("u-idle");
   });
 
-  it("catch-up 已补窗：started 只清条不插泡", () => {
+  it("窗里已有同一用户行：started 只清条不再插一条", () => {
+    useConversationStore.getState().addMessage(
+      {
+        id: "u-catch",
+        role: "user",
+        content: "窗里已有",
+        createdAt: new Date().toISOString(),
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
     useQueuedTurnsStore.getState().upsert({
       queueId: "q-catch",
       conversationId: CID,
       content: "条上",
+      messageId: "u-catch",
       position: 1,
       queueDepth: 1,
     });
@@ -485,46 +548,46 @@ describe("turn_queue_started · 契约出队清轻态", () => {
           queue_id: "q-catch",
           conversation_id: CID,
           remaining_depth: 0,
-          content: "不该再插",
+          content: "窗里已有",
+          user_message_id: "u-catch",
         },
       },
-      {
-        conversationId: CID,
-        source: "server",
-        skipQueuedTurnUserBubble: true,
-      },
+      { conversationId: CID, source: "server" },
     );
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
-    expect(
-      (useConversationStore.getState().byId[CID]?.messages ?? []).some(
-        (m) => m.role === "user" && m.content === "不该再插",
-      ),
-    ).toBe(false);
+    const users = (
+      useConversationStore.getState().byId[CID]?.messages ?? []
+    ).filter((m) => m.role === "user");
+    expect(users).toEqual([expect.objectContaining({ id: "u-catch" })]);
   });
 });
 
-describe("turn_saved · 排队入场泡绑服务端 id", () => {
-  const LOCAL_ID = "11111111-1111-4111-8111-111111111111";
+describe("turn_saved · 排队条记下服务端用户行 id", () => {
   const SERVER_ID = "u-server-bind";
 
-  function enqueueLocalUuid(): void {
-    paintMidFlightUserBubble(CID, {
-      id: LOCAL_ID,
-      content: "排队句",
-      queueId: "q-bind",
-    });
+  function enqueueUnbound(): void {
     useQueuedTurnsStore.getState().upsert({
       queueId: "q-bind",
       conversationId: CID,
-      messageId: LOCAL_ID,
       content: "排队句",
       position: 1,
       queueDepth: 1,
     });
   }
 
-  it("本地 UUID 入队 → turn_saved 不同服务端 id → store messageId 与气泡均为服务端 id", () => {
-    enqueueLocalUuid();
+  it("未绑定的排队条收到 turn_saved 后记下服务端 id，时间线仍没有这一行", () => {
+    useConversationStore.getState().addMessage(
+      {
+        id: "user1",
+        role: "user",
+        content: "上一问",
+        createdAt: new Date().toISOString(),
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    enqueueUnbound();
     handleMetaEvent(
       {
         type: "turn_saved",
@@ -537,16 +600,14 @@ describe("turn_saved · 排队入场泡绑服务端 id", () => {
     const users = (
       useConversationStore.getState().byId[CID]?.messages ?? []
     ).filter((m) => m.role === "user");
-    expect(users).toHaveLength(1);
-    expect(users[0]?.id).toBe(SERVER_ID);
-    expect(users.some((m) => m.id === LOCAL_ID)).toBe(false);
+    expect(users).toEqual([expect.objectContaining({ id: "user1" })]);
     expect(useQueuedTurnsStore.getState().list(CID)[0]?.messageId).toBe(
       SERVER_ID,
     );
   });
 
-  it("绑定后 clearQueuedTurnLocally 删的是服务端 id 泡", () => {
-    enqueueLocalUuid();
+  it("记下之后取消按服务端 id 删行", () => {
+    enqueueUnbound();
     handleMetaEvent(
       {
         type: "turn_saved",
@@ -555,12 +616,22 @@ describe("turn_saved · 排队入场泡绑服务端 id", () => {
       },
       { conversationId: CID, source: "server" },
     );
+    useConversationStore.getState().addMessage(
+      {
+        id: SERVER_ID,
+        role: "user",
+        content: "排队句",
+        createdAt: new Date().toISOString(),
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
 
     expect(clearQueuedTurnLocally(CID, "q-bind")?.messageId).toBe(SERVER_ID);
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
     const messages = useConversationStore.getState().byId[CID]?.messages ?? [];
     expect(messages.find((m) => m.id === SERVER_ID)).toBeUndefined();
-    expect(messages.find((m) => m.id === LOCAL_ID)).toBeUndefined();
   });
 });
 

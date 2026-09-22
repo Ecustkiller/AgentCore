@@ -62,19 +62,61 @@ export function useLiveCoordinatingTurn(): boolean {
   );
 }
 
+function assistantHasRunningTool(
+  messages: readonly {
+    role: string;
+    process?: readonly { kind: string; status?: string }[];
+  }[],
+): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "assistant") continue;
+    return (message.process ?? []).some(
+      (step) => step.kind === "tool" && step.status === "running",
+    );
+  }
+  return false;
+}
+
+/** 经典回合还有正在执行的工具步，下一工具步顶可以注入。 */
+export function classicToolStepOpen(
+  conversationId: string | null | undefined,
+): boolean {
+  if (!conversationId) return false;
+  return assistantHasRunningTool(getRuntime(conversationId).messages);
+}
+
+/** 订阅最新助手泡是否有正在执行的工具步。 */
+export function useClassicToolStepOpen(): boolean {
+  return useConversationStore((s) => {
+    const id = s.currentConversationId;
+    if (!id) return false;
+    return assistantHasRunningTool(s.byId[id]?.messages ?? []);
+  });
+}
+
+/**
+ * 生成中 Ctrl/Cmd+Enter：
+ * - 队还在，或经典回合有正在执行的工具步 → steer
+ * - 其余（含经典散文）→ queue，与 Enter 相同
+ */
+export function resolveOccupiedShortcutDelivery(
+  conversationId: string | null | undefined,
+): MessageDelivery {
+  if (isLiveCoordinatingTurn(conversationId)) return "steer";
+  if (classicToolStepOpen(conversationId)) return "steer";
+  return "queue";
+}
+
 /**
  * 默认 delivery：
- * - 空闲 → steer
- * - 经典生成中（无团队图）→ queue（主发送 / Enter）
- * - 协调空窗（已有团队图且队还在，含听团）→ steer（立刻给主 Agent）
- * 经典显式插队（Ctrl/Cmd+Enter / 「插队」）传 ``delivery=steer``。
- * 协调空窗显式排队（次级「排队」/ Ctrl/Cmd+Enter）传 ``delivery=queue``。
- * 不可注入时由服务端降级 ``turn_queued`` + ``degraded_from=steer``。
+ * - 空闲 → steer（开新回合）
+ * - 生成中（含团队还在听）→ queue（Enter / 发送钮；挂在输入框上方）
  */
 export function resolveDefaultDelivery(
   isGenerating: boolean,
-  conversationId: string | null | undefined,
+  _conversationId?: string | null,
 ): MessageDelivery {
   if (!isGenerating) return "steer";
-  return isCoordinationActive(conversationId) ? "steer" : "queue";
+  return "queue";
 }

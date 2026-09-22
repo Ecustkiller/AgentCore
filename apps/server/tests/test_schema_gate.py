@@ -32,6 +32,11 @@ def test_net_tombstones_include_dropped_user_workflows():
     assert "workflow_store_reports" in tables
 
 
+def test_net_tombstones_include_dropped_message_feedback():
+    _tables, columns = sg.net_tombstones()
+    assert ("messages", "feedback") in columns
+
+
 def test_simulate_stale_orm_fails():
     result = sg.run_offline_checks(simulate_stale_orm=True)
     assert not result.ok

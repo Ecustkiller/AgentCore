@@ -186,13 +186,13 @@ export const collaborationChapter: ManualChapterContent = {
           text: [
             "写文件、跑代码等工具审批与 ",
             {
-              text: "自主度",
+              text: "对话边界",
               link: {
                 kind: "jump",
                 to: MANUAL_SECTION_IDS.collaboration.autonomy,
               },
             },
-            " 联动：配方越托管，同类能力越少逐次弹窗。拍板卡不受配方改写。",
+            " 联动：边界决定能不能改文件、跑命令；拍板卡不受边界改写。",
           ],
         },
         {
@@ -204,16 +204,16 @@ export const collaborationChapter: ManualChapterContent = {
     },
     {
       id: MANUAL_SECTION_IDS.collaboration.autonomy,
-      title: "自主度",
+      title: "对话边界",
       icon: "SlidersHorizontal",
       blocks: [
         {
           type: "lead",
-          text: "权限配方管「改文件 / 执行命令」弹多少次。拍板卡仍会按需出现。",
+          text: "对话边界决定这一场能改文件、跑命令、动这台电脑到哪一步。边界内不再逐次问。拍板卡仍会按需出现。",
         },
         {
           type: "paragraph",
-          text: "三个配方怎么选",
+          text: "三档怎么选",
           emphasis: true,
         },
         {
@@ -221,23 +221,23 @@ export const collaborationChapter: ManualChapterContent = {
           cols: 2,
           items: [
             {
-              title: "谨慎",
-              desc: "改文件逐次问（云端与本地都问）；不预授执行。最稳，批量改文件时会很吵。",
+              title: "只看",
+              desc: "只能看和搜索。不能改文件、跑命令、用浏览器。",
             },
             {
-              title: "全放行（推荐）",
-              desc: "授权根内改文件和跑命令免逐次确认；没加入本对话的目录仍不能改。删盘、读私钥、装软件仍会拦住。",
+              title: "这个文件夹（推荐）",
+              desc: "这个文件夹里可以改文件、跑命令、装依赖、用浏览器。装软件、推远程、毁灭形删除、读私钥仍会单独拦住。",
             },
             {
-              title: "托管",
-              desc: "与全放行同一组权限轴。授权根内免审；拍板检查点仍会出现。",
+              title: "这台电脑",
+              desc: "仅桌面。在这个文件夹之外，还能做本机操作。装软件、推远程、毁灭形删除、读私钥仍会单独拦住。",
             },
           ],
         },
         {
           type: "callout",
           variant: "tip",
-          text: "桌面：对话输入区权限徽章选三配方之一后，点「设为新会话默认」写入账户默认（只影响之后新建的对话；自定义组合不可设为默认）。手机仍可在设置改默认。已有会话请在徽章切配方；要改某一条再展开轴，下一回合生效。",
+          text: "对话输入区权限徽章里选，点「设为新会话默认」只影响之后新建的对话。已有会话在徽章里改，下一回合生效。升到这台电脑时会再确认一次。云端和网页没有「这台电脑」。",
         },
         {
           type: "callout",
@@ -251,7 +251,7 @@ export const collaborationChapter: ManualChapterContent = {
                 to: MANUAL_SECTION_IDS.collaboration.checkpoint,
               },
             },
-            " 的关系：配方减的是工具审批疲劳；拍板仍走检查点。非法组合「免审执行 + 改文件逐次问」选不出。",
+            " 的关系：边界决定能不能做；拍板仍走检查点。不可逆动作不因提高边界而放行。",
           ],
         },
       ],
@@ -422,6 +422,10 @@ export const collaborationChapter: ManualChapterContent = {
               desc: "平时只挂一行，用到才翻。适合某类任务的拆法、检查单、写作模板。",
             },
             {
+              title: "碰到文件",
+              desc: "写清路径和那一句约束。读到或写到匹配的文件时带上全文。",
+            },
+            {
               title: "@ 点名",
               desc: "输入框 @ 某条按需提示词，这一句当场带上，不必改成常驻。",
             },
@@ -484,6 +488,10 @@ export const collaborationChapter: ManualChapterContent = {
             {
               title: "按需",
               desc: "某一类任务的做法。平时只挂一行，相关时才翻开正文。",
+            },
+            {
+              title: "碰到文件",
+              desc: "针对某类路径的约束。路径写成 **/*.tsx 这种；* 不跨目录。",
             },
             {
               title: "@ 点名",

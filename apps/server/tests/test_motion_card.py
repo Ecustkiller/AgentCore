@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentcore.core.types import AutonomyPolicy, ToolEffect, recipe_to_axes
+from agentcore.core.types import ToolEffect, WorkspaceBoundary
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.delegate.ceo_format import format_for_ceo
 from agentcore.runtime.runs.plan import RunPlan
@@ -292,7 +292,7 @@ def test_state_json_round_trips_motion_card():
 
 def test_format_for_ceo_does_not_surface_leftover_motion_card():
     t = tool(Provider([]))
-    t._permission_axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+    t._permission_axes = WorkspaceBoundary.READ
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="汇总分析", role="汇总分析师")])
     results = {
         "w1": RunState(

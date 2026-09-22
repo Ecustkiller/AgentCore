@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from scripts.log_timeline import (
+    _parse_cli_args,
     detect_jsonl_timeline_gap,
     format_conversation_context,
     format_empty_hit_hint,
@@ -10,6 +15,7 @@ from scripts.log_timeline import (
     format_trace,
     is_bare_trace_id,
     normalize_trace_id_arg,
+    reject_messages_combo,
 )
 
 
@@ -196,3 +202,28 @@ def test_trace_gap_preload_uses_load_log_events() -> None:
     src = inspect.getsource(cli)
     assert "_query_load_log_events" not in src
     assert "load_log_events(" in src
+
+
+def test_parse_messages_flag() -> None:
+    parsed = _parse_cli_args(["--messages", "--trace", "ab" * 16])
+    assert parsed[7] is True
+    assert parsed[5] is None
+    assert parsed[8] == ["--trace", "ab" * 16]
+
+
+def test_messages_rejects_pack_full_and_raw() -> None:
+    with pytest.raises(SystemExit, match="--messages"):
+        reject_messages_combo(
+            messages=True, pack_dir=Path("logs/packs/x"), full=False, raw=False
+        )
+    with pytest.raises(SystemExit, match="--messages"):
+        reject_messages_combo(messages=True, pack_dir=None, full=True, raw=False)
+    with pytest.raises(SystemExit, match="--messages"):
+        reject_messages_combo(messages=True, pack_dir=None, full=False, raw=True)
+    reject_messages_combo(messages=True, pack_dir=None, full=False, raw=False)
+
+
+def test_empty_hit_hint_skips_sync_for_local_dev_paste() -> None:
+    hint = format_empty_hit_hint(using_export_dir=False)
+    assert "build: dev" in hint
+    assert "不要 sync" in hint

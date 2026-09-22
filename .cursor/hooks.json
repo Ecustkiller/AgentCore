@@ -1,10 +1,10 @@
 {
   "version": 1,
   "hooks": {
-    "preToolUse": [
+    "beforeShellExecution": [
       {
-        "command": "node .cursor/hooks/enforce-task-model.js",
-        "matcher": "Task",
+        "command": "node .cursor/hooks/allow-log-timeline.js",
+        "matcher": "log_timeline\\.py",
         "timeout": 5
       }
     ]

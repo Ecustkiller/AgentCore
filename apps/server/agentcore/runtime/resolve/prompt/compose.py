@@ -23,6 +23,7 @@ from agentcore.runtime.skills.registry import SKILL_GROUP_ORDER
 def assemble_system_prompt(
     *,
     rules_markdown: str | None = None,
+    path_index: str | None = None,
     extra_context: str | None = None,
 ) -> str:
     """Build the shared system-prompt base for a conversation.
@@ -55,6 +56,7 @@ def assemble_system_prompt(
             _format_rules(rules_markdown),
             SectionOrder.MEMORY,
         )
+        .add("path_rules", (path_index or "").strip() or None, SectionOrder.PATH_RULES)
         .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
         # D4 前缀缓存归因: 本层的段会被上层当作一整段收进去, 只有各层都登记, 击穿点才能归到叶段
         # (如 memory_rules) 而不是笼统的「CEO 提示变了」。只登记不改装配。
@@ -63,18 +65,17 @@ def assemble_system_prompt(
     )
 
 
-def _on_demand_preamble(*, with_summaries: bool) -> list[str]:
-    """Shared intro lines for ``<按需目录>`` (CEO and worker both get name＋摘要).
+def _on_demand_preamble() -> list[str]:
+    """Shared intro lines for ``<按需目录>``.
 
     The preamble states this is the on-demand catalog, how to pull full text, and
-    that a catalog row is not a completed consult. WHEN / deferred-tool promotion /
-    family enable live in the consult tool description. Kinds are section headings,
-    not preamble.
+    that a catalog row is not a completed consult. Row shape is the rows. WHEN /
+    deferred-tool promotion / family enable live in the consult tool description.
+    Section headings render only when a section has something to contrast with.
     """
-    detail = "name＋一行摘要" if with_summaries else "name"
     return [
         "<按需目录>",
-        f"这是按需目录（{detail}）。用 `consult(name)` 拉全文。目录行 ≠ 已查阅。",
+        "这是按需目录。用 `consult(name)` 拉全文。目录行 ≠ 已查阅。",
     ]
 
 
@@ -85,10 +86,21 @@ _SECTION_HEADINGS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _consult_call(name: str) -> str:
+    """Directory key as a consult invocation, not a bare token.
+
+    A snake_case name at the start of a row is read as a workspace path when
+    the block sits next to ``<工作区>``. The summary stays the trigger; the
+    name only appears inside ``consult("…")``.
+    """
+    return f'consult("{name}")'
+
+
 def _catalog_row(entry: ConsultDirectoryEntry, *, with_summaries: bool) -> str:
+    call = _consult_call(entry.name)
     if with_summaries and entry.summary:
-        return f"- {entry.name}：{entry.summary}"
-    return f"- {entry.name}"
+        return f"- {entry.summary}。{call}"
+    return f"- {call}"
 
 
 def _tool_section_lines(
@@ -123,7 +135,7 @@ def _tool_section_lines(
 def _skill_section_lines(
     entries: Sequence[ConsultDirectoryEntry], *, with_summaries: bool
 ) -> list[str]:
-    """能力指引栏：按 SystemSkill.group 中文子标题分组。空组不出现。"""
+    """能力指引栏：按决策时刻排列。空组不出现。组名不印成子标题。"""
     leftover: list[ConsultDirectoryEntry] = []
     by_group: dict[str, list[ConsultDirectoryEntry]] = {}
     for entry in entries:
@@ -138,7 +150,6 @@ def _skill_section_lines(
         group = by_group.get(heading)
         if not group:
             continue
-        lines.append(f"{heading}：")
         lines.extend(_catalog_row(e, with_summaries=with_summaries) for e in group)
     return lines
 
@@ -163,9 +174,9 @@ def _grouped_tool_rows(
             lines.append(_catalog_row(lead, with_summaries=with_summaries))
             continue
         label = lead.family_label.strip() or lead.name
-        names = "、".join(m.name for m in members)
-        # 成套启用合同在 consult description，目录行只写组名与成员。
-        lines.append(f"- {label}：{names}")
+        calls = "、".join(_consult_call(m.name) for m in members)
+        # 成套启用合同在 consult description。目录行写组名，成员只出现在 consult 调用里。
+        lines.append(f"- {label}。{calls}")
     return lines
 
 
@@ -181,12 +192,14 @@ def render_on_demand_directory(
     Entries must come from the same
     :class:`~agentcore.runtime.context.consult_sources.MergedConsultSource` the tool holds.
     ``with_summaries=False`` remains a test/compat switch — workers no longer use it.
-    Grouped headings appear only when entries carry ``section``; unsectioned
-    lists stay a flat bullet list (tests / catalog bridges).
+    A section heading (能力指引 / 低频工具 / 设定) renders only when that section
+    has a sibling section or unsectioned rows beside it. Skill decision-moment
+    groups order rows and are not printed. Unsectioned lists stay a flat bullet
+    list (tests / catalog bridges).
     """
     if not entries:
         return ""
-    lines = _on_demand_preamble(with_summaries=with_summaries)
+    lines = _on_demand_preamble()
     if not any(e.section for e in entries):
         if with_summaries:
             lines.extend(_catalog_row(e, with_summaries=True) for e in entries)
@@ -204,11 +217,14 @@ def render_on_demand_directory(
             leftover.append(entry)
     if leftover:
         lines.extend(_catalog_row(e, with_summaries=with_summaries) for e in leftover)
+    populated = [key for key, _heading in _SECTION_HEADINGS if by_section.get(key)]
+    show_headings = len(populated) >= 2 or bool(leftover)
     for key, heading in _SECTION_HEADINGS:
         group = by_section.get(key)
         if not group:
             continue
-        lines.append(f"{heading}：")
+        if show_headings:
+            lines.append(f"{heading}：")
         if key == "tool":
             lines.extend(_tool_section_lines(group, with_summaries=with_summaries))
         elif key == "skill":
@@ -252,7 +268,7 @@ def compose_worker_base_prompt(
 ) -> str:
     """Build the delegated worker's frozen ``role: system``.
 
-    Shared base + the same ``<按需目录>`` (name＋摘要) the CEO sees when
+    Shared base + the same ``<按需目录>`` the CEO sees when
     ``on_demand_entries`` is non-empty. Date, workspace, and attachments ride
     :func:`~agentcore.runtime.resolve.prompt.envelope.render_worker_turn_envelope`
     on the opening user message. ``attachment_context`` / ``workspace_context``

@@ -1,55 +1,60 @@
 // @vitest-environment jsdom
 
 import { Markdown } from "@/components/chat/Markdown";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 afterEach(cleanup);
 
-describe("Markdown workspace path links", () => {
-  it("turns a prose path into a button that opens the file", () => {
-    const onOpen = vi.fn();
-    render(
-      <Markdown
-        content="已写入 AgentCore/文档/工作稿/白板PRD.md。"
-        onOpenWorkspacePath={onOpen}
-      />,
+describe("Markdown body paths stay code", () => {
+  it("does not turn a prose path into a link or a file button", () => {
+    const { container } = render(
+      <Markdown content="已写入 AgentCore/文档/工作稿/白板PRD.md。" />,
     );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "打开 AgentCore/文档/工作稿/白板PRD.md",
-      }),
-    );
-    expect(onOpen).toHaveBeenCalledWith("AgentCore/文档/工作稿/白板PRD.md");
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(container.textContent).toContain("白板PRD.md");
   });
 
-  it("turns inline-code paths into the same opener", () => {
-    const onOpen = vi.fn();
+  it("keeps directory, symbol, and file-shaped code on the same code chip", () => {
     render(
-      <Markdown
-        content="见 `src/auth/login.ts`"
-        onOpenWorkspacePath={onOpen}
-      />,
+      <Markdown content="见 `evals/cases/routing/`、`delegate_parallel_compare` 与 `tools/builtin/delegate/schema.py`。" />,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "打开 src/auth/login.ts" }),
-    );
-    expect(onOpen).toHaveBeenCalledWith("src/auth/login.ts");
-  });
-
-  it("does not link paths when the opener is omitted", () => {
-    render(<Markdown content="已写入 AgentCore/文档/工作稿/白板PRD.md。" />);
+    for (const label of [
+      "evals/cases/routing/",
+      "delegate_parallel_compare",
+      "tools/builtin/delegate/schema.py",
+    ]) {
+      expect(screen.getByText(label).tagName).toBe("CODE");
+    }
+    expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("leaves fence contents untouched", () => {
-    const onOpen = vi.fn();
+  it("renders a relative markdown link as code, not a blue file opener", () => {
     render(
-      <Markdown
-        content={"```\nAgentCore/文档/工作稿/白板PRD.md\n```"}
-        onOpenWorkspacePath={onOpen}
-      />,
+      <Markdown content="见 [schema.py](tools/builtin/delegate/schema.py)。" />,
+    );
+    const mark = screen.getByText("schema.py");
+    expect(mark.tagName).toBe("CODE");
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("keeps a real https link", () => {
+    render(<Markdown content="见 [文档](https://example.com/a)。" />);
+    expect(
+      screen.getByRole("link", { name: "文档" }).getAttribute("href"),
+    ).toBe("https://example.com/a");
+  });
+
+  it("leaves fence contents untouched", () => {
+    render(
+      <Markdown content={"```\nAgentCore/文档/工作稿/白板PRD.md\n```"} />,
     );
     expect(screen.queryByRole("button", { name: /打开 / })).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(
+      screen.getByText("AgentCore/文档/工作稿/白板PRD.md").closest("pre"),
+    ).toBeTruthy();
   });
 });

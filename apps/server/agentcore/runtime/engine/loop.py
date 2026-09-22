@@ -130,26 +130,21 @@ def _must_not_hold_captain_return(
 def _should_hold_return_for_interjection(
     *,
     role: str,
-    steer_cid: str,
     profile: ProfileParams,
     round_idx: int,
 ) -> bool:
-    """Captain RETURN stays this turn: unread 插队, or live coordinating team.
+    """Captain RETURN stays this turn only while a live team is still coordinating.
 
-    Does not abort the just-finished LLM stream. Workers never hold. No remaining
-    ``max_rounds`` slot → leftover 升队 at close (existing honesty path). Live team
-    hold is occupancy (session still active); ALL_COMPLETED closes the session
-    before the real ending is allowed to Return.
+    Classic unread steer does not hold a prose return. Injection happens at a
+    later tool-step top; a return that never reaches one promotes leftovers onto
+    the next turn. Workers never hold. No remaining ``max_rounds`` slot → the
+    team hold also stops. Live team hold is occupancy (session still active);
+    ALL_COMPLETED closes the session before the real ending is allowed to Return.
     """
     if role != "captain":
         return False
     if profile.max_rounds > 0 and round_idx + 1 >= profile.max_rounds:
         return False
-    if steer_cid:
-        from agentcore.runtime.turn.steer import peek_count
-
-        if peek_count(steer_cid) > 0:
-            return True
     from agentcore.runtime.coordination.session import live_team_holds_captain_turn
 
     return live_team_holds_captain_turn(role)
@@ -699,8 +694,8 @@ async def react_loop(
 
             # 跨回合 append 把宿主 eid 只留在共享 tool context 上（delegate 跑在
             # asyncio.gather 子任务里，它的 ContextVar 写不回父任务）。回绑必须早于本轮
-            # 所有按 execution 分流的消费方——插话路由、团队事件等待、wait 工具面都读它；
-            # 漏回绑时 CEO 既不等队员也拿不到 wait，只能用正文收口把在跑的队员甩成 detached。
+            # 所有按 execution 分流的消费方——插话路由、团队事件等待都读它；
+            # 漏回绑时 CEO 不等队员，只能用正文收口把在跑的队员甩成 detached。
             if role == "captain":
                 from agentcore.runtime.resolve.ceo_surface import resync_coordination_binding
 
@@ -1056,27 +1051,15 @@ async def react_loop(
                     outcome, finish_override_sink
                 ) and _should_hold_return_for_interjection(
                     role=role,
-                    steer_cid=steer_cid,
                     profile=profile,
                     round_idx=round_idx,
                 ):
                     held = applied.content or final_content
-                    from agentcore.runtime.coordination.session import (
-                        live_team_holds_captain_turn,
+                    logger.info(
+                        "engine.coordination_hold_end",
+                        round=round_idx,
+                        via="return",
                     )
-
-                    if live_team_holds_captain_turn(role):
-                        logger.info(
-                            "engine.coordination_hold_end",
-                            round=round_idx,
-                            via="return",
-                        )
-                    else:
-                        logger.info(
-                            "engine.steer_hold_return",
-                            round=round_idx,
-                            conversation_id=steer_cid,
-                        )
                     _ensure_assistant_so_far(messages, held)
                     final_content = held
                     if applied.reasoning:
@@ -1213,5 +1196,8 @@ async def react_loop(
                     discard_leftovers_on_user_stop(leftovers)
                 else:
                     promote_leftovers_to_queue(leftovers)
+                    from agentcore.runtime.turn.durable import flush_turn_queue_durable
+
+                    await flush_turn_queue_durable()
         if captain_token is not None:
             current_captain_loop.reset(captain_token)

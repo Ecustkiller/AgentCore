@@ -1,7 +1,6 @@
 """Cost & usage observability endpoints (单回合工资单 + 对话累计 + 账户仪表盘).
 
-成本是产品差异点：AgentCore 是 multi-agent，单回合花销能按 Agent/角色拆开（工资单），
-账户仪表盘则给窗口总额 / 额度 / 趋势。
+组团时单回合花销按 Agent/角色拆开（工资单）；账户仪表盘给窗口总额 / 额度 / 趋势。
 
 All three reads are scoped to the authenticated user via ``cost_events.user_id``,
 so a non-owner can never read another user's spend (IDOR-safe) — the message /

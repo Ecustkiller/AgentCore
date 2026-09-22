@@ -31,7 +31,7 @@ const emptyCards = {
 const toolDone: ProcessStep = {
   kind: "tool",
   id: "t1",
-  tool_name: "wait",
+  tool_name: "web_search",
   arguments: {},
   result: null,
   status: "success",
@@ -62,7 +62,7 @@ describe("ProcessTimeline · 正文不进过程折", () => {
     renderTimeline(process, false);
     expect(screen.getByText("Used 1 tool")).toBeTruthy();
     expect(screen.getByText("我先找日志目录")).toBeTruthy();
-    expect(screen.queryByText("Wait")).toBeNull();
+    expect(screen.queryByText("Search web")).toBeNull();
     expect(screen.getByText("清晰度是 1080p")).toBeTruthy();
   });
 

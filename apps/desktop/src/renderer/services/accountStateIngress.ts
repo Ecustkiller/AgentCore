@@ -6,6 +6,10 @@ import {
   mapQueuedMentions,
 } from "@/services/queuedTurnMap";
 import {
+  backfillUserRowsLeftQueue,
+  isPromotedUserRow,
+} from "@/services/turns/queuedTurnLocal";
+import {
   AI_ATTENTION_SNAPSHOT_TYPE,
   AI_ATTENTION_TYPE,
   type AiAttentionEvent,
@@ -78,6 +82,14 @@ function mapQueueItems(
       typeof item.interjection_id === "string"
         ? item.interjection_id.trim() || undefined
         : undefined;
+    const wireMessageId =
+      typeof item.user_message_id === "string"
+        ? item.user_message_id.trim()
+        : "";
+    // 段首已经点过名的 id 离开排队条后，后来的快照不得把它放回去（否则时间线又藏起这一行）。
+    if (wireMessageId && isPromotedUserRow(conversationId, wireMessageId)) {
+      continue;
+    }
     next.push({
       queueId,
       conversationId,
@@ -86,13 +98,16 @@ function mapQueueItems(
         typeof item.position === "number" ? item.position : next.length + 1,
       queueDepth: depth,
       interjectionId,
-      // 出队插泡竞态：同 queue_id 仍在队时保留本地 messageId / degradedFrom。
+      // 快照带了用户行 id 就以它为准；没带才留本端 ack 填的 messageId。
       // 附件 / 点名以快照字段为真源，不再从旧条接回。
-      messageId: prev?.messageId,
+      messageId: wireMessageId || prev?.messageId,
       degradedFrom: prev?.degradedFrom,
       attachments: mapQueuedAttachments(item.attachments),
       agentMentions: mapQueuedMentions(item.agent_mentions),
     });
+  }
+  if (next.length !== depth) {
+    for (const entry of next) entry.queueDepth = next.length;
   }
   return next;
 }
@@ -104,12 +119,11 @@ function applyQueueSnapshot(payload: unknown): void {
     typeof p.conversation_id === "string" ? p.conversation_id : "";
   // 增量只动这一条。缺字段 / 非数组丢帧；空 items 清该会话。禁止整表清空。
   if (!conversationId || !Array.isArray(p.items)) return;
-  useQueuedTurnsStore
-    .getState()
-    .replaceConversation(
-      conversationId,
-      mapQueueItems(conversationId, p.items),
-    );
+  const store = useQueuedTurnsStore.getState();
+  const previous = store.list(conversationId);
+  const next = mapQueueItems(conversationId, p.items);
+  store.replaceConversation(conversationId, next);
+  backfillUserRowsLeftQueue(conversationId, previous, next);
 }
 
 function applyQueueAccountSnapshot(payload: unknown): void {
@@ -118,6 +132,7 @@ function applyQueueAccountSnapshot(payload: unknown): void {
   // 缺 queues / 非数组丢帧，不清现有表。空数组 = 只清云队。
   if (!Array.isArray(queues)) return;
 
+  const previous = useQueuedTurnsStore.getState().byConversation;
   const cloud: Record<string, QueuedTurnEntry[]> = {};
   for (const raw of queues) {
     if (!raw || typeof raw !== "object") continue;
@@ -127,7 +142,21 @@ function applyQueueAccountSnapshot(payload: unknown): void {
     if (!conversationId || !Array.isArray(q.items)) continue;
     cloud[conversationId] = mapQueueItems(conversationId, q.items);
   }
-  useQueuedTurnsStore.getState().replaceAll(cloud, keepsLocalQueue);
+  const store = useQueuedTurnsStore.getState();
+  store.replaceAll(cloud, keepsLocalQueue);
+  const after = useQueuedTurnsStore.getState();
+  const ids = new Set([
+    ...Object.keys(previous),
+    ...Object.keys(after.byConversation),
+  ]);
+  for (const conversationId of ids) {
+    if (keepsLocalQueue(conversationId)) continue;
+    backfillUserRowsLeftQueue(
+      conversationId,
+      previous[conversationId] ?? [],
+      after.list(conversationId),
+    );
+  }
 }
 
 function applyPausedCardSettled(payload: unknown): void {

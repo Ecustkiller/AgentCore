@@ -44,7 +44,7 @@ function Kicker({
       <span
         aria-hidden="true"
         className="block h-px w-5 shrink-0"
-        style={{ background: "var(--brand-gradient)" }}
+        style={{ background: "var(--blue-gradient)" }}
       />
       {children}
     </p>
@@ -92,7 +92,7 @@ export default function Home() {
                 <span
                   aria-hidden="true"
                   className="block size-[7px] shrink-0 rounded-full"
-                  style={{ background: "var(--brand-gradient)" }}
+                  style={{ background: "var(--blue-gradient)" }}
                 />
                 <span className="grad-text">{t(HERO.eyebrow)}</span>
               </p>
@@ -146,7 +146,7 @@ export default function Home() {
                   className="btn-outline max-sm:min-h-[3.25rem]"
                   style={{
                     background:
-                      "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--brand-gradient) border-box",
+                      "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--blue-gradient) border-box",
                   }}
                 >
                   {t(CTA.desktop)}
@@ -200,7 +200,7 @@ export default function Home() {
                   <span
                     aria-hidden="true"
                     className="mb-6 block h-px w-full"
-                    style={{ background: "var(--brand-gradient)", opacity: 0.5 }}
+                    style={{ background: "var(--blue-gradient)", opacity: 0.5 }}
                   />
                   <RichTitle
                     as="h3"
@@ -273,7 +273,7 @@ export default function Home() {
                       }`}
                       style={
                         asset.featured
-                          ? { background: "var(--brand-gradient)" }
+                          ? { background: "var(--blue-gradient)" }
                           : undefined
                       }
                     >
@@ -492,7 +492,7 @@ export default function Home() {
                   <span
                     aria-hidden="true"
                     className="role-line absolute left-0 top-[1.625rem] hidden h-px w-full sm:block"
-                    style={{ background: "var(--brand-gradient)" }}
+                    style={{ background: "var(--blue-gradient)" }}
                   />
                   <div className="relative grid gap-10 sm:grid-cols-3 sm:gap-8">
                     {ROLE.stages.map((stage) => (
@@ -599,7 +599,7 @@ export default function Home() {
                   className="btn-outline px-7 py-4 max-sm:min-h-[3.25rem]"
                   style={{
                     background:
-                      "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--brand-gradient) border-box",
+                      "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--blue-gradient) border-box",
                   }}
                 >
                   {t(CTA.desktop)}

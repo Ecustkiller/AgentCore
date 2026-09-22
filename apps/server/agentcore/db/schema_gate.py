@@ -44,7 +44,7 @@ _EXTRA_SOURCE_NEEDLES: tuple[str, ...] = (
     "generate_invite_code",
     "CreateInviteRequest",
     # In-app ticket product retired (table ``feedback`` is ambiguous vs
-    # ``messages.feedback`` 点赞/点踩 and runtime "feedback" identifiers).
+    # runtime steer / redirect "feedback" identifiers).
     "FeedbackRow",
     "FeedbackRepository",
     "get_feedback_repo",
@@ -66,7 +66,7 @@ _EXTRA_SOURCE_NEEDLES: tuple[str, ...] = (
 )
 
 # Dropped table names that collide with unrelated identifiers (e.g. shared-space
-# invite helpers; ``feedback`` vs message rating / runtime feedback). Still
+# invite helpers; ``feedback`` vs runtime steer / redirect feedback). Still
 # enforced via ORM metadata; skipped in source scan.
 _AMBIGUOUS_TOMBSTONE_TABLES: frozenset[str] = frozenset({"invites", "feedback"})
 

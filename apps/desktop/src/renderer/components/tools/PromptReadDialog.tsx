@@ -1,5 +1,8 @@
 import { PromptDocument } from "@/components/prompt/PromptDocument";
-import { PromptWorkbench } from "@/components/prompt/PromptWorkbench";
+import {
+  type PromptApplyMode,
+  PromptWorkbench,
+} from "@/components/prompt/PromptWorkbench";
 import { PublishSkillDialog } from "@/components/tools/PublishSkillDialog";
 import { ToolInspector } from "@/components/tools/ToolInspector";
 import { Badge, Button, SegmentedControl } from "@/components/ui";
@@ -22,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { getDocument } from "@/services/documents";
 import {
   type SkillCatalog,
+  parsePathPatterns,
   skillBodyFromContent,
 } from "@/services/skillCatalog";
 import type { SkillStoreGroup, SkillStoreListing } from "@/services/skillStore";
@@ -60,6 +64,8 @@ export function PromptReadDialog({
       name: string;
       description: string;
       body: string;
+      applyMode: PromptApplyMode;
+      paths: string;
     },
   ) => Promise<boolean>;
   onPublishMine: (
@@ -267,6 +273,8 @@ function ReadBody({
       name: string;
       description: string;
       body: string;
+      applyMode: PromptApplyMode;
+      paths: string;
     },
   ) => Promise<boolean>;
 }) {
@@ -340,10 +348,17 @@ function MineSkillEditor({
       name: string;
       description: string;
       body: string;
+      applyMode: PromptApplyMode;
+      paths: string;
     },
   ) => Promise<boolean>;
 }) {
-  const onDemand = item.applyMode === "on_demand";
+  const [applyMode, setApplyMode] = useState<PromptApplyMode>(item.applyMode);
+  const [paths, setPaths] = useState(() => parsePathPatterns(item.content));
+  useEffect(() => {
+    setApplyMode(item.applyMode);
+    setPaths(parsePathPatterns(item.content));
+  }, [item.applyMode, item.content]);
   const pendingBody = Boolean(item.mineId) && !item.content;
   const [view, setView] = useState<MineView>(() =>
     pendingBody ? "preview" : initialMineView(item.content),
@@ -399,8 +414,11 @@ function MineSkillEditor({
         />
       }
       previewing={view === "preview"}
+      applyMode={applyMode}
+      onApplyModeChange={setApplyMode}
+      initialPaths={paths}
       initialTrigger={item.description}
-      triggerEnabled={onDemand}
+      triggerEnabled={applyMode !== "always"}
       initialBody={body}
       bodyLoading={loading}
       readOnly={!writable}
@@ -411,8 +429,13 @@ function MineSkillEditor({
                 { ...item, version },
                 {
                   name: draft.title,
-                  description: onDemand ? draft.trigger : item.description,
+                  description:
+                    (draft.applyMode ?? applyMode) === "always"
+                      ? item.description
+                      : draft.trigger,
                   body: draft.body,
+                  applyMode: draft.applyMode ?? applyMode,
+                  paths: draft.paths ?? paths,
                 },
               )
           : undefined

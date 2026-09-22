@@ -3,7 +3,7 @@
  *
  * 配色**只用语义 token**（`globals.css` 的 `--foreground`/`--primary`/`--muted-foreground`
  * 与代码高亮 `--syntax-*`），禁硬编码 hex（见 `color-tokens.mdc`）；选区用 `color-mix`
- * 在品牌色上取透明度，亮/暗主题自动跟随。代码块高亮另在 `globals.css` 的 `.markdown-body`，
+ * 在 primary 蓝上取透明度，亮/暗主题自动跟随。代码块高亮另在 `globals.css` 的 `.markdown-body`，
  * 此处只管源码编辑视图自身。
  */
 

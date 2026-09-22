@@ -163,7 +163,7 @@ describe("sendMidFlightMessage · sidecar live", () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
-  it("显式 sidecarTarget 在活 map 已清时仍走 RPC，复用已有用户泡", async () => {
+  it("显式 sidecarTarget 在活 map 已清时仍走 RPC，received 后撤掉乐观用户行", async () => {
     useConversationStore.getState().addMessage(
       {
         id: "opt-reuse",
@@ -207,7 +207,7 @@ describe("sendMidFlightMessage · sidecar live", () => {
       useConversationStore
         .getState()
         .byId[CID]?.messages.filter((m) => m.role === "user"),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it("无 sidecar live 不走 RPC，仍 POST 云 /messages", async () => {

@@ -305,6 +305,7 @@ async def _catch_up_replay(sink: EventSink, *, cursor: ReplayCursor | None) -> l
         build_cursor_replay,
         mark_full_replay_segment,
     )
+    from agentcore.runtime.events.chat import reused_user_row_from_events
 
     turn_id = sink._message_id
     if cursor is None:
@@ -316,6 +317,9 @@ async def _catch_up_replay(sink: EventSink, *, cursor: ReplayCursor | None) -> l
     if not turn_id:
         return []
     agent_ids = sink._checkpointer.run_agent_ids() if sink._checkpointer is not None else {}
+    # turn_queue_started is not journaled. The synthetic head copies it from this sink
+    # so a follower with Last-Event-ID still sees the reused user row. Idle / resume
+    # sinks have no such frame, and the head stays bare.
     return await build_cursor_replay(
         turn_id=turn_id,
         conversation_id=sink.conversation_id or "",
@@ -323,6 +327,7 @@ async def _catch_up_replay(sink: EventSink, *, cursor: ReplayCursor | None) -> l
         cursor_turn_id=cursor.turn_id,
         memory_channels=sink.stream_memory_snapshot(),
         memory_agent_ids=agent_ids,
+        **reused_user_row_from_events(sink.history_snapshot()),
     )
 
 

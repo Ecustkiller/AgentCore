@@ -337,6 +337,9 @@ async def recover_expired_lease(lease: TurnLeaseRow, state: TurnState) -> None:
             await journal_writer.flush()
         if should_release:
             await release_turn_lease(message_id)
+            from agentcore.runtime.turn.durable import note_conversation_slot_free
+
+            note_conversation_slot_free(conversation_id)
         else:
             with contextlib.suppress(Exception):
                 await orphan_turn_lease(message_id)

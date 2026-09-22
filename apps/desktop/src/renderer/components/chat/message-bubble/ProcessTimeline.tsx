@@ -121,7 +121,6 @@ const ProcessRow = memo(function ProcessRow({
   turnKey,
   rowKey,
   conversationId,
-  onOpenWorkspacePath,
 }: {
   step: ProcessStep;
   streaming: boolean;
@@ -134,7 +133,6 @@ const ProcessRow = memo(function ProcessRow({
   rowKey: string;
   /** 所属对话（= conversationId）：仅 browser 单步结果用它懒加载关键帧。 */
   conversationId?: string | null;
-  onOpenWorkspacePath?: (path: string) => void;
 }) {
   if (step.kind === "reasoning") {
     return (
@@ -156,7 +154,6 @@ const ProcessRow = memo(function ProcessRow({
           knownLedgerIds={knownLedgerIds}
           evidenceLedger={evidenceLedger}
           isStreaming={streaming}
-          onOpenWorkspacePath={onOpenWorkspacePath}
         />
       </div>
     );
@@ -181,7 +178,6 @@ export function TimelineNodeView({
   journal,
   conversationId,
   checkpoints,
-  onOpenWorkspacePath,
   isStreaming,
 }: {
   node: TimelineNode;
@@ -194,7 +190,6 @@ export function TimelineNodeView({
   journal?: ExecutionJournal;
   conversationId: string | null;
   checkpoints: CheckpointDisplay[];
-  onOpenWorkspacePath?: (path: string) => void;
   isStreaming: boolean;
 }) {
   if (node.kind === "team") {
@@ -256,7 +251,6 @@ export function TimelineNodeView({
       turnKey={messageId}
       rowKey={nodeKey}
       conversationId={conversationId}
-      onOpenWorkspacePath={onOpenWorkspacePath}
     />
   );
 }
@@ -271,7 +265,7 @@ export function graphSlotExecutionId(
 
 /**
  * In-stream fallback: generic Thinking… when the tail has no live node.
- * Live chrome = running/wait tool, streaming reasoning/content,
+ * Live chrome = running tool, streaming reasoning/content,
  * composing tool, visible collaboration graph (StatusStrip) at the tail, or a
  * pending user gate. Markers are not live by themselves — delegate/debate omit
  * tool steps (isMarkerStandinTool) and stand in as `team` / interaction markers.
@@ -289,7 +283,6 @@ export function shouldShowThinkingTail(args: {
   if (!last) return true;
   if (last.kind === "reasoning" || last.kind === "content") return false;
   if (last.kind === "tool") {
-    if (last.tool_name === "wait") return false;
     return last.status !== "running";
   }
   return true;
@@ -348,7 +341,6 @@ export function ProcessTimeline({
   journal,
   conversationId,
   checkpoints,
-  onOpenWorkspacePath,
   /** When false, never collapse reasoning/tool rows into a summary.
    * Default true keeps CEO bubble chrome. */
   collapseProcessSteps = true,
@@ -365,7 +357,6 @@ export function ProcessTimeline({
   journal?: ExecutionJournal;
   conversationId: string | null;
   checkpoints: CheckpointDisplay[];
-  onOpenWorkspacePath?: (path: string) => void;
   collapseProcessSteps?: boolean;
   /** Harvested `run.debrief` — fills an empty successful handoff row. */
   handoffDebrief?: RunDebrief | null;
@@ -373,7 +364,6 @@ export function ProcessTimeline({
   const hasContentStep = process.some((s) => s.kind === "content");
 
   // 摘要步数与可见行同源，避免「Thought 10」展开只剩 3 行。
-  // collapseProcessSteps 只控制折叠 chrome，不再 omit wait。
   const nodes = groupToolRuns(
     absorbHandoffBriefContent(process, handoffDebrief),
   );
@@ -417,7 +407,6 @@ export function ProcessTimeline({
         knownLedgerIds={knownLedgerIds}
         evidenceLedger={evidenceLedger}
         isStreaming={isStreaming}
-        onOpenWorkspacePath={onOpenWorkspacePath}
       />
     </div>
   );
@@ -434,7 +423,6 @@ export function ProcessTimeline({
       journal={journal}
       conversationId={conversationId}
       checkpoints={checkpoints}
-      onOpenWorkspacePath={onOpenWorkspacePath}
       isStreaming={isStreaming}
     />
   );

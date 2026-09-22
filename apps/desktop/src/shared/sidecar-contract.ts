@@ -61,16 +61,12 @@ export interface SidecarBrowserBridge {
   token: string;
 }
 
-/** 会话权限轴（安全权限与治理）——与服务端 `PermissionAxes` 逐字段对齐。
- *  sidecar 无会话库，桌面按回合把当前会话轴随参数送达本地引擎。 */
-export type SidecarFileWriteAxis = "ask" | "session";
-export type SidecarCommandAxis = "ask" | "auto";
-export type SidecarHostAxis = "off" | "ask" | "session";
+/** 会话边界（安全权限与治理）——与服务端 `{"boundary": ...}` 对齐。
+ *  sidecar 无会话库，桌面按回合把当前边界随参数送达本地引擎。 */
+export type SidecarWorkspaceBoundary = "read" | "folder" | "computer";
 
 export interface SidecarPermissionAxes {
-  file_write: SidecarFileWriteAxis;
-  command: SidecarCommandAxis;
-  host: SidecarHostAxis;
+  boundary: SidecarWorkspaceBoundary;
 }
 
 /** Conversation-page soft @Agent mention (prompt hint; not a hard route). */
@@ -169,7 +165,7 @@ export interface SidecarStartTurnRequest {
    * 避免 spawn-env 过期 / 未注入导致 browser 永久未装配。
    */
   browserBridge?: SidecarBrowserBridge;
-  /** 本会话当前权限轴。缺省 = sidecar 沿用当前值（初始默认全放行）。 */
+  /** 本会话当前边界。缺省 = sidecar 沿用当前值（初始默认这个文件夹）。 */
   permissionAxes?: SidecarPermissionAxes;
   /**
    * 当前对话所属项目 folderId（与列表 / grouped 的 `conversation.folderId` 同形）。
@@ -191,7 +187,7 @@ export interface SidecarStartTurnRequest {
   localSubpath?: string | null;
   /**
    * 本机 FIFO 出队：带上 queueId 时 sidecar 首帧发 ``turn_queue_started``。
-   * 桌面 ``queue/needStart`` 通知后走同一条 startTurn（先占位再开跑）。
+   * 渲染进程先认领这个 turn，再 startTurn；时间线只认那一帧。
    */
   queueId?: string;
   attachments?: SidecarQueuedAttachment[];
@@ -202,8 +198,23 @@ export interface SidecarStartTurnRequest {
   tableSelection?: string[];
 }
 
-/** sidecar → 桌面：FIFO 已出队，请按用户回合 ``startTurn``（先占位）。 */
+/** sidecar → 主进程：FIFO 已出队，请渲染进程认领后再 ``startTurn``。 */
 export const SIDECAR_QUEUE_NEED_START = "queue/needStart";
+
+/** 主进程 → 渲染进程：本机 FIFO 出队，先认领事件再开跑。 */
+export interface SidecarQueueNeedStart {
+  conversationId: string;
+  rootId: string;
+  subpath: string;
+  queueId: string;
+  userMessageId: string;
+  messageId: string;
+  traceId: string;
+  userMessage: string;
+  agentMentions?: SidecarStartTurnRequest["agentMentions"];
+  attachments?: SidecarQueuedAttachment[];
+  tableSelection?: string[];
+}
 
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */
 export interface SidecarHistoryEntry {
@@ -822,6 +833,8 @@ export interface SidecarQueuedTurnItem {
   content: string;
   position: number;
   queueDepth?: number;
+  /** 已落库的用户行 id。取消用它删时间线气泡。 */
+  userMessageId?: string;
   interjectionId?: string;
   degradedFrom?: "steer";
   attachments?: SidecarQueuedAttachment[];
@@ -830,6 +843,38 @@ export interface SidecarQueuedTurnItem {
 
 export interface SidecarListQueuedTurnsResult {
   items: SidecarQueuedTurnItem[];
+}
+
+/** 拖动改 FIFO 顺序。``queueIds`` 必须是当前队列的完整排列。 */
+export interface SidecarReorderQueuedTurnsRequest {
+  rootId: string;
+  subpath?: string;
+  conversationId: string;
+  queueIds: string[];
+}
+
+/** 就地改正文 / 附件 / @。身份与顺序不动。 */
+export interface SidecarEditQueuedTurnRequest {
+  rootId: string;
+  subpath?: string;
+  conversationId: string;
+  queueId: string;
+  content: string;
+  attachments?: SidecarQueuedAttachment[];
+  agentMentions?: SidecarAgentMention[];
+}
+
+/** ``not_found`` = 已不在队（同云 404）。 */
+export type SidecarEditQueuedTurnAck =
+  | { status: "saved" }
+  | { status: "not_found" };
+
+/** 把该排队项放到队首并硬停当前回合，槽空后这条开跑。 */
+export interface SidecarStopAndSendQueuedTurnRequest {
+  rootId: string;
+  subpath?: string;
+  conversationId: string;
+  queueId: string;
 }
 
 /** 本机 outbox 未同步回合的投影自足摘要（recovery → renderer D5，不透传 journal）。 */
@@ -926,6 +971,9 @@ export const SIDECAR_CHANNELS = {
   deliverMessage: "sidecar:deliverMessage",
   cancelQueuedTurn: "sidecar:cancelQueuedTurn",
   listQueuedTurns: "sidecar:listQueuedTurns",
+  reorderQueuedTurns: "sidecar:reorderQueuedTurns",
+  stopAndSendQueuedTurn: "sidecar:stopAndSendQueuedTurn",
+  editQueuedTurn: "sidecar:editQueuedTurn",
   occupancy: "sidecar:occupancy",
   resume: "sidecar:resume",
   probe: "sidecar:probe",
@@ -941,6 +989,7 @@ export const SIDECAR_CHANNELS = {
   restoreWorkspaceVersion: "sidecar:restoreWorkspaceVersion",
   listBrowserSessions: "sidecar:listBrowserSessions",
   event: "sidecar:event",
+  queueNeedStart: "sidecar:queueNeedStart",
   fulfill: "sidecar:fulfill",
   status: "sidecar:status",
 } as const;
@@ -975,6 +1024,16 @@ export interface SidecarApi {
   listQueuedTurns(
     req: SidecarListQueuedTurnsRequest,
   ): Promise<SidecarListQueuedTurnsResult>;
+  /** 本机 FIFO 改顺序。失败须 reject，调用方回滚本地顺序。 */
+  reorderQueuedTurns(req: SidecarReorderQueuedTurnsRequest): Promise<void>;
+  /** 队首 + 硬停。``not_found`` 须 reject。 */
+  stopAndSendQueuedTurn(
+    req: SidecarStopAndSendQueuedTurnRequest,
+  ): Promise<void>;
+  /** 就地改正文 / 附件 / @。``not_found`` = 已开跑。 */
+  editQueuedTurn(
+    req: SidecarEditQueuedTurnRequest,
+  ): Promise<SidecarEditQueuedTurnAck>;
   /**
    * 本机这通是否还在写。只读活表；禁止经 ``loadRecovery``（会改灯和冷卡）。
    */
@@ -1041,6 +1100,11 @@ export interface SidecarApi {
    * 再 `claimSidecarTurnSink`——禁止每 turn 直接 `onEvent`（可叠 listener → live 叠字）。
    */
   onEvent(cb: (e: SidecarEventPush) => void): () => void;
+  /**
+   * 本机 FIFO 出队。渲染进程先认领该 turn，再 ``startTurn``。
+   * 返回取消订阅。App 生命周期只订一次。
+   */
+  onQueueNeedStart(cb: (notice: SidecarQueueNeedStart) => void): () => void;
   /**
    * 订阅本机履约帧（CLIENT_TOOL `*_required` / `client_tool_cancelled`）；返回取消订阅函数。
    *

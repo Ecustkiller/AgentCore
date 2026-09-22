@@ -27,6 +27,25 @@ class MessageStartPayload(WirePayload):
         "The instruction is the server's — clients must not infer it by comparing the id "
         "against whatever bubble is on screen."
     )
+    user_message_id: str | None = absent(
+        "Persisted user-row id when this open reuses a row already saved at send time "
+        "(a queue drain). Copied from this sink's turn_queue_started. Absent on idle, "
+        "resume, steer, and any other bare open — a message_start without it is not a dequeue."
+    )
+    content: str | None = absent(
+        "Text of that reused user row, so a follower who never held the queue snapshot can "
+        "paint it. Present only together with user_message_id. Not assistant text."
+    )
+    attachments: list[Any] | None = absent(
+        "Attachments of that reused user row. Same shape as turn_queue_started.attachments. "
+        "Omitted when empty.",
+        ts_type="MessageAttachment[]",
+    )
+    agent_mentions: list[Any] | None = absent(
+        "Mentions on that reused user row. Same shape as turn_queue_started.agent_mentions. "
+        "Omitted when empty.",
+        ts_type="AgentMention[]",
+    )
 
 
 # 整块帧标记（attach 回放段专用，live 帧永不带）。放在正文类 delta 上：`delta` 不是一小段

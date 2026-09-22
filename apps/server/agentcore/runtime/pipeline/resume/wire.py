@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from agentcore.config import settings
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, new_id
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary, new_id
 from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.folders.desk import caller_is_desk_member
 from agentcore.llm.profiles import TurnProfiles
@@ -141,7 +141,7 @@ async def _wire_continuation_toolset(
     journal_entries: list[dict[str, Any]],
     display_journal: list[dict[str, Any]] | None,
     profiles: TurnProfiles,
-    permission_axes: PermissionAxes | None,
+    permission_axes: WorkspaceBoundary | None,
     session_saver: SessionSaver | None,
     session_loader: SessionLoader | None,
     suspension_saver: SuspensionSaver | None,
@@ -263,10 +263,16 @@ async def _wire_continuation_toolset(
     # path exemption on the list helpers still applies.
     backend.ai_list_materials = frozenset()
     from agentcore.llm.image_accept import model_accepts_images
+    from agentcore.memory import default_memory_store, load_turn_rule_view
     from agentcore.runtime.coordination.session import (
         invalidate_verify_cache_for_execution,
     )
 
+    rule_view = await load_turn_rule_view(
+        default_memory_store(),
+        user_id,
+        folder_id=folder_id,
+    )
     base_tool_context = ToolContext.create(
         execution_id=resume_execution_id,
         run_id=new_id(),
@@ -298,6 +304,7 @@ async def _wire_continuation_toolset(
         folder_local_root_id=folder_local_root_id,
         folder_local_subpath=folder_local_subpath,
         on_file_landed=invalidate_verify_cache_for_execution,
+        path_rules=rule_view.path_rules,
     )
     if auto_desk_folder_id:
         base_tool_context.turn_target_desk.note_folder(auto_desk_folder_id)
@@ -439,7 +446,7 @@ async def wire_resume_turn(
     message_id: str,
     captain_run_id: str,
     profiles: TurnProfiles,
-    permission_axes: PermissionAxes | None,
+    permission_axes: WorkspaceBoundary | None,
     session_saver: SessionSaver | None,
     session_loader: SessionLoader | None,
     suspension_saver: SuspensionSaver | None,
@@ -491,7 +498,7 @@ async def wire_crash_turn(
     user_message: str,
     journal_entries: list[dict[str, Any]],
     profiles: TurnProfiles,
-    permission_axes: PermissionAxes | None,
+    permission_axes: WorkspaceBoundary | None,
     session_saver: SessionSaver | None,
     session_loader: SessionLoader | None,
     suspension_saver: SuspensionSaver | None,

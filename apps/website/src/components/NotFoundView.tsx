@@ -39,7 +39,7 @@ export default function NotFoundView() {
               className="float-in m-0 font-bold leading-none tracking-[-0.04em]"
               style={{
                 fontSize: "clamp(5rem, 18vw, 11rem)",
-                background: "var(--brand-gradient)",
+                background: "var(--blue-gradient)",
                 WebkitBackgroundClip: "text",
                 backgroundClip: "text",
                 color: "transparent",
@@ -79,7 +79,7 @@ export default function NotFoundView() {
                 className="btn-outline max-sm:min-h-[3.25rem]"
                 style={{
                   background:
-                    "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--brand-gradient) border-box",
+                    "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--blue-gradient) border-box",
                 }}
               >
                 {t(NOT_FOUND.app)}
@@ -89,7 +89,7 @@ export default function NotFoundView() {
                 className="btn-outline max-sm:min-h-[3.25rem]"
                 style={{
                   background:
-                    "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--brand-gradient) border-box",
+                    "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--blue-gradient) border-box",
                 }}
               >
                 {t(NOT_FOUND.download)}

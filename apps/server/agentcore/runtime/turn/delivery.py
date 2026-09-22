@@ -116,12 +116,132 @@ def queued_turns_json(conversation_id: str) -> list[dict[str, Any]]:
             "attachments": list(item.attachments),
             "agentMentions": list(item.agent_mentions),
         }
+        if item.user_message_id:
+            row["userMessageId"] = item.user_message_id
         items.append(row)
     return items
 
 
 def list_queued_items(conversation_id: str) -> list[QueuedTurn]:
     return turn_queue.list_pending(conversation_id)
+
+
+async def reorder_queued_items(conversation_id: str, queue_ids: list[str]) -> bool:
+    """Permute the FIFO. False when the id list is not the current set."""
+    from agentcore.runtime.turn.durable import sync_durable_order
+
+    async with turn_queue.mutation_lock(conversation_id):
+        ok = turn_queue.reorder(conversation_id, queue_ids)
+        if ok:
+            await sync_durable_order(conversation_id)
+        return ok
+
+
+def promote_queued_item(conversation_id: str, queue_id: str) -> QueuedTurn | None:
+    """Move one pending item to the front. Missing / already started → None."""
+    return turn_queue.move_to_front(conversation_id, queue_id)
+
+
+async def stop_live_turn(conversation_id: str) -> bool:
+    """Hard-cancel the occupying turn. Same sequence as ``POST …/stop``.
+
+    Marks user-stop before the orphan pass so the unwind closes as 已停止.
+    Does not clear the FIFO. Returns whether a live run was signalled.
+    """
+    from agentcore.runtime.coordination.session import cancel_coordination_on_user_stop
+    from agentcore.runtime.events.client_tool_reattach import cancel_pending_client_tools
+    from agentcore.runtime.interaction_orphan import orphan_live_turn_hot_pending
+
+    turn_runs.mark_user_stop(conversation_id)
+    await orphan_live_turn_hot_pending(conversation_id)
+    cancel_pending_client_tools(conversation_id)
+    stopped = turn_runs.stop(conversation_id)
+    if not stopped:
+        stopped = cancel_coordination_on_user_stop(conversation_id)
+    return stopped
+
+
+async def stop_and_send_queued_item(
+    conversation_id: str, queue_id: str
+) -> QueuedTurn | None:
+    """Put this queued item first, then hard-stop the live turn.
+
+    Drain after stop starts the new front item. When the slot is already free,
+    arm drain so the promoted item starts now. Missing id → None.
+    """
+    from agentcore.runtime.turn.durable import sync_durable_order
+
+    async with turn_queue.mutation_lock(conversation_id):
+        item = promote_queued_item(conversation_id, queue_id)
+        if item is None:
+            return None
+        await sync_durable_order(conversation_id)
+    stopped = await stop_live_turn(conversation_id)
+    if not stopped:
+        turn_queue.schedule_drain(conversation_id)
+    return item
+
+
+async def edit_queued_item(
+    conversation_id: str,
+    queue_id: str,
+    *,
+    content: str,
+    attachments: list[dict[str, Any]],
+    agent_mentions: list[dict[str, Any]],
+) -> QueuedTurn | None:
+    """Replace a pending item's text, attachments, and mentions.
+
+    Holds the queue mutation lock across the user-row write and the memory
+    update. The row write must land first; if it does not, memory stays.
+    Already started / unknown id / missing user row → None.
+    ``queue_id``, ``user_message_id``, order, credentials, ``interjection_id``,
+    and ``table_selection`` are left as they were at enqueue.
+    """
+    from agentcore.conversation.midflight_persist import update_midflight_user_message
+
+    async with turn_queue.mutation_lock(conversation_id):
+        item = turn_queue.find_pending(conversation_id, queue_id)
+        if item is None:
+            return None
+        if item.user_message_id:
+            wrote = await update_midflight_user_message(
+                conversation_id=conversation_id,
+                user_message_id=item.user_message_id,
+                content=content,
+                attachments=attachments,
+                agent_mentions=agent_mentions,
+            )
+            if not wrote:
+                return None
+        from agentcore.runtime.turn.durable import update_durable_payload
+
+        if not await update_durable_payload(
+            queue_id,
+            content=content,
+            attachments=attachments,
+            agent_mentions=agent_mentions,
+        ):
+            return None
+        return turn_queue.apply_edit(
+            conversation_id,
+            queue_id,
+            content=content,
+            attachments=attachments,
+            agent_mentions=agent_mentions,
+        )
+
+
+async def withdraw_queued_item(conversation_id: str, queue_id: str) -> QueuedTurn | None:
+    """Cancel one FIFO item under the same lock as edit and drain."""
+    from agentcore.runtime.turn.durable import delete_durable_item
+
+    async with turn_queue.mutation_lock(conversation_id):
+        if turn_queue.find_pending(conversation_id, queue_id) is None:
+            return None
+        if not await delete_durable_item(queue_id):
+            return None
+        return cancel_queued_item(conversation_id, queue_id)
 
 
 def cancel_queued_item(conversation_id: str, queue_id: str) -> QueuedTurn | None:
@@ -152,6 +272,7 @@ def _emit_received_once(
     content: str,
     attachments_meta: list[dict[str, Any]],
     agent_mentions: list[dict[str, Any]],
+    user_message_id: str | None = None,
 ) -> None:
     from agentcore.runtime.events import user_interjection
 
@@ -163,6 +284,7 @@ def _emit_received_once(
             status="received",
             attachments=attachments_meta or None,
             agent_mentions=agent_mentions or None,
+            user_message_id=user_message_id,
         )
     )
 
@@ -217,7 +339,6 @@ async def deliver_in_flight(
     coord = active_coordination_for_conversation(conversation_id)
     coord_active = coord is not None and coord.active
     try_interject = delivery == "steer" and coord_active
-    degraded_from: str | None = None
 
     if try_interject:
         assert coord is not None
@@ -270,6 +391,7 @@ async def deliver_in_flight(
                 content=content,
                 attachments_meta=att_meta,
                 agent_mentions=raw_agent_mentions,
+                user_message_id=user_message_id,
             )
             return InFlightDelivery(
                 status="received",
@@ -308,6 +430,7 @@ async def deliver_in_flight(
                 content=content,
                 attachments_meta=att_meta,
                 agent_mentions=raw_agent_mentions,
+                user_message_id=user_message_id,
             )
             return InFlightDelivery(
                 status="received",
@@ -319,7 +442,6 @@ async def deliver_in_flight(
                 agent_mentions=raw_agent_mentions,
                 confirm_reason="steer_confirm",
             )
-        degraded_from = "steer"
 
     started: asyncio.Future[Any] | None = None
     if wait_for_start:
@@ -343,6 +465,9 @@ async def deliver_in_flight(
             trace_id=trace_id,
         ),
     )
+    from agentcore.runtime.turn.durable import flush_turn_queue_durable
+
+    await flush_turn_queue_durable()
     return InFlightDelivery(
         status="queued",
         conversation_id=conversation_id,
@@ -350,6 +475,5 @@ async def deliver_in_flight(
         queue_id=status.queue_id,
         position=status.position,
         queue_depth=status.queue_depth,
-        degraded_from=degraded_from,
         started=started,
     )

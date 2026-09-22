@@ -7,15 +7,17 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from agentcore.api.schemas.messages import SendMessageRequest
+from agentcore.api.schemas.messages import EditQueuedTurnRequest, SendMessageRequest
 from agentcore.runtime.turn.delivery import (
     DeliveryBlockedError,
     NoLiveTurnError,
-    cancel_queued_item,
     deliver_in_flight,
     delivery_json_ack,
+    edit_queued_item,
     queued_turns_json,
     raise_if_delivery_blocked,
+    reorder_queued_items,
+    stop_and_send_queued_item,
 )
 from agentcore.runtime.turn.queue import QueuedTurn, set_queue_starter
 from agentcore.runtime.turn.runs import turn_runs
@@ -270,7 +272,9 @@ class DeliveryMixin:
                 )
             )
             return
-        item = cancel_queued_item(conversation_id, queue_id)
+        from agentcore.runtime.turn.delivery import withdraw_queued_item
+
+        item = await withdraw_queued_item(conversation_id, queue_id)
         if item is None:
             await self._send(
                 protocol.make_error(
@@ -305,6 +309,137 @@ class DeliveryMixin:
             )
             return
         await self._reply(request_id, {"items": queued_turns_json(conversation_id)})
+
+    async def _on_reorder_queued_turns(self, request_id: Any, params: dict[str, Any]) -> None:
+        if not self._initialized:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
+                )
+            )
+            return
+        conversation_id = str(params.get("conversationId") or "").strip()
+        raw_ids = params.get("queueIds")
+        queue_ids = (
+            [str(item).strip() for item in raw_ids if str(item).strip()]
+            if isinstance(raw_ids, list)
+            else []
+        )
+        if not conversation_id or not queue_ids:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "reorderQueuedTurns requires conversationId and queueIds",
+                )
+            )
+            return
+        if not await reorder_queued_items(conversation_id, queue_ids):
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "queue ids must be the current fifo",
+                    data={"code": "invalid_queue_order"},
+                )
+            )
+            return
+        await self._reply(request_id, {"ok": True})
+
+    async def _on_stop_and_send_queued_turn(self, request_id: Any, params: dict[str, Any]) -> None:
+        if not self._initialized:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
+                )
+            )
+            return
+        conversation_id = str(params.get("conversationId") or "").strip()
+        queue_id = str(params.get("queueId") or "").strip()
+        if not conversation_id or not queue_id:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "stopAndSendQueuedTurn requires conversationId and queueId",
+                )
+            )
+            return
+        item = await stop_and_send_queued_item(conversation_id, queue_id)
+        if item is None:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.QUEUED_TURN_NOT_FOUND,
+                    "queued turn not found",
+                    data={"code": "queued_turn_not_found"},
+                )
+            )
+            return
+        from agentcore.core.task_cancel import cancel_task
+
+        turn_id = ""
+        for tid, cid in self._turn_conversations.items():
+            if cid == conversation_id:
+                turn_id = tid
+                break
+        task = self._turns.get(turn_id) if turn_id else None
+        if task is not None and not task.done():
+            cancel_task(task, "user_stop")
+        await self._reply(request_id, {"ok": True, "queueId": queue_id})
+
+    async def _on_edit_queued_turn(self, request_id: Any, params: dict[str, Any]) -> None:
+        if not self._initialized:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
+                )
+            )
+            return
+        conversation_id = str(params.get("conversationId") or "").strip()
+        queue_id = str(params.get("queueId") or "").strip()
+        if not conversation_id or not queue_id:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "editQueuedTurn requires conversationId and queueId",
+                )
+            )
+            return
+        try:
+            body = EditQueuedTurnRequest.model_validate(
+                {
+                    "content": str(params.get("content") or ""),
+                    "attachments": _rpc_attachment_dicts(params),
+                    "agent_mentions": rpc_agent_mentions(params),
+                }
+            )
+        except ValidationError as e:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.INVALID_PARAMS, f"invalid editQueuedTurn params: {e}"
+                )
+            )
+            return
+        item = await edit_queued_item(
+            conversation_id,
+            queue_id,
+            content=body.content,
+            attachments=[a.model_dump() for a in body.attachments],
+            agent_mentions=[m.model_dump() for m in body.agent_mentions],
+        )
+        if item is None:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.QUEUED_TURN_NOT_FOUND,
+                    "queued turn not found",
+                    data={"code": "queued_turn_not_found"},
+                )
+            )
+            return
+        await self._reply(request_id, {"ok": True, "queueId": queue_id})
 
 
 def _rpc_attachment_dicts(params: dict[str, Any]) -> list[dict[str, Any]]:

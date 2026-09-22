@@ -270,7 +270,7 @@ async def test_stream_chat_persists_agent_mentions(monkeypatch):
 
     from agentcore.api.sse import EventSink
     from agentcore.conversation import turns as turns_mod
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     created: list[dict] = []
 
@@ -317,7 +317,7 @@ async def test_stream_chat_persists_agent_mentions(monkeypatch):
     monkeypatch.setattr(
         turns_mod,
         "resolve_permission_axes",
-        AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+        AsyncMock(return_value=WorkspaceBoundary.FOLDER),
     )
     monkeypatch.setattr(
         turns_mod,
@@ -365,7 +365,7 @@ async def test_regenerate_forwards_stored_agent_mentions(monkeypatch):
 
     from agentcore.api.sse import EventSink
     from agentcore.conversation import turns as turns_mod
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     captured: list[dict] = []
     mentions = [{"agent_id": "w1", "role": "写手"}]
@@ -423,7 +423,7 @@ async def test_regenerate_forwards_stored_agent_mentions(monkeypatch):
     monkeypatch.setattr(
         turns_mod,
         "resolve_permission_axes",
-        AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+        AsyncMock(return_value=WorkspaceBoundary.FOLDER),
     )
     monkeypatch.setattr(
         turns_mod,
@@ -462,7 +462,7 @@ async def test_regenerate_replaces_agent_mentions_when_edit_sends_empty(monkeypa
 
     from agentcore.api.sse import EventSink
     from agentcore.conversation import turns as turns_mod
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     captured: list[dict] = []
     updates: list[dict] = []
@@ -520,7 +520,7 @@ async def test_regenerate_replaces_agent_mentions_when_edit_sends_empty(monkeypa
     monkeypatch.setattr(
         turns_mod,
         "resolve_permission_axes",
-        AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+        AsyncMock(return_value=WorkspaceBoundary.FOLDER),
     )
     monkeypatch.setattr(
         turns_mod,

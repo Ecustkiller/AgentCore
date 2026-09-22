@@ -108,7 +108,7 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     ),
     EventType.TURN_QUEUE_STARTED: (
         Disposition.EPHEMERAL,
-        "时间线用户泡入场（正文在帧上）；reload 靠 REST",
+        "已拿到该帧的连接提前插入同一用户行；入场权威是段首点名的 message_start。reload 靠 REST",
     ),
     EventType.TURN_QUEUE_CANCELLED: (
         Disposition.EPHEMERAL,

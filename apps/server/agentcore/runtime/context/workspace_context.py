@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Literal
 from agentcore.workspace.layout import CONV_SEGMENT, INTERNAL_SEGMENT, TREE_SEGMENT
 
 if TYPE_CHECKING:
-    from agentcore.core.types import HostAxis, PermissionAxes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.workspace.protocol import WorkspaceBackend
 
 ChannelSurface = Literal["desktop", "web", "mobile", "unknown"]
@@ -221,7 +221,7 @@ def _system_line(
     Local stays the user's machine — do not paste the cloud menu there.
     """
     if not is_local:
-        line = "系统：Linux · bash"
+        line = "系统：Linux · 壳：bash"
         if exec_on:
             from agentcore.tools.sandbox.guest_rootfs import format_cloud_guest_surface
 
@@ -239,9 +239,9 @@ def _system_line(
     else:
         shell = None
     if os_name and shell:
-        return f"系统：{os_name} · {shell}"
+        return f"系统：{os_name} · 壳：{shell}"
     if shell:
-        return f"系统：{shell}"
+        return f"系统：壳：{shell}"
     if os_name:
         return f"系统：{os_name}"
     return ""
@@ -302,8 +302,7 @@ def build_workspace_context(
     package_install_enabled: bool | None = None,
     git_tool_enabled: bool | None = None,
     exec_languages: list[str] | tuple[str, ...] | None = None,
-    host_axis: HostAxis | str | None = None,
-    permission_axes: PermissionAxes | None = None,
+    permission_axes: WorkspaceBoundary | None = None,
     mcp_enabled: bool = False,
     mcp_label: str | None = None,
     git_fact: WorkspaceGitFact | None = None,
@@ -318,14 +317,16 @@ def build_workspace_context(
     even for an empty cloud scratch). ``backend is None`` → ``""`` (caller omits).
 
     Gap line uses the same predicates as worker registry assembly
-    (``execution_class_enabled_for`` / ``browser_execution_enabled_for``, including
-    ``command=ask`` withhold); optional ``*_enabled`` overrides are for tests /
-    probes only — not a second truth source. Assembled faces are omitted
-    (the opening tool table is the channel).
+    (``execution_class_enabled_for`` / ``browser_execution_enabled_for``).
+    Optional ``*_enabled`` overrides are for tests / probes only — not a
+    second truth source. Assembled faces are omitted (the opening tool table
+    is the channel).
 
-    ``permission_axes`` folds ask-withhold into ``run`` /
-    ``browser`` so the line never contradicts the worker toolset.
-    When ``host_axis`` is omitted, it is taken from ``permission_axes.host``.
+    ``permission_axes`` is the conversation boundary. ``read`` omits write /
+    ``run`` / ``browser`` / ``host`` from both the tool table and this gap
+    line (the ``边界：`` fact is the reason). Environment gaps (sandbox down,
+    bridge down, desktop offline) stay on the gap line only when the boundary
+    includes that face.
 
     ``package_install`` on cloud uses the same predicate as ``run``.
     Local follows execution-class only. Override ``package_install_enabled``
@@ -347,8 +348,14 @@ def build_workspace_context(
     if backend is None:
         return ""
 
-    if host_axis is None and permission_axes is not None:
-        host_axis = permission_axes.host
+    from agentcore.core.types import WorkspaceBoundary
+
+    boundary = permission_axes if permission_axes is not None else WorkspaceBoundary.FOLDER
+    boundary_line = "边界：" + {
+        WorkspaceBoundary.READ: "只看",
+        WorkspaceBoundary.FOLDER: "这个文件夹",
+        WorkspaceBoundary.COMPUTER: "这台电脑",
+    }[boundary]
 
     location: Literal["server", "local"] = backend.location
     root_label = (getattr(backend, "root_label", None) or "workspace").strip() or "workspace"
@@ -395,11 +402,7 @@ def build_workspace_context(
 
     note_browser_assembled(browser_on)
     local_open_on = is_local
-    host_off = False
-    if host_axis is not None:
-        host_val = getattr(host_axis, "value", None) or str(host_axis)
-        host_off = host_val == "off"
-    host_on = desktop_online and not host_off
+    host_on = boundary.allows_host and desktop_online
     mcp_on = mcp_enabled if mcp_label is None else mcp_label != "未装配"
     pkg_on = (
         package_install_enabled if package_install_enabled is not None else exec_on
@@ -412,7 +415,7 @@ def build_workspace_context(
         git_on = git_execution_enabled_for(backend, desktop_online=desktop_online)
 
     leftover_lines: list[str] = []
-    if not exec_on and not is_local:
+    if boundary.allows_execution and not exec_on and not is_local:
         from agentcore.runtime.delegate.exec_env_remediation import (
             cloud_sandbox_failure_hint,
         )
@@ -440,8 +443,21 @@ def build_workspace_context(
         root_label=root_label,
         desk_visibly_empty=desk_visibly_empty,
     )
+    gap_flags: list[tuple[str, bool]] = []
+    if boundary.allows_execution:
+        gap_flags.extend(
+            (
+                ("run", exec_on),
+                ("package_install", pkg_on),
+                ("browser", browser_on),
+            )
+        )
+    if boundary.allows_host:
+        gap_flags.append(("host", host_on))
+    gap_flags.extend((("local_open", local_open_on), ("mcp", mcp_on)))
     body_lines = [
         location_line,
+        boundary_line,
         desk_line,
         _system_line(
             is_local=is_local,
@@ -452,16 +468,7 @@ def build_workspace_context(
         git_line,
         desktop_line,
         *([mounts_line] if mounts_line else []),
-        _gap_line(
-            (
-                ("run", exec_on),
-                ("package_install", pkg_on),
-                ("browser", browser_on),
-                ("local_open", local_open_on),
-                ("host", host_on),
-                ("mcp", mcp_on),
-            )
-        ),
+        _gap_line(gap_flags),
         *leftover_lines,
         interpreters_line,
     ]

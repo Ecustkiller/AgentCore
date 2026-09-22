@@ -30,6 +30,9 @@ class PersistenceSettings(BaseModel):
     # from the message-side schedule trigger (16) so we do not re-fold every ~2 user turns.
     compaction_enabled: bool = True
     compaction_trigger_input_tokens: int = 32_000
+    # Fold retain is a token budget packed from the newest user-led turn, not a
+    # message count. ``compaction_recency_messages`` is leftover load padding only.
+    compaction_recency_token_budget: int = 24_000
     compaction_recency_messages: int = 12
     compaction_message_trigger_min_fold: int = 16
     compaction_min_fold_messages: int = 4

@@ -9,7 +9,11 @@ import { traceTurnEnd } from "@/services/sseTrace";
 import { clearQueuedTurnLocally } from "@/services/turns/cancelQueuedTurn";
 import { settleConsumedResume } from "@/services/turns/consumedResume";
 import { notifySteerDegradedToQueue } from "@/services/turns/queuedNotify";
-import { insertQueuedTurnUserBubble } from "@/services/turns/queuedTurnLocal";
+import {
+  insertQueuedTurnUserBubble,
+  releaseNamedQueueEntry,
+  rememberPromotedUserRow,
+} from "@/services/turns/queuedTurnLocal";
 import {
   completeTurnPhase,
   getRuntime,
@@ -72,20 +76,23 @@ export function handleMessageStreamEvent(
       // EPHEMERAL =「队列变了」信号。内容与排序都由设备通道的整队快照负责
       // （`accountStateIngress`），本帧只管这条流上说得出、快照说不出的那件事：
       // 普通排队条即反馈不 toast，steer 降级必须 toast（光看条看不出降级）。
+      // 快照还没到之前，不要把「队里没有」当成这条插话已取消。
       const p = event.payload as TurnQueuedPayload;
+      const queuedCid = p.conversation_id || conversationId;
+      if (queuedCid) {
+        useQueuedTurnsStore.getState().markQueueStale(queuedCid);
+      }
       if (p.degraded_from === "steer") {
         notifySteerDegradedToQueue();
       }
       return true;
     }
     case "turn_queue_started": {
-      // EPHEMERAL：FIFO 出队开跑（新回合 sink 首帧，先于 message_start）。
-      // 从帧 payload 插用户泡（不从条抄；空快照可已清条）。follow catch-up 已拉齐
-      // REST 窗则只清条（``skipQueuedTurnUserBubble``），避免与窗口用户行双泡。
+      // 已经拿到这一帧的连接提前插入同一用户行。跟播不必重放它；
+      // 入场权威是段首点名的 message_start。
       const p = event.payload as TurnQueueStartedPayload;
-      if (!ctx.skipQueuedTurnUserBubble) {
-        insertQueuedTurnUserBubble(conversationId, event.payload);
-      }
+      const placed = insertQueuedTurnUserBubble(conversationId, event.payload);
+      if (placed) rememberPromotedUserRow(conversationId, placed);
       useQueuedTurnsStore.getState().remove(conversationId, p.queue_id);
       return true;
     }
@@ -213,12 +220,17 @@ export function handleMessageStreamEvent(
         store.resetAssistantForNewTurn(payload.message_id, conversationId);
         store.setGenerating(true, conversationId);
       }
-      // 排队条出队真相源 = turn_queue_started（勿再靠 message_start 猜末条用户泡）。
       store.stampPendingTurnWarning(conversationId);
       if (payload.trace_id)
         store.setTraceIdOnLastMessage(payload.trace_id, conversationId);
       // Stamp server turn id (and one-time align execution client→server).
       store.setServerMessageIdOnLastMessage(payload.message_id, conversationId);
+      // 只有点名的段首才按 id 插入并摘掉排队条。插在已盖章的助手泡之前，
+      // 尾部仍是助手，content_delta 不会写进用户行。裸 message_start 不得清队。
+      const placed = insertQueuedTurnUserBubble(conversationId, event.payload, {
+        beforeMessageId: payload.message_id,
+      });
+      if (placed) releaseNamedQueueEntry(conversationId, placed);
       // Turn (re)start — clear the captain context accumulator so a reconnect replay
       // (which re-sends message_start first) rebuilds it idempotently (上下文传递可视化 通道①+⑤).
       resetCaptainContext(conversationId);

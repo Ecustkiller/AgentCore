@@ -138,6 +138,7 @@ describe("formatSupportDiagnosticText", () => {
         "upstream_status: 400",
         'upstream_body_preview: {"error":{"message":"Invalid schema for function x"}}',
         "uv run python scripts/log_timeline.py conv-1",
+        "只执行上面这一条。",
       ].join("\n"),
     );
   });

@@ -53,6 +53,7 @@ import {
 } from "@/services/workspacesToken";
 import { useAuthStore } from "@/stores/auth";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { blocksStreamOpen } from "@/stores/conversation/turnPhase";
 import {
   enterTurnStreaming,
   getTurnPhase,
@@ -62,6 +63,7 @@ import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import type { SSEEvent } from "@/types/events";
 import type {
   SidecarHistoryEntry,
+  SidecarQueueNeedStart,
   SidecarQueuedAttachment,
   SidecarTurnResult,
 } from "@shared/sidecar-contract";
@@ -797,6 +799,62 @@ async function runSidecarTurn({
     claim.release();
     releasePrimaryStream(conversationId, primaryToken);
     releaseLocalStream();
+  }
+}
+
+const queuedSidecarStarts = new Set<string>();
+
+/**
+ * 本机 FIFO 出队：先认领这个 turn 的事件，再 startTurn。
+ * 用户行等首帧 ``turn_queue_started`` 放入时间线，这里不预画。
+ */
+export async function startQueuedSidecarTurn(
+  notice: SidecarQueueNeedStart,
+): Promise<void> {
+  const key = `${notice.conversationId}:${notice.messageId}`;
+  if (queuedSidecarStarts.has(key)) return;
+  queuedSidecarStarts.add(key);
+  const turnId = crypto.randomUUID();
+  try {
+    if (blocksStreamOpen(getTurnPhase(notice.conversationId))) {
+      useConversationStore
+        .getState()
+        .setTurnPhase("idle", notice.conversationId);
+    }
+    await runSidecarTurn({
+      conversationId: notice.conversationId,
+      rootId: notice.rootId,
+      subpath: notice.subpath,
+      turnId,
+      op: "startTurn",
+      hasInference: true,
+      failMessage: "本地引擎未能完成排队回合，请重试",
+      invoke: () =>
+        window.sidecarApi.startTurn({
+          conversationId: notice.conversationId,
+          rootId: notice.rootId,
+          subpath: notice.subpath,
+          turnId,
+          traceId: notice.traceId,
+          userId: useAuthStore.getState().user?.id ?? "local",
+          userMessage: notice.userMessage,
+          userMessageId: notice.userMessageId,
+          messageId: notice.messageId,
+          queueId: notice.queueId,
+          ...(notice.agentMentions && notice.agentMentions.length > 0
+            ? { agentMentions: notice.agentMentions }
+            : {}),
+          ...(notice.attachments && notice.attachments.length > 0
+            ? { attachments: notice.attachments }
+            : {}),
+          ...tableSelectionPayload(notice.tableSelection),
+        }),
+      writeBack: async () => {
+        await persistAndReconcile(notice.conversationId, notice.userMessageId);
+      },
+    });
+  } finally {
+    queuedSidecarStarts.delete(key);
   }
 }
 

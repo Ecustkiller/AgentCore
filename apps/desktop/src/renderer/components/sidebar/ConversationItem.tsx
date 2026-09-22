@@ -292,11 +292,11 @@ export function ConversationItem({
   };
 
   const rowActionClass =
-    "size-6 text-sidebar-foreground/40 hover:text-sidebar-foreground";
+    "size-6 text-sidebar-muted hover:text-sidebar-foreground";
 
   if (editing) {
     return (
-      <div className="flex h-8 w-full items-center rounded-lg bg-sidebar-accent px-2">
+      <div className="touch-row flex h-8 w-full items-center rounded-lg bg-sidebar-accent px-2">
         <input
           ref={inputRef}
           value={draft}
@@ -318,7 +318,7 @@ export function ConversationItem({
             }
             commitEdit();
           }}
-          className="h-7 min-w-0 flex-1 bg-transparent px-1 text-sm text-sidebar-accent-foreground focus:outline-none"
+          className="h-7 min-w-0 flex-1 bg-transparent px-1 text-sm text-sidebar-accent-foreground focus:outline-none max-md:min-h-11 pointer-coarse:min-h-11"
         />
       </div>
     );
@@ -338,7 +338,7 @@ export function ConversationItem({
               variant="sidebar"
               active={isActive}
               // 列表行比导航项低一档（h-8 vs 导航 h-9），让二级内容不占一级高度。
-              className={cn("h-8", className)}
+              className={cn("touch-row h-8", className)}
               onMouseEnter={() => {
                 setHovered(true);
                 if (!suppressPreview) {
@@ -365,7 +365,7 @@ export function ConversationItem({
                     ? `${isMac ? "Meta" : "Control"}+${hotkeyIndex}`
                     : undefined
                 }
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                className="flex min-w-0 flex-1 items-center gap-2 self-stretch rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 onClick={openConversation}
                 onDoubleClick={(e) => {
                   e.preventDefault();
@@ -408,7 +408,7 @@ export function ConversationItem({
               {showHotkeyIndex ? (
                 <span
                   aria-hidden
-                  className="w-3.5 shrink-0 text-center text-xs tabular-nums text-sidebar-foreground/40"
+                  className="w-3.5 shrink-0 text-center text-xs tabular-nums text-sidebar-muted"
                 >
                   {hotkeyIndex}
                 </span>
@@ -496,7 +496,7 @@ export function ConversationItem({
               ) : conversation.pinned ? (
                 <Pin
                   size={12}
-                  className="shrink-0 text-sidebar-foreground/40"
+                  className="shrink-0 text-sidebar-muted"
                   aria-label="已置顶"
                 />
               ) : null}

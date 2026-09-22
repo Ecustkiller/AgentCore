@@ -9,10 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentcore.core.types import (
-    CommandAxis,
-    FileWriteAxis,
-    HostAxis,
-    PermissionAxes,
+    WorkspaceBoundary,
     ToolApproval,
 )
 from agentcore.desktop.channel import DesktopClientChannel, HostOp, HostOpError
@@ -292,40 +289,52 @@ async def test_channel_maps_host_failure():
         await channel.request_host(HostOp.AUDIO_DEVICES)
 
 
-def test_host_tools_gated_on_host_axis_not_desktop_heartbeat():
-    names_off = {s.name for s in build_worker_registry(desktop_online=False).list_all()}
+def test_host_tools_gated_on_boundary_not_desktop_heartbeat():
+    computer = WorkspaceBoundary.COMPUTER
+    names_off = {
+        s.name
+        for s in build_worker_registry(
+            desktop_online=False, permission_axes=computer
+        ).list_all()
+    }
     assert "host" in names_off
     assert names_off.isdisjoint(_RETIRED_HOST_NAMES)
 
-    axes_off = PermissionAxes(
-        host=HostAxis.OFF,
-    )
-    names_axis_off = {
+    names_folder = {
         s.name
         for s in build_worker_registry(
-            desktop_online=True, permission_axes=axes_off
+            desktop_online=True, permission_axes=WorkspaceBoundary.FOLDER
         ).list_all()
     }
-    assert "host" not in names_axis_off
+    assert "host" not in names_folder
 
     names_on = {
-        s.name for s in build_worker_registry(desktop_online=True).list_all()
+        s.name
+        for s in build_worker_registry(
+            desktop_online=True, permission_axes=computer
+        ).list_all()
     }
     assert "host" in names_on
     assert names_on.isdisjoint(_RETIRED_HOST_NAMES)
 
     ceo_offline = {
         s.name
-        for s in build_ceo_tool_registry(desktop_online=False).list_all()
+        for s in build_ceo_tool_registry(
+            desktop_online=False, permission_axes=computer
+        ).list_all()
     }
     assert "host" in ceo_offline
     ceo = {
         s.name
-        for s in build_ceo_tool_registry(desktop_online=True).list_all()
+        for s in build_ceo_tool_registry(
+            desktop_online=True, permission_axes=computer
+        ).list_all()
     }
     assert "host" in ceo
     assert ceo.isdisjoint(_RETIRED_HOST_NAMES)
-    host_schema = build_ceo_tool_registry(desktop_online=True).get("host").schema
+    host_schema = build_ceo_tool_registry(
+        desktop_online=True, permission_axes=computer
+    ).get("host").schema
     assert host_schema.approval is ToolApproval.NEVER
 
 
@@ -399,18 +408,19 @@ def test_shell_silent_install_and_package_helpers():
 
 
 def test_host_stays_listed_without_desktop_online():
-    names_off = {s.name for s in build_worker_registry(desktop_online=False).list_all()}
+    names_off = {
+        s.name
+        for s in build_worker_registry(
+            desktop_online=False, permission_axes=WorkspaceBoundary.COMPUTER
+        ).list_all()
+    }
     assert "host" in names_off
     assert names_off.isdisjoint(_RETIRED_HOST_NAMES)
 
 
-def test_command_ask_keeps_host():
-    """command=ask withholds execution_class but must not strip Host."""
-    axes = PermissionAxes(
-        file_write=FileWriteAxis.ASK,
-        command=CommandAxis.ASK,
-        host=HostAxis.ASK,
-    )
+def test_computer_keeps_host_and_execution():
+    """这台电脑 includes host and run; 只看 includes neither."""
+    axes = WorkspaceBoundary.COMPUTER
     names = {
         s.name
         for s in build_worker_registry(
@@ -419,7 +429,15 @@ def test_command_ask_keeps_host():
     }
     assert "host" in names
     assert names.isdisjoint(_RETIRED_HOST_NAMES)
-    assert "code_execute" not in names
+    assert "run" in names
+    read_names = {
+        s.name
+        for s in build_worker_registry(
+            desktop_online=True, permission_axes=WorkspaceBoundary.READ
+        ).list_all()
+    }
+    assert "host" not in read_names
+    assert "run" not in read_names
 
     ceo = {
         s.name

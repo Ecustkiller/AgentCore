@@ -1,14 +1,12 @@
 """Sandbox → approval policy table (安全权限与治理 §二 / §三).
 
-Maps the workspace execution environment to whether GRANTABLE *execution-class*
-tools still need a human approval prompt. File-mutation tools: local workers
-always share the turn gate; cloud workers historically skipped per-call cards
-for server-sandbox tools — **except** when ``file_write=ask`` (谨慎), which
-must still prompt the file-mutation class on cloud (PermissionAxes 优先于
-历史云端免审).
+The conversation boundary decides whether execution and writes are in scope.
+In-boundary execution auto-passes. Out-of-boundary calls are refused, not
+prompted. Cloud workers still skip per-call cards for in-boundary server
+tools. ``read`` does not skip file writes — those calls are denied.
 
-Desktop Client Tools (MCP stdio / Host face) touch the user's machine even when
-the workspace is cloud — they still share the turn ApprovalGate.
+Desktop Client Tools (MCP) still share the turn ApprovalGate. Host is only
+assembled on ``computer``, and always-confirm shapes still prompt.
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from agentcore.config import settings
-from agentcore.core.types import PermissionAxes
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.runtime.always_confirm import requires_always_confirm
 
 if TYPE_CHECKING:
@@ -75,7 +73,7 @@ def cloud_worker_skips_per_call_gate(
     tool_name: str,
     *,
     arguments: dict[str, Any] | None = None,
-    permission_axes: PermissionAxes | None = None,
+    permission_axes: WorkspaceBoundary | None = None,
     file_op_tools: frozenset[str] = frozenset(),
 ) -> bool:
     """True when the cloud-worker path may drop ``needs_approval`` for this tool.
@@ -84,8 +82,8 @@ def cloud_worker_skips_per_call_gate(
     Desktop-touch (MCP / Host) never skip. 恒确认 shapes (``git push`` /
     ``create_pr`` / ``host(action=install_package)``) never skip — the cloud sandbox
     isolates the server, not the remote being published to. File-mutation class
-    under ``file_write=ask`` never skip (谨慎 must prompt reversible writes on
-    cloud). Other server-sandbox tools on cloud stay historically ungated.
+    under ``read`` never skip — those calls are denied. Other server-sandbox
+    tools on cloud stay historically ungated.
     """
     if worker_gate_applies(backend):
         return False
@@ -93,11 +91,13 @@ def cloud_worker_skips_per_call_gate(
         return False
     if requires_always_confirm(tool_name, arguments):
         return False
-    return not (
+    if (
         permission_axes is not None
-        and not permission_axes.trusts_file_writes
+        and not permission_axes.allows_write
         and tool_name in file_op_tools
-    )
+    ):
+        return False
+    return True
 
 
 def is_desktop_touch_tool(tool_name: str) -> bool:
@@ -118,7 +118,7 @@ def execution_tool_auto_passes(
     backend: WorkspaceBackend | None,
     tool_name: str,
     *,
-    permission_axes: PermissionAxes | None = None,
+    permission_axes: WorkspaceBoundary | None = None,
 ) -> bool:
     """True when the tool should skip the approval prompt via sandbox / command=auto.
 
@@ -134,6 +134,33 @@ def execution_tool_auto_passes(
     name = (tool_name or "").strip()
     if name not in execution_class_tool_names():
         return False
-    if permission_axes is not None and permission_axes.auto_executes:
-        return True
+    if permission_axes is not None:
+        return permission_axes.allows_execution
     return execution_approval_posture(backend) is ExecutionApprovalPosture.AUTO_PASS
+
+
+def boundary_block_message(
+    boundary: WorkspaceBoundary | None,
+    tool_name: str,
+) -> str | None:
+    """Deny copy when this call sits outside the conversation boundary.
+
+    In-boundary calls return ``None`` and follow the normal gate. There is no
+    per-step approval mode: outside the boundary the tool is refused.
+    """
+    if boundary is None:
+        return None
+    name = (tool_name or "").strip()
+    from agentcore.tools.builtin import file_mutation_tool_names
+    from agentcore.tools.registration import (
+        execution_class_tool_names,
+        host_class_tool_names,
+    )
+
+    if name in file_mutation_tool_names() and not boundary.allows_write:
+        return "这个对话的边界是只看，不能改文件。"
+    if name in execution_class_tool_names() and not boundary.allows_execution:
+        return "这个对话的边界是只看，不能跑命令。"
+    if name in host_class_tool_names() and not boundary.allows_host:
+        return "这个对话的边界不包括这台电脑。"
+    return None

@@ -15,6 +15,7 @@ function emptyRail(over: Partial<PromptRail> = {}): PromptRail {
   return {
     constitution: [],
     alwaysMine: [],
+    pathMine: [],
     folders: [],
     official: [],
     tools: [],

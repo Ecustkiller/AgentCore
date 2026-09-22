@@ -526,10 +526,10 @@ async def test_captain_deliverable_only_keeps_timeline_no_reset():
     )
 
 
-async def test_captain_coordination_wait_aside_not_in_deliverable():
-    """协调态进度旁白 + wait：deliverable_only 裁掉终稿 content，旁白仍进 process 流。
+async def test_captain_coordination_aside_not_in_deliverable():
+    """协调态进度旁白：deliverable_only 裁掉终稿 content，旁白仍进 process 流。
 
-    证明路径：content_delta 直播过程旁白；非终止 wait 后回退，最终 messages.content
+    证明路径：content_delta 直播过程旁白；非终止工具后回退，最终 messages.content
     只留交付段（阶段结论）。
     """
     from agentcore.runtime.coordination.session import (
@@ -537,7 +537,6 @@ async def test_captain_coordination_wait_aside_not_in_deliverable():
         clear_active_coordination,
         set_active_coordination,
     )
-    from agentcore.runtime.coordination.tools import WaitTool
 
     session = CoordinationSession(execution_id="e", total_workers=2)
     set_active_coordination(session)
@@ -546,14 +545,14 @@ async def test_captain_coordination_wait_aside_not_in_deliverable():
             [
                 [
                     _content_chunk("研究员还在检索，写手待启动。"),
-                    _tool_chunk("wait", '{"reason": "no disposition"}'),
+                    _tool_chunk("search", '{"q": "x"}'),
                 ],
                 [_content_chunk("阶段结论：调研已齐，开始合成。")],
             ]
         )
         sink = _RecordingSink()
         reg = ToolRegistry()
-        reg.register(WaitTool())
+        reg.register(_StubTool())
         content, _r, _u, _rounds = await react_loop(
             messages=[LLMMessage(role="user", content="go")],
             llm=provider,
@@ -1649,4 +1648,3 @@ async def test_worker_nested_lead_opening_has_replan_not_wait():
     opening = provider.names[0]
     assert "delegate" in opening
     assert "replan" in opening
-    assert "wait" not in opening

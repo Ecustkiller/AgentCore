@@ -205,10 +205,9 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
     from typing import Any
 
     from agentcore.core.types import (
-        AutonomyPolicy,
         ToolApproval,
         ToolFace,
-        recipe_to_axes,
+        WorkspaceBoundary,
     )
     from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
     from agentcore.runtime.approvals import ApprovalDecision
@@ -240,8 +239,8 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
             return ToolResult(tool_call_id="", success=True, output="wrote")
 
     class _SpyGate:
-        # file_write=ask（谨慎）：云端 worker 也不得免逐次卡。
-        permission_axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+        # 只看：越界写直接拒绝，写盘不得发生。闸对象仍要传到收口，否则没有边界可判。
+        permission_axes = WorkspaceBoundary.READ
         file_op_tools = frozenset({"write"})
 
         def __init__(self) -> None:
@@ -329,8 +328,8 @@ async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
             cutoff_reason_sink=[],
         )
 
-    assert gate.authorized == ["write"], "硬顶收口漏传审批闸 → GRANTABLE 绕卡落盘"
-    assert tool.executed is True
+    assert gate.authorized == []
+    assert tool.executed is False, "只看越界写不得落盘"
 
 
 async def _run_coordinated_worker(

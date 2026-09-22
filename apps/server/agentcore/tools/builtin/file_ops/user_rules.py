@@ -111,9 +111,9 @@ def _catalog_from_list_payload(
     payload: dict[str, Any], *, folder_id: str | None
 ) -> tuple[tuple[str, str, str], ...]:
     if folder_id:
-        keys = ("project_rules", "project_on_demand_rules")
+        keys = ("project_rules", "project_on_demand_rules", "project_path_rules")
     else:
-        keys = ("global_rules", "global_on_demand_rules")
+        keys = ("global_rules", "global_on_demand_rules", "global_path_rules")
     seen: set[str] = set()
     rows: list[tuple[str, str, str]] = []
     for key in keys:

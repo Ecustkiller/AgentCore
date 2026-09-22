@@ -135,29 +135,19 @@ def test_channel_profile_for_turn_drops_desktop_for_members():
     assert web.can_bind_folder is False
 
 
-def test_web_and_missing_header_ceo_registry_keeps_host():
-    """DeepSeek frozen tools: web / missing header still list ``host``; execute refuses."""
+def test_folder_boundary_omits_host_until_computer():
+    """Web and desktop share the folder roster. Host appears only on 这台电脑."""
+    from agentcore.core.types import WorkspaceBoundary
+
     web_names = {s.name for s in build_ceo_tool_registry(desktop_online=False).list_all()}
-    assert "host" in web_names
-
-    # Profile wiring: web / None → desktop_online False → same roster.
-    assert resolve_channel_profile("web").desktop_online is False
-    assert resolve_channel_profile(None).desktop_online is False
-    missing = {
+    assert "host" not in web_names
+    computer = {
         s.name
         for s in build_ceo_tool_registry(
-            desktop_online=resolve_channel_profile(None).desktop_online
+            desktop_online=False, permission_axes=WorkspaceBoundary.COMPUTER
         ).list_all()
     }
-    assert "host" in missing
-
-    desktop_names = {
-        s.name
-        for s in build_ceo_tool_registry(
-            desktop_online=resolve_channel_profile("desktop").desktop_online
-        ).list_all()
-    }
-    assert "host" in desktop_names
+    assert "host" in computer
 
 
 def test_birth_desk_facts_include_folder_id_without_tool_how():
@@ -229,7 +219,7 @@ def test_cloud_system_line_declares_guest_surface_when_run_on():
     system = _system_line(out)
     assert system.startswith("系统：")
     assert "Linux" in system
-    assert "bash" in system
+    assert "壳：bash" in system
     for name in CLOUD_GUEST_SURFACE:
         assert name in system
     assert "禁止" not in system
@@ -247,7 +237,7 @@ def test_cloud_system_line_omits_guest_surface_when_run_off():
     )
     system = _system_line(out)
     assert "Linux" in system
-    assert "bash" in system
+    assert "壳：bash" in system
     for name in CLOUD_GUEST_SURFACE:
         assert name not in system
 
@@ -329,16 +319,17 @@ def test_cloud_conv_root_stays_scratch_identity():
     assert "桌：workspace（云端文件夹）" not in out
 
 
-def test_cloud_host_off_capability():
-    from agentcore.core.types import HostAxis
+def test_folder_does_not_list_host_as_a_gap():
+    from agentcore.core.types import WorkspaceBoundary
 
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=True,
         run_enabled=False,
-        host_axis=HostAxis.OFF,
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
-    assert "host" in _gaps(out)
+    assert "host" not in _gaps(out)
+    assert "边界：这个文件夹" in out
     assert "客户端：桌面已连接" in out
     assert "客户端：未连接" not in out
     assert "桌面回填通道未连接" not in out
@@ -363,7 +354,7 @@ def test_no_desktop_host_unassembled():
         desktop_online=False,
         run_enabled=False,
     )
-    assert "host" in _gaps(out)
+    assert "host" not in _gaps(out)
     assert "客户端：未连接" in out
     assert "桌面回填通道未连接" not in out
     _assert_no_capability_restatements(out)
@@ -531,7 +522,7 @@ def test_host_mcp_unassembled_states_facts_and_defers_posture_to_core():
         run_enabled=False,
         browser_enabled=False,
     )
-    assert "host" in _gaps(out)
+    assert "host" not in _gaps(out)
     assert "mcp" in _gaps(out)
     assert "客户端：未连接" in out
     _assert_no_capability_restatements(out)
@@ -606,7 +597,7 @@ def test_channel_offline_self_claim_desktop_recheck_honesty():
         desktop_online=False,
         run_enabled=False,
     )
-    assert "host" in _gaps(out)
+    assert "host" not in _gaps(out)
     assert "local_open" in _gaps(out)
     assert "通道复检铁律" not in out
     assert "正在用客户端" not in out

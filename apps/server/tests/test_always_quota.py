@@ -240,6 +240,10 @@ async def test_measure_usage_entry_sum_equals_used_and_split():
                 return docs
             return docs  # None → both (here only user docs)
 
+        async def list_path_user_rules(self, user_id, folder_id):
+            del user_id, folder_id
+            return []
+
     usage_global = await measure_always_usage(FakeRepo(), "u", folder_id=None)  # type: ignore[arg-type]
     assert usage_global.used_chars == g_chars
     assert usage_global.global_chars == g_chars
@@ -268,6 +272,10 @@ async def test_measure_usage_counts_only_user_rules():
                 return [global_user]
             if folder_id == "F1":
                 return [project_user]
+            return []
+
+        async def list_path_user_rules(self, user_id, folder_id):
+            del user_id, folder_id
             return []
 
     usage = await measure_always_usage(FakeRepo(), "u", folder_id="F1")  # type: ignore[arg-type]

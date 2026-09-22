@@ -100,11 +100,11 @@ async def test_auto_grant_top_level_without_gate_is_noop():
 
 @pytest.mark.asyncio
 async def test_auto_grant_light_without_gate_is_noop():
-    from agentcore.core.types import AutonomyPolicy
+    from agentcore.core.types import WorkspaceBoundary
 
     class _Tool:
         _depth = 0
-        _permission_axes = AutonomyPolicy.LESS_INTERRUPT
+        _permission_axes = WorkspaceBoundary.FOLDER
         _pending_pause = False
         _base_tool_context = type("C", (), {"backend": None})()
         _approval_gate = None

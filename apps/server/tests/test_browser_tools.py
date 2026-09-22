@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from agentcore.config import settings
-from agentcore.core.types import AutonomyPolicy, ToolApproval, ToolFace, recipe_to_axes
+from agentcore.core.types import ToolApproval, ToolFace, WorkspaceBoundary
 from agentcore.runtime.browser.desktop_bridge import (
     reset_desktop_bridge_health_for_tests,
     set_desktop_bridge_health_for_tests,
@@ -204,7 +204,7 @@ def test_worker_registry_includes_browser_only_on_gvisor_cloud(tmp_path, monkeyp
     observe = {
         s.name
         for s in build_worker_registry(
-            backend=backend, permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+            backend=backend, permission_axes=WorkspaceBoundary.READ
         ).list_all()
     }
     assert not (_BROWSER_NAMES & observe)

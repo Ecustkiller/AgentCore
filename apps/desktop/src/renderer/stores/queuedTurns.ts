@@ -10,7 +10,7 @@ export interface QueuedTurnEntry {
   queueId: string;
   conversationId: string;
   /**
-   * 主时间线用户气泡 id（发送 ack 即入场并填写；取消顺带删泡）。
+   * 已落库的用户行 id。排队期间时间线不画这一行；取消用它删行；出队按它放进时间线。
    */
   messageId?: string;
   content: string;
@@ -36,8 +36,26 @@ export const TURN_QUEUE_ACCOUNT_SNAPSHOT_TYPE = "turn_queue_account_snapshot";
 
 interface QueuedTurnsState {
   byConversation: Record<string, QueuedTurnEntry[]>;
+  /**
+   * 这通对话的排队快照已经对过账（增量快照 / 本机 hydrate / 账号快照触及）。
+   * 未对账前，插话「将在下一条回复处理」不因队里暂时没有而收掉。
+   */
+  authoritativeIds: Record<string, true>;
+  /** ``turn_queued`` 已到、下一次快照还没到。这段窗口不把「队里没有」当成已取消。 */
+  staleIds: Record<string, true>;
+  /** 账号级云队快照已到过。云对话不在表里 = 队是空的。 */
+  cloudQueueReady: boolean;
   upsert: (entry: QueuedTurnEntry) => void;
   remove: (conversationId: string, queueId: string) => QueuedTurnEntry | null;
+  /** 本地改顺序。id 列表必须是当前集合，否则不动。 */
+  reorder: (conversationId: string, queueIds: string[]) => void;
+  /** 改一条的正文 / 附件 / @。不在队里则不动，返回 null。 */
+  patchPayload: (
+    conversationId: string,
+    queueId: string,
+    payload: Pick<QueuedTurnEntry, "content" | "attachments" | "agentMentions">,
+  ) => QueuedTurnEntry | null;
+  markQueueStale: (conversationId: string) => void;
   /** 增量快照权威替换（空数组 = 清这一条会话；禁止整表清空）。 */
   replaceConversation: (
     conversationId: string,
@@ -57,6 +75,17 @@ interface QueuedTurnsState {
 
 export const useQueuedTurnsStore = create<QueuedTurnsState>((set, get) => ({
   byConversation: {},
+  authoritativeIds: {},
+  staleIds: {},
+  cloudQueueReady: false,
+
+  markQueueStale: (conversationId) => {
+    if (!conversationId) return;
+    set((state) => {
+      if (state.staleIds[conversationId]) return state;
+      return { staleIds: { ...state.staleIds, [conversationId]: true } };
+    });
+  },
 
   upsert: (entry) =>
     set((state) => {
@@ -88,6 +117,47 @@ export const useQueuedTurnsStore = create<QueuedTurnsState>((set, get) => ({
     return hit;
   },
 
+  reorder: (conversationId, queueIds) =>
+    set((state) => {
+      const prev = state.byConversation[conversationId] ?? [];
+      if (prev.length === 0) return state;
+      if (queueIds.length !== prev.length) return state;
+      const byId = new Map(prev.map((entry) => [entry.queueId, entry]));
+      if (queueIds.some((id) => !byId.has(id))) return state;
+      const next = queueIds.map((id, index) => {
+        const entry = byId.get(id);
+        if (!entry) return null;
+        return {
+          ...entry,
+          position: index + 1,
+          queueDepth: queueIds.length,
+        };
+      });
+      if (next.some((entry) => entry == null)) return state;
+      return {
+        byConversation: {
+          ...state.byConversation,
+          [conversationId]: next as QueuedTurnEntry[],
+        },
+      };
+    }),
+
+  patchPayload: (conversationId, queueId, payload) => {
+    const prev = get().byConversation[conversationId] ?? [];
+    const hit = prev.find((entry) => entry.queueId === queueId) ?? null;
+    if (!hit) return null;
+    set((state) => ({
+      byConversation: {
+        ...state.byConversation,
+        [conversationId]: (state.byConversation[conversationId] ?? []).map(
+          (entry) =>
+            entry.queueId === queueId ? { ...entry, ...payload } : entry,
+        ),
+      },
+    }));
+    return hit;
+  },
+
   replaceConversation: (conversationId, entries) =>
     set((state) => {
       const byConversation = { ...state.byConversation };
@@ -98,20 +168,44 @@ export const useQueuedTurnsStore = create<QueuedTurnsState>((set, get) => ({
           (a, b) => a.position - b.position,
         );
       }
-      return { byConversation };
+      const staleIds = { ...state.staleIds };
+      delete staleIds[conversationId];
+      return {
+        byConversation,
+        staleIds,
+        authoritativeIds: {
+          ...state.authoritativeIds,
+          [conversationId]: true,
+        },
+      };
     }),
 
   replaceAll: (cloudByConversation, keepKey) =>
     set((state) => {
       const next: Record<string, QueuedTurnEntry[]> = {};
+      const authoritativeIds = { ...state.authoritativeIds };
+      const staleIds = { ...state.staleIds };
+      for (const id of Object.keys(state.byConversation)) {
+        if (keepKey(id)) continue;
+        authoritativeIds[id] = true;
+        delete staleIds[id];
+      }
       for (const [id, entries] of Object.entries(state.byConversation)) {
         if (keepKey(id)) next[id] = entries;
       }
       for (const [id, entries] of Object.entries(cloudByConversation)) {
-        if (keepKey(id) || entries.length === 0) continue;
+        if (keepKey(id)) continue;
+        authoritativeIds[id] = true;
+        delete staleIds[id];
+        if (entries.length === 0) continue;
         next[id] = [...entries].sort((a, b) => a.position - b.position);
       }
-      return { byConversation: next };
+      return {
+        byConversation: next,
+        authoritativeIds,
+        staleIds,
+        cloudQueueReady: true,
+      };
     }),
 
   clearConversation: (conversationId) =>
@@ -144,3 +238,25 @@ export function conversationHasQueuedTurns(
 }
 
 const EMPTY: QueuedTurnEntry[] = [];
+
+/**
+ * 插话仍标着 queued，但排队快照已经对过账、队里没有这条。
+ * 等待徽章不画。``turn_queued`` 到了、快照还没到的窗口不算已取消。
+ * 本机队只认这通对话自己的快照，不拿云账号空表当权威。
+ */
+export function useInterjectionQueueWithdrawn(
+  conversationId: string | null | undefined,
+  interjectionId: string | null | undefined,
+  localQueue: boolean,
+): boolean {
+  return useQueuedTurnsStore((s) => {
+    if (!conversationId || !interjectionId) return false;
+    if (s.staleIds[conversationId]) return false;
+    const authoritative =
+      s.authoritativeIds[conversationId] === true ||
+      (!localQueue && s.cloudQueueReady);
+    if (!authoritative) return false;
+    const items = s.byConversation[conversationId] ?? EMPTY;
+    return !items.some((e) => e.interjectionId === interjectionId);
+  });
+}

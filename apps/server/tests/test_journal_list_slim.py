@@ -113,7 +113,6 @@ def _assistant_row(*, usage=None):
         evidence_ledger=[],
         followups=[],
         cost=None,
-        feedback=None,
         trace_id=None,
     )
 

@@ -1,7 +1,7 @@
 """Cloud web-search fallback for the on-machine sidecar.
 
 When the sidecar's local SearXNG is unreachable it POSTs here with an inference
-JWT. The server runs the same SearXNG→Tavily backend as the built-in tool — keys
+JWT. The server runs the same SearXNG backend as the built-in tool — keys
 stay on the server; the client only sees structured results.
 """
 
@@ -83,7 +83,7 @@ async def inference_web_search(
     request: Request,
     user: User = Depends(inference_user),
 ) -> InferenceWebSearchResponse | JSONResponse:
-    """Run server-side web search for a sidecar turn (SearXNG→Tavily; no client keys)."""
+    """Run server-side web search for a sidecar turn (SearXNG; no client keys)."""
     conversation_id = request.headers.get(INFERENCE_CONVERSATION_HEADER) or None
     message_id = request.headers.get(INFERENCE_MESSAGE_HEADER) or None
     trace_id = request.headers.get(INFERENCE_TRACE_HEADER) or None

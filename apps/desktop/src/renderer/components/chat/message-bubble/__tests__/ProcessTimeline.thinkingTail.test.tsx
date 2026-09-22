@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * In-stream Thinking… tail: `shouldShowThinkingTail` is the exported gate.
- * Live chrome (running/wait tool, streaming reasoning/content,
+ * Live chrome (running tool, streaming reasoning/content,
  * composing tool, visible graph at tail, pending user gate) suppresses the tail.
  * The team marker is not live by itself.
  */
@@ -35,8 +35,6 @@ const toolDone: ProcessStep = {
 };
 const toolRunning: ProcessStep = { ...toolDone, status: "running" };
 const toolError: ProcessStep = { ...toolDone, status: "error" };
-const waitDone: ProcessStep = { ...toolDone, tool_name: "wait" };
-const waitRunning: ProcessStep = { ...waitDone, status: "running" };
 const team: ProcessStep = { kind: "team", execution_id: "e1" };
 const leftoverPlanReview = {
   kind: "plan_review",
@@ -107,10 +105,8 @@ describe("shouldShowThinkingTail", () => {
     ).toBe(false);
   });
 
-  it("suppresses a running tool, wait (running or settled), and streaming reasoning/content", () => {
+  it("suppresses a running tool and streaming reasoning/content", () => {
     expect(shouldShowThinkingTail({ ...live, last: toolRunning })).toBe(false);
-    expect(shouldShowThinkingTail({ ...live, last: waitDone })).toBe(false);
-    expect(shouldShowThinkingTail({ ...live, last: waitRunning })).toBe(false);
     expect(
       shouldShowThinkingTail({
         ...live,
@@ -125,7 +121,7 @@ describe("shouldShowThinkingTail", () => {
     ).toBe(false);
   });
 
-  it("shows after a settled non-wait tool, an empty tail, and other markers", () => {
+  it("shows after a settled tool, an empty tail, and other markers", () => {
     expect(shouldShowThinkingTail({ ...live, last: toolDone })).toBe(true);
     expect(shouldShowThinkingTail({ ...live, last: toolError })).toBe(true);
     expect(shouldShowThinkingTail({ ...live, last: undefined })).toBe(true);

@@ -374,17 +374,34 @@ async def lifespan(app: FastAPI):
     stream_state_retention_task = asyncio.create_task(stream_state_retention_loop())
 
     # Durable RUNNING lease sweeper (crash recover): claim heartbeat-expired leases and
-    # redrive unfinished DAG via recover_turn. Boot pass runs inside the loop.
+    # redrive unfinished DAG via recover_turn. The boot sweep is awaited here, before
+    # the unstarted FIFO is reloaded, so a recovering turn still owns the slot.
     # Install the DelegateTool factory BEFORE the sweeper so a boot reclaim can redrive
     # (not just salvage) unfinished workers.
     turn_lease_sweep_task: asyncio.Task | None = None
     if settings.turn_lease_enabled:
         from agentcore.conversation.crash_delegate import production_crash_delegate_factory
-        from agentcore.runtime.leases import turn_lease_sweep_loop
+        from agentcore.runtime.leases import run_turn_lease_sweep, turn_lease_sweep_loop
         from agentcore.runtime.recover_hooks import set_crash_delegate_factory
 
         set_crash_delegate_factory(production_crash_delegate_factory)
-        turn_lease_sweep_task = asyncio.create_task(turn_lease_sweep_loop())
+        # Reclaim killed turns before reloading the FIFO, so a recovering lease
+        # owns the slot and the queue does not start beside it.
+        try:
+            await run_turn_lease_sweep()
+        except Exception as e:  # noqa: BLE001 — boot continues; the loop retries
+            get_logger(__name__).warning("turn_lease.boot_sweep_failed", error=str(e))
+        turn_lease_sweep_task = asyncio.create_task(turn_lease_sweep_loop(boot=False))
+
+    from agentcore.runtime.turn.durable import (
+        install_postgres_turn_queue,
+        restore_durable_turn_queue,
+        turn_queue_durable_enabled,
+    )
+
+    if turn_queue_durable_enabled():
+        install_postgres_turn_queue(engine="cloud")
+        await restore_durable_turn_queue()
 
     # L3 团队浏览器 (M0): recycle idle / over-lifetime browser sandboxes (~1GB each).
     # Only when gVisor is available (browser is cloud-only + gVisor-gated); the lazy
@@ -430,6 +447,10 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         boot_log.info("server.shutdown", reason="lifespan")
+        from agentcore.runtime.turn.durable import flush_turn_queue_durable
+
+        with contextlib.suppress(Exception):
+            await flush_turn_queue_durable()
         # Signal the lag probe to stop *before* salvage: a 20s salvage busy-loop
         # would otherwise look like event-loop stall and spam event_loop.lag.
         # Do not await here — cancel of sleep(1) is enough to silence it; the

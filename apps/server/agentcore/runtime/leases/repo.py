@@ -115,6 +115,13 @@ class TurnLeaseRepository:
         await self._session.commit()
         return (result.rowcount or 0) > 0
 
+    async def list_for_conversation(self, conversation_id: str) -> Sequence[TurnLeaseRow]:
+        """Every lease still held on this conversation, local or cloud."""
+        result = await self._session.execute(
+            select(TurnLeaseRow).where(TurnLeaseRow.conversation_id == conversation_id)
+        )
+        return result.scalars().all()
+
     async def get(self, message_id: str) -> TurnLeaseRow | None:
         result = await self._session.execute(
             select(TurnLeaseRow).where(TurnLeaseRow.message_id == message_id)

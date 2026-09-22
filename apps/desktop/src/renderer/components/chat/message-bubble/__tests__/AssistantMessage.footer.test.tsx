@@ -120,9 +120,9 @@ vi.mock("@/services/turns/continuePaused", () => ({
 vi.mock("../AssistantMessageFooter", () => ({
   AssistantMessageFooter: () => <div data-testid="assistant-footer" />,
   AssistantMessageMetaSummary: () => null,
-  MessageMoreMenu: () => (
-    <button type="button" aria-label="更多">
-      更多
+  AssistantTurnInspect: () => (
+    <button type="button" aria-label="复制排查包">
+      复制排查包
     </button>
   ),
 }));
@@ -178,7 +178,7 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
     expect(screen.queryByRole("button", { name: "有帮助" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "更多" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
   });
 
   it("末条助手气泡已标 settle，但本轮 turnPhase 仍在写：不显示 footer", () => {

@@ -13,8 +13,10 @@ emits ``turn_queue_started`` as that sink's first frame (before ``message_start`
 If the waiting client disconnects mid-queue, the turn still starts detached (existing
 attach/recovery path); no new mechanism.
 
-Process-local (same posture as :mod:`.runs`). Restart drops
-the queue; durable recovery of queued content is out of scope for this slice.
+Process-local deque (same posture as :mod:`.runs`), mirrored to
+``turn_queue_items`` when a store is installed. A restart reloads unstarted
+items in order and resolves credentials again; it does not keep the enqueue-time
+key. A lease still held by crash recovery blocks that drain.
 
 多端 (云对话多端同权 B2 · 验收 5): the enqueueing POST is not the only观察端 any more —
 every enqueue also signals ``turn_queued`` to端 following the conversation (see
@@ -28,7 +30,8 @@ one account-level :func:`~agentcore.fulfill.user_signal.queue_account_snapshot_f
 usually looking at another conversation — or at another machine — so the
 display stream cannot be where it is learned. That push is why there is no
 client-side queue reconciliation any more: the snapshot lands on its own,
-positions already renumbered. The queue itself stays in-process.
+positions already renumbered. Unstarted items also sit in ``turn_queue_items``
+so a process restart can reload them.
 """
 
 from __future__ import annotations
@@ -80,7 +83,8 @@ class QueuedTurn:
     # turn would inherit that turn's device (see fulfill/origin.py).
     origin_device_id: str | None = None
     user_id: str = ""
-    # Preflight credentials resolved at enqueue time (billing gate already passed).
+    # Live drain uses the enqueue-time snapshot. A restored item leaves this empty
+    # and sets ``credentials_pending`` so start resolves the current key instead.
     llm_credentials: Any = None
     llm_supports_tools: bool | None = None
     # Set when this entry was promoted from a user interjection (协调升队 /
@@ -94,6 +98,10 @@ class QueuedTurn:
     user_message_id: str | None = None
     message_id: str | None = None
     trace_id: str | None = None
+    # Set only when the item was reloaded after a restart. Drain re-resolves
+    # credentials and must win the durable-row claim before starting.
+    credentials_pending: bool = False
+    durable_claim: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +168,9 @@ class TurnQueue:
     def __init__(self) -> None:
         self._queues: dict[str, deque[QueuedTurn]] = defaultdict(deque)
         self._drain_scheduled: set[str] = set()
+        # Edit, cancel, and drain share this so a save cannot commit the user row
+        # while pop_next is copying the previous text into the next turn.
+        self._mutation_locks: dict[str, asyncio.Lock] = {}
 
     def enqueue(self, conversation_id: str, item: QueuedTurn) -> QueueStatus:
         q = self._queues[conversation_id]
@@ -230,6 +241,8 @@ class TurnQueue:
                 "position": idx,
                 "interjection_id": item.interjection_id,
             }
+            if item.user_message_id:
+                row["user_message_id"] = item.user_message_id
             if item.attachments:
                 row["attachments"] = item.attachments
             if item.agent_mentions:
@@ -288,13 +301,16 @@ class TurnQueue:
         existing = turn_runs.get(conversation_id)
         if existing is None or existing.task.done():
             self.schedule_drain(conversation_id)
+        from agentcore.runtime.turn.durable import schedule_turn_queue_mirror
+
+        schedule_turn_queue_mirror(conversation_id, item.queue_id)
         return status
 
     def depth(self, conversation_id: str) -> int:
         return len(self._queues.get(conversation_id) or ())
 
     def list_pending(self, conversation_id: str) -> list[QueuedTurn]:
-        """FIFO snapshot of pending turns (process-local; empty after restart)."""
+        """FIFO snapshot of pending turns currently in this process."""
         q = self._queues.get(conversation_id)
         if not q:
             return []
@@ -343,6 +359,97 @@ class TurnQueue:
             return item
         return None
 
+    def reorder(self, conversation_id: str, queue_ids: list[str]) -> bool:
+        """Permute the pending FIFO. The id list must be exactly the current set.
+
+        Same order is a no-op success. A partial list, duplicate, or unknown id
+        leaves the queue untouched and returns False.
+        """
+        q = self._queues.get(conversation_id)
+        if not q:
+            return False
+        current = [item.queue_id for item in q]
+        if len(queue_ids) != len(current) or len(set(queue_ids)) != len(queue_ids):
+            return False
+        if set(queue_ids) != set(current):
+            return False
+        if queue_ids == current:
+            return True
+        by_id = {item.queue_id: item for item in q}
+        ordered = deque(by_id[qid] for qid in queue_ids)
+        self._queues[conversation_id] = ordered
+        logger.info(
+            "turn_queue.reordered",
+            conversation_id=conversation_id,
+            queue_depth=len(ordered),
+        )
+        self.push_snapshot(conversation_id, user_id=ordered[0].user_id)
+        return True
+
+    def mutation_lock(self, conversation_id: str) -> asyncio.Lock:
+        """Per-conversation lock for edit, withdraw, and drain pop."""
+        lock = self._mutation_locks.get(conversation_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._mutation_locks[conversation_id] = lock
+        return lock
+
+    def find_pending(self, conversation_id: str, queue_id: str) -> QueuedTurn | None:
+        q = self._queues.get(conversation_id)
+        if not q:
+            return None
+        for item in q:
+            if item.queue_id == queue_id:
+                return item
+        return None
+
+    def apply_edit(
+        self,
+        conversation_id: str,
+        queue_id: str,
+        *,
+        content: str,
+        attachments: list[dict[str, Any]],
+        agent_mentions: list[dict[str, Any]],
+    ) -> QueuedTurn | None:
+        """Replace one pending item's payload. Identity, order, and credentials stay.
+
+        Missing / already popped → None. Caller holds ``mutation_lock``.
+        """
+        item = self.find_pending(conversation_id, queue_id)
+        if item is None:
+            return None
+        item.content = content
+        item.attachments = list(attachments)
+        item.agent_mentions = list(agent_mentions)
+        logger.info(
+            "turn_queue.edited",
+            conversation_id=conversation_id,
+            queue_id=queue_id,
+            attachment_count=len(item.attachments),
+            mention_count=len(item.agent_mentions),
+        )
+        self.push_snapshot(conversation_id, user_id=item.user_id)
+        return item
+
+    def move_to_front(self, conversation_id: str, queue_id: str) -> QueuedTurn | None:
+        """Place one pending item at position 1. Missing id → None."""
+        q = self._queues.get(conversation_id)
+        if not q:
+            return None
+        ids = [item.queue_id for item in q]
+        if queue_id not in ids:
+            return None
+        if ids[0] == queue_id:
+            return q[0]
+        ordered = [queue_id, *[qid for qid in ids if qid != queue_id]]
+        if not self.reorder(conversation_id, ordered):
+            return None
+        front = self._queues.get(conversation_id)
+        if not front:
+            return None
+        return front[0]
+
     def pop_next(self, conversation_id: str) -> QueuedTurn | None:
         q = self._queues.get(conversation_id)
         if not q:
@@ -385,8 +492,16 @@ class TurnQueue:
         if turn_runs.has_resume_deferred(conversation_id):
             return
 
-        item = self.pop_next(conversation_id)
+        from agentcore.runtime.turn.durable import claim_durable_start, drain_blocked
+
+        async with self.mutation_lock(conversation_id):
+            if await drain_blocked(conversation_id):
+                return
+            item = self.pop_next(conversation_id)
         if item is None:
+            return
+        if not await claim_durable_start(item):
+            self.schedule_drain(conversation_id)
             return
 
         logger.info(
@@ -428,6 +543,17 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
 
     from .runs import turn_runs
 
+    if item.credentials_pending and item.user_id:
+        from agentcore.runtime.turn.durable import resolve_drain_credentials
+
+        credentials, supports = await resolve_drain_credentials(
+            item.user_id,
+            conversation_id,
+            needs_tools=item.requires_tools,
+        )
+        item.llm_credentials = credentials
+        item.llm_supports_tools = supports
+
     sink = EventSink()
     remaining_depth = turn_queue.depth(conversation_id)
     sink.emit(
@@ -436,6 +562,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
             conversation_id=conversation_id,
             remaining_depth=remaining_depth,
             content=item.content,
+            user_message_id=item.user_message_id,
             attachments=item.attachments or None,
             agent_mentions=item.agent_mentions or None,
         )

@@ -46,12 +46,12 @@ from agentcore.evals.types import EvalConfigError
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-ApplyMode = Literal["always", "on_demand"]
+ApplyMode = Literal["always", "on_demand", "paths"]
 Layer = Literal["user_rule"]
 
 _MANIFEST_NAME = "documents.json"
 _LAYERS = frozenset({"user_rule"})
-_APPLY_MODES = frozenset({"always", "on_demand"})
+_APPLY_MODES = frozenset({"always", "on_demand", "paths"})
 
 
 @dataclass(frozen=True)

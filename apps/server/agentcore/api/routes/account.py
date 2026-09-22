@@ -325,7 +325,7 @@ class AccountRuleDoc(BaseModel):
 
 
 class AccountRulesListResponse(BaseModel):
-    """Always rules for ``<设定>`` plus on_demand bodies for 规则目录 / ``consult``.
+    """Always rules for ``<设定>``, path rules for ``<路径约定>``, on_demand for consult.
 
     ``ancestor_*`` carry the enclosing folders' layers, outermost-first, and
     ``folder_chain`` is that same chain by id with the current folder last: the engine may
@@ -339,6 +339,9 @@ class AccountRulesListResponse(BaseModel):
     global_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
     project_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
     ancestor_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
+    global_path_rules: list[AccountRuleDoc] = Field(default_factory=list)
+    project_path_rules: list[AccountRuleDoc] = Field(default_factory=list)
+    ancestor_path_rules: list[AccountRuleDoc] = Field(default_factory=list)
     folder_chain: list[str] = Field(default_factory=list)
 
 
@@ -383,7 +386,7 @@ async def list_account_user_rules(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountRulesListResponse:
-    """User rules for turn assembly: always → ``<设定>``; on_demand → catalog + consult."""
+    """User rules for turn assembly: always → ``<设定>``; paths → index; on_demand → catalog."""
     repo = DocumentRepository(session)
     folder_chain: list[str] = []
     if body.folder_id:
@@ -398,14 +401,17 @@ async def list_account_user_rules(
 
     ancestor_docs: list[Document] = []
     ancestor_on_demand: list[Document] = []
+    ancestor_path: list[Document] = []
     for scope in ancestors:
         ancestor_docs += await repo.list_injectable_rules(
             user.user_id, scope, ai_maintained=False
         )
         ancestor_on_demand += await repo.list_on_demand_user_rules(user.user_id, scope)
+        ancestor_path += await repo.list_path_user_rules(user.user_id, scope)
 
     project_docs: Sequence[Document] = []
     project_on_demand: Sequence[Document] = []
+    project_path: Sequence[Document] = []
     if current_id:
         project_docs = await repo.list_injectable_rules(
             user.user_id, current_id, ai_maintained=False
@@ -413,6 +419,7 @@ async def list_account_user_rules(
         project_on_demand = await repo.list_on_demand_user_rules(
             user.user_id, current_id
         )
+        project_path = await repo.list_path_user_rules(user.user_id, current_id)
     return AccountRulesListResponse(
         global_rules=_rule_docs(
             await repo.list_injectable_rules(user.user_id, None, ai_maintained=False)
@@ -429,6 +436,9 @@ async def list_account_user_rules(
         ancestor_on_demand_rules=_on_demand_rule_docs(
             ancestor_on_demand, skip_names=set()
         ),
+        global_path_rules=_rule_docs(await repo.list_path_user_rules(user.user_id, None)),
+        project_path_rules=_rule_docs(project_path),
+        ancestor_path_rules=_rule_docs(ancestor_path),
         folder_chain=folder_chain,
     )
 
@@ -437,7 +447,7 @@ class AccountRuleWriteRequest(BaseModel):
     name: str
     content: str
     folder_id: str | None = None
-    apply: Literal["always", "on_demand"] | None = None
+    apply: Literal["always", "on_demand", "paths"] | None = None
     description: str | None = None
 
 

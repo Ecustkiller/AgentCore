@@ -1114,8 +1114,7 @@ def test_idle_yield_brief_pending_approval_forbids_wait(monkeypatch):
     assert "这是预期中的等待" not in brief
     assert "禁止" in brief or "勿" in brief
     assert "会继续" in brief or "报告阻塞" in brief
-    assert "听团" in brief or "wait" in brief
-    assert "【禁止】调用 wait" not in brief
+    assert "听团" in brief
     assert "保持静默，引导" not in brief
     assert "团队已取消" not in brief
     assert "调度已停" not in brief

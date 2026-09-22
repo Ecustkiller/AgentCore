@@ -281,6 +281,34 @@ describe("buildPromptRail", () => {
     ).not.toContain("短约束");
   });
 
+  it("路径条目单独成区，不进按需夹", () => {
+    const rail = buildPromptRail(
+      base,
+      buildMineCatalogRows(
+        [],
+        [
+          {
+            id: "p1",
+            name: "组件.md",
+            description: "组件用函数",
+            applyMode: "paths",
+            aiMaintained: false,
+            disputedAt: null,
+            alwaysChars: null,
+            parentId: "folder-1",
+          },
+        ],
+      ),
+      [{ id: "folder-1", name: "前端" }],
+      null,
+    );
+    expect(rail.pathMine.map((row) => row.label)).toEqual(["组件"]);
+    expect(
+      rail.folders.flatMap((folder) => folder.items.map((row) => row.label)),
+    ).not.toContain("组件");
+    expect(rail.alwaysMine).toEqual([]);
+  });
+
   it("用户按需文件进自己的夹，官方 HOW 不进用户夹", () => {
     const rail = buildPromptRail(
       {

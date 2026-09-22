@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentcore.runtime.events.chat import message_start
+from agentcore.runtime.events.chat import message_start, reused_user_row_from_events
 from agentcore.runtime.events.disposition import DURABLE_EVENT_TYPES
 from agentcore.runtime.events.interaction import interaction_orphaned
 from agentcore.runtime.events.stream_checkpointer import (
@@ -511,7 +511,16 @@ def synthesize_segment_deltas(
     return extra
 
 
-def replay_open_event(*, turn_id: str, conversation_id: str, full_replay: bool = True) -> SSEEvent:
+def replay_open_event(
+    *,
+    turn_id: str,
+    conversation_id: str,
+    full_replay: bool = True,
+    user_message_id: str | None = None,
+    content: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
+) -> SSEEvent:
     """Synthesize the ``message_start`` that opens, stamps + RESETS the replayed bubble.
 
     ``message_start`` is EPHEMERAL (never journaled, so :func:`journal_rows_to_sse`
@@ -540,7 +549,14 @@ def replay_open_event(*, turn_id: str, conversation_id: str, full_replay: bool =
     then keeps whatever they already have.
     """
     return message_start(
-        turn_id, conversation_id=conversation_id, trace_id="", full_replay=full_replay
+        turn_id,
+        conversation_id=conversation_id,
+        trace_id="",
+        full_replay=full_replay,
+        user_message_id=user_message_id,
+        content=content,
+        attachments=attachments,
+        agent_mentions=agent_mentions,
     )
 
 
@@ -589,7 +605,14 @@ def mark_full_replay_segment(
             continue
         out.append(event)
     if not stamped and turn_id:
-        out.insert(0, replay_open_event(turn_id=turn_id, conversation_id=conversation_id))
+        out.insert(
+            0,
+            replay_open_event(
+                turn_id=turn_id,
+                conversation_id=conversation_id,
+                **reused_user_row_from_events(events),
+            ),
+        )
     return out
 
 
@@ -671,6 +694,10 @@ async def build_cursor_replay(
     cursor_turn_id: str | None = None,
     memory_channels: dict[str, str],
     memory_agent_ids: dict[str, str],
+    user_message_id: str | None = None,
+    content: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
 ) -> list[SSEEvent]:
     """Durable journal + in-flight segment synthesis, shipped全量 or 增量.
 
@@ -739,7 +766,13 @@ async def build_cursor_replay(
 
     events = [
         replay_open_event(
-            turn_id=turn_id, conversation_id=conversation_id, full_replay=not incremental
+            turn_id=turn_id,
+            conversation_id=conversation_id,
+            full_replay=not incremental,
+            user_message_id=user_message_id,
+            content=content,
+            attachments=attachments,
+            agent_mentions=agent_mentions,
         )
     ]
     events.extend(journal_events)

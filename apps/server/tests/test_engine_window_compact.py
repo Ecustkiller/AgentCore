@@ -14,11 +14,13 @@ from agentcore.runtime.engine.window_compact import (
     SUMMARY_LEAD,
     apply_stored_window_compact,
     assistant_round_spans,
+    estimate_span_tokens,
     head_end,
     maybe_compact_worker_window,
     near_window_ceiling,
     preamble_end,
     project_compacted_window,
+    recency_keep_rounds,
     render_window_fold,
     select_new_fold_spans,
     window_compact_due,
@@ -50,20 +52,20 @@ def _round(i: int, *, path: str | None = None, body: str = "x") -> list[LLMMessa
     ]
 
 
-def _worker_window(n: int) -> list[LLMMessage]:
+def _worker_window(n: int, *, body: str | None = None) -> list[LLMMessage]:
     msgs = [
         LLMMessage(role="system", content="sys"),
         LLMMessage(role="user", content="task"),
     ]
     for i in range(n):
-        msgs.extend(_round(i, body=f"body-{i}"))
+        msgs.extend(_round(i, body=body if body is not None else f"body-{i}"))
     return msgs
 
 
 def test_production_window_compact_defaults() -> None:
     assert settings.engine_window_compact_enabled is True
     assert settings.engine_window_compact_prompt_tokens == 64_000
-    assert settings.engine_window_compact_recency_rounds == 2
+    assert settings.engine_window_compact_recency_token_budget == 24_000
     assert settings.engine_window_compact_min_fold_rounds == 4
     assert settings.engine_window_compact_trigger_fold_rounds == 8
     assert settings.engine_window_compact_max_fold_rounds == 12
@@ -83,27 +85,48 @@ def test_head_end_and_spans() -> None:
     assert spans[-1] == (6, 8)
 
 
-def test_select_keeps_recency_and_skips_already_folded() -> None:
+def test_select_keeps_two_rounds_when_both_fit_budget() -> None:
     msgs = _worker_window(8)
-    first = select_new_fold_spans(
-        msgs, recency_rounds=2, already_folded=0, min_fold_rounds=4
-    )
+    first = select_new_fold_spans(msgs, already_folded=0, min_fold_rounds=4)
     assert len(first) == 6
     assert first[0][0] == 2
-    nxt = select_new_fold_spans(
-        msgs, recency_rounds=2, already_folded=6, min_fold_rounds=1
-    )
+    nxt = select_new_fold_spans(msgs, already_folded=6, min_fold_rounds=1)
     assert nxt == []
     too_few = select_new_fold_spans(
-        _worker_window(5), recency_rounds=2, already_folded=0, min_fold_rounds=4
+        _worker_window(5), already_folded=0, min_fold_rounds=4
     )
     assert too_few == []
+    projected = project_compacted_window(msgs, summary="摘要", folded_rounds=6)
+    tool_bodies = [str(m.content) for m in projected if m.role == "tool"]
+    assert tool_bodies == ["body-6", "body-7"]
+
+
+def test_select_folds_earlier_round_when_two_exceed_budget() -> None:
+    """A pair of fat rounds does not get a hard keep-2; only the newest stays."""
+    fat = "Z" * 50_000
+    msgs = _worker_window(6, body=fat)
+    spans = assistant_round_spans(msgs, start=head_end(msgs))
+    newest = estimate_span_tokens(msgs, spans[-1])
+    previous = estimate_span_tokens(msgs, spans[-2])
+    assert newest + previous > settings.engine_window_compact_recency_token_budget
+    assert recency_keep_rounds(
+        msgs, spans, token_budget=settings.engine_window_compact_recency_token_budget
+    ) == 1
+    folded = select_new_fold_spans(msgs, already_folded=0, min_fold_rounds=4)
+    assert len(folded) == 5
+    assert folded[-1][1] == spans[-2][1]
+    projected = project_compacted_window(
+        msgs, summary="折了超预算的更早轮", folded_rounds=5
+    )
+    tool_bodies = [str(m.content) for m in projected if m.role == "tool"]
+    assert tool_bodies == [fat]
+    assert any("read f5.py" in str(m.content) for m in projected if m.role == "assistant")
 
 
 def test_project_replaces_prefix_with_summary_and_bridge() -> None:
     msgs = _worker_window(6)
     out = project_compacted_window(
-        msgs, summary="已读 f0–f3", folded_rounds=4, recency_rounds=2
+        msgs, summary="已读 f0–f3", folded_rounds=4
     )
     assert out is not msgs
     assert out[0].role == "system"
@@ -116,7 +139,7 @@ def test_project_replaces_prefix_with_summary_and_bridge() -> None:
     assert out[3].content == BRIDGE_USER
     assert out[4].role == "assistant"
     assert out[-1].role == "tool"
-    # Recency = last 2 rounds (4 messages) + summary/bridge.
+    # Folded 4 of 6: summary/bridge + last 2 rounds (4 messages).
     assert len(out) == 2 + 2 + 4
     roles = [m.role for m in out]
     for i in range(len(roles) - 1):
@@ -124,13 +147,23 @@ def test_project_replaces_prefix_with_summary_and_bridge() -> None:
             raise AssertionError("consecutive assistants")
 
 
-def test_project_does_not_eat_recency_when_watermark_is_high() -> None:
+def test_project_does_not_eat_newest_round_when_watermark_is_high() -> None:
     msgs = _worker_window(5)
     out = project_compacted_window(
-        msgs, summary="x", folded_rounds=99, recency_rounds=2
+        msgs, summary="x", folded_rounds=99
     )
-    # 5 rounds, recency 2 → fold at most 3.
-    assert len([m for m in out if m.role == "assistant" and m.tool_calls]) == 2
+    # 5 rounds, floor keep 1 → fold at most 4. No token estimate on project.
+    assert len([m for m in out if m.role == "assistant" and m.tool_calls]) == 1
+    assert any("read f4.py" in str(m.content) for m in out if m.role == "assistant")
+
+
+def test_project_honors_watermark_without_reestimating() -> None:
+    """Projection is the window loop: stored folded_rounds only, never a token recut."""
+    fat = "Z" * 50_000
+    msgs = _worker_window(6, body=fat)
+    out = project_compacted_window(msgs, summary="s", folded_rounds=4)
+    tool_bodies = [str(m.content) for m in out if m.role == "tool"]
+    assert tool_bodies == [fat, fat]
 
 
 def test_window_from_journal_ignores_compact_watermark() -> None:
@@ -336,6 +369,46 @@ async def test_maybe_compact_records_captain_and_worker(monkeypatch: pytest.Monk
         payload = log.entries()[-1]["payload"]
         assert payload["folded_rounds"] == 6
         assert payload["summary"].startswith("sum:")
+    finally:
+        current_fact_log.reset(token)
+        wc._cooldown_until_round.clear()
+
+
+@pytest.mark.asyncio
+async def test_maybe_compact_folds_over_budget_earlier_round(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentcore.runtime.engine import window_compact as wc
+
+    wc._cooldown_until_round.clear()
+
+    async def _fake(old: str, folded, **_kw) -> str:
+        return f"sum:{len(folded)}"
+
+    monkeypatch.setattr(wc, "_summarize_worker_fold", _fake)
+    fat = "Z" * 50_000
+    msgs = _worker_window(8, body=fat)
+    log = TurnFactLog()
+    token = current_fact_log.set(log)
+    try:
+        wrote = await maybe_compact_worker_window(
+            msgs,
+            run_id="w-fat",
+            role="worker",
+            round_idx=3,
+            last_prompt_tokens=80_000,
+            conversation_id="c1",
+            user_id="u1",
+            model_id=None,
+        )
+        assert wrote is True
+        payload = log.entries()[-1]["payload"]
+        assert payload["folded_rounds"] == 7
+        out = apply_stored_window_compact(msgs, "w-fat")
+        tool_bodies = [str(m.content) for m in out if m.role == "tool"]
+        assert tool_bodies == [fat]
+        assert any("read f7.py" in str(m.content) for m in out if m.role == "assistant")
+        assert str(out[2].content).startswith(SUMMARY_LEAD)
     finally:
         current_fact_log.reset(token)
         wc._cooldown_until_round.clear()

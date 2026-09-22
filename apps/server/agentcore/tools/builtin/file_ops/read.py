@@ -6,7 +6,7 @@ import json
 import time
 from typing import Any
 
-from agentcore.core.types import PermissionAxes, ToolApproval, ToolFace
+from agentcore.core.types import WorkspaceBoundary, ToolApproval, ToolFace
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -129,7 +129,7 @@ def _as_int(value: object) -> int:
     raise TypeError(f"expected int, got {type(value).__name__}")
 
 
-def _permission_axes_of(context: ToolContext) -> PermissionAxes | None:
+def _permission_axes_of(context: ToolContext) -> WorkspaceBoundary | None:
     """Parse ``ToolContext.permission_axes`` JSON; ``None`` if absent / unusable."""
     raw = getattr(context, "permission_axes", None)
     if not isinstance(raw, str) or not raw.strip():
@@ -137,7 +137,7 @@ def _permission_axes_of(context: ToolContext) -> PermissionAxes | None:
     try:
         data = json.loads(raw) if raw.lstrip().startswith("{") else None
         if isinstance(data, dict):
-            return PermissionAxes.from_mapping(data)
+            return WorkspaceBoundary.from_mapping(data)
     except (ValueError, TypeError, json.JSONDecodeError):
         return None
     return None

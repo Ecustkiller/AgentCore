@@ -269,7 +269,7 @@ async def test_approve_always_files_grants_whole_class():
     Uses always_ask so session file-trust does not short-circuit the file cards
     (that path is covered by test_session_file_trust_*).
     """
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     reg = InteractionRegistry()
     sink = EventSink()
@@ -288,7 +288,7 @@ async def test_approve_always_files_grants_whole_class():
         registry=reg,
         timeout_seconds=5.0,
         file_op_tools=file_ops,
-        permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS),
+        permission_axes=WorkspaceBoundary.READ,
     )
 
     # A write (the clicked card), a parallel edit, and a run.
@@ -865,7 +865,7 @@ async def test_delegation_grant_skips_run_approval():
 
 async def test_always_ask_policy_ignores_delegation_grant():
     """autonomy=always_ask（安全权限与治理 §二）：delegation grant 不短路——每个可授权调用仍出卡。"""
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     reg = InteractionRegistry()
     sink = EventSink()
@@ -875,7 +875,7 @@ async def test_always_ask_policy_ignores_delegation_grant():
         registry=reg,
         timeout_seconds=5.0,
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS),
+        permission_axes=WorkspaceBoundary.READ,
     )
     gate.grant_delegation("exec-1")
     assert gate.has_delegation_grant("exec-1")  # the grant exists…
@@ -926,7 +926,7 @@ def test_delegation_grantable_tool_names_includes_execution_and_file_ops():
 
 async def test_session_file_trust_skips_file_write_under_first_grant():
     """文件改动类会话信任，不必等 delegation grant（对齐 Composer 心智）。"""
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.tools.builtin import approval_class_tool_names
 
     reg = InteractionRegistry()
@@ -938,7 +938,7 @@ async def test_session_file_trust_skips_file_write_under_first_grant():
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
     decision = await gate.authorize(
@@ -952,7 +952,7 @@ async def test_session_file_trust_skips_file_write_under_first_grant():
 
 async def test_session_file_trust_still_prompts_permanent_delete():
     """永久删除不在会话文件信任内——仍出审批卡。"""
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.tools.builtin import approval_class_tool_names
 
     reg = InteractionRegistry()
@@ -964,7 +964,7 @@ async def test_session_file_trust_still_prompts_permanent_delete():
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
     resolver = asyncio.create_task(
@@ -982,7 +982,7 @@ async def test_session_file_trust_still_prompts_permanent_delete():
 
 async def test_session_file_trust_still_prompts_git_push():
     """Structured git push is remote publish — not covered by file_write=session."""
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.tools.builtin import approval_class_tool_names
 
     reg = InteractionRegistry()
@@ -994,7 +994,7 @@ async def test_session_file_trust_still_prompts_git_push():
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
     assert gate.will_prompt(
@@ -1019,12 +1019,7 @@ async def test_session_file_trust_still_prompts_git_push():
 
 async def test_delegation_grant_does_not_cover_git_push():
     """Kickoff/delegation grant covers git writes except push / create_pr."""
-    from agentcore.core.types import (
-        CommandAxis,
-        FileWriteAxis,
-        HostAxis,
-        PermissionAxes,
-    )
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.tools.builtin import approval_class_tool_names
 
     reg = InteractionRegistry()
@@ -1036,11 +1031,7 @@ async def test_delegation_grant_does_not_cover_git_push():
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=PermissionAxes(
-            file_write=FileWriteAxis.SESSION,
-            command=CommandAxis.AUTO,
-            host=HostAxis.ASK,
-        ),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
     gate.grant_delegation("exec-1")
     assert not gate.will_prompt(
@@ -1062,12 +1053,7 @@ async def test_delegation_grant_does_not_cover_git_push():
 
 async def test_session_host_trust_still_prompts_package_install():
     """host(action=install_package) is always-confirm — not covered by host=session."""
-    from agentcore.core.types import (
-        CommandAxis,
-        FileWriteAxis,
-        HostAxis,
-        PermissionAxes,
-    )
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.tools.registration import host_class_tool_names
 
     reg = InteractionRegistry()
@@ -1080,11 +1066,7 @@ async def test_session_host_trust_still_prompts_package_install():
         timeout_seconds=5.0,
         host_class_tools=host_tools,
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=PermissionAxes(
-            file_write=FileWriteAxis.SESSION,
-            command=CommandAxis.AUTO,
-            host=HostAxis.SESSION,
-        ),
+        permission_axes=WorkspaceBoundary.COMPUTER,
     )
 
     # Ordinary Host GRANTABLE action is session-trusted under host=session.
@@ -1116,11 +1098,7 @@ async def test_session_host_trust_still_prompts_package_install():
         registry=InteractionRegistry(),
         timeout_seconds=5.0,
         host_class_tools=host_tools,
-        permission_axes=PermissionAxes(
-            file_write=FileWriteAxis.SESSION,
-            command=CommandAxis.AUTO,
-            host=HostAxis.SESSION,
-        ),
+        permission_axes=WorkspaceBoundary.COMPUTER,
     )
     reg2 = gate2.registry
     resolver2 = asyncio.create_task(
@@ -1142,7 +1120,7 @@ async def test_session_host_trust_still_prompts_package_install():
 
 async def test_session_file_trust_does_not_cover_run():
     """执行类仍需 delegation grant / 逐次审批，不被文件会话信任短路。"""
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.tools.builtin import approval_class_tool_names
 
     reg = InteractionRegistry()
@@ -1154,7 +1132,7 @@ async def test_session_file_trust_does_not_cover_run():
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
     resolver = asyncio.create_task(
@@ -1172,7 +1150,7 @@ async def test_session_file_trust_does_not_cover_run():
 
 async def test_observe_policy_ignores_session_file_trust():
     """只观察：文件会话信任关闭，write 仍出卡。"""
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.tools.builtin import approval_class_tool_names
 
     reg = InteractionRegistry()
@@ -1184,7 +1162,7 @@ async def test_observe_policy_ignores_session_file_trust():
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS),
+        permission_axes=WorkspaceBoundary.READ,
     )
 
     resolver = asyncio.create_task(
@@ -1234,7 +1212,7 @@ def test_run_process_manage_skips_approval():
 
 def test_will_prompt_matrix_short_circuits_and_force():
     """will_prompt mirrors authorize opening short-circuits; force always prompts."""
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.runtime.approvals import DelegationGrant
     from agentcore.tools.builtin import approval_class_tool_names
 
@@ -1247,7 +1225,7 @@ def test_will_prompt_matrix_short_circuits_and_force():
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
     # Baseline: GRANTABLE with no short-circuit → would prompt.

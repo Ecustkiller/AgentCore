@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.runtime.audit.hooks import (
     bind_recorder,
     on_approval_resolved,
@@ -27,8 +27,8 @@ from agentcore.workspace.server import ServerWorkspace
 
 
 def test_permission_axes_changed_projection():
-    previous = {"file_write": "session", "command": "ask", "host": "off"}
-    next_axes = {"file_write": "session", "command": "auto", "host": "session"}
+    previous = {"boundary": "read"}
+    next_axes = {"boundary": "folder"}
     draft = project_permission_axes_changed(previous=previous, next_axes=next_axes)
     assert draft.category == "permission"
     assert draft.action == "permission.axes_changed"
@@ -82,7 +82,7 @@ async def test_approval_force_schedules_without_delegation():
 
 @pytest.mark.asyncio
 async def test_managed_bind_activates_and_snapshots_axes():
-    managed = recipe_to_axes(AutonomyPolicy.MANAGED)
+    managed = WorkspaceBoundary.FOLDER
     recorder, token = bind_recorder(
         user_id="u1",
         conversation_id=str(uuid4()),
@@ -175,7 +175,7 @@ async def test_code_execute_network_mode_follows_axes(tmp_path: Path):
         agent_id="a",
         backend=backend,
         user_id="u",
-        permission_axes="{\"file_write\":\"session\",\"command\":\"auto\",\"host\":\"session\"}",
+        permission_axes='{"boundary":"folder"}',
     )
     await execute_short(
         {"code": "print(1)", "language": "python"},
@@ -190,7 +190,7 @@ async def test_code_execute_network_mode_follows_axes(tmp_path: Path):
         agent_id="a",
         backend=backend,
         user_id="u",
-        permission_axes="{\"file_write\":\"ask\",\"command\":\"ask\",\"host\":\"off\"}",
+        permission_axes='{"boundary":"read"}',
     )
     await execute_short(
         {"code": "print(1)", "language": "python"},

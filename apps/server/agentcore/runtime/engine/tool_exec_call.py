@@ -806,6 +806,14 @@ async def run_one_tool(
     msg_content = with_file_products_marker(output, result.file_products)
     if not result.success:
         msg_content = with_tool_failed_marker(msg_content or "")
+    elif name in {"read", "write", "edit"} and isinstance(args, dict):
+        raw_path = args.get("file_path")
+        if isinstance(raw_path, str) and raw_path.strip():
+            from agentcore.documents.path_rules import path_rule_note
+
+            note = path_rule_note(getattr(context, "path_rules", ()), raw_path)
+            if note:
+                msg_content = f"{msg_content}\n{note}" if msg_content else note
     message = LLMMessage(
         role="tool",
         content=msg_content,

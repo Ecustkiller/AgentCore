@@ -5,21 +5,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from agentcore.core.types import (
-    AutonomyPolicy,
-    CommandAxis,
-    FileWriteAxis,
-    HostAxis,
-    PermissionAxes,
-    ToolEffect,
-    recipe_to_axes,
-)
+from agentcore.core.types import ToolEffect, WorkspaceBoundary
 
-_AUTO_AXES = PermissionAxes(
-    FileWriteAxis.SESSION,
-    CommandAxis.AUTO,
-    HostAxis.ASK,
-)
+_AUTO_AXES = WorkspaceBoundary.FOLDER
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.facts import TurnFactLog, current_fact_log
@@ -275,7 +263,7 @@ async def test_debate_full_auto_does_not_hang_preview():
         pass
 
     tool = _debate_tool(
-        sink, registry, _save, _drop, permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED)
+        sink, registry, _save, _drop, permission_axes=WorkspaceBoundary.FOLDER
     )
     # full_auto must not suspend before moderator.
     # Without LLM we can't finish moderator; patch _run_moderator.
@@ -320,7 +308,7 @@ async def test_delegate_full_auto_multi_skips_card():
         pass
 
     t = tool_durable(Provider(["AOUT", "BOUT"]), sink, registry, _save, _drop)
-    t._permission_axes = recipe_to_axes(AutonomyPolicy.MANAGED)
+    t._permission_axes = WorkspaceBoundary.FOLDER
     transcript = [
         LLMMessage(role="user", content="原始请求"),
         LLMMessage(

@@ -34,6 +34,7 @@ from agentcore.runtime.pipeline.errors import (
     remaining_prepare_local_io_budget,
     reset_prepare_local_io_deadline,
 )
+from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.pipeline.prepare import prepare_fresh_turn
 from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
@@ -279,13 +280,13 @@ async def test_prepare_aborts_desktop_offline_skips_llm(monkeypatch):
     monkeypatch.setattr(pipeline_pkg, "build_turn_router", _should_not_build)
 
     async def _empty_rules(*_a, **_k):
-        return ""
+        return TurnRuleView()
 
     async def _no_desk_label(*_a, **_k):
         return None
 
     monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.assemble_turn_rules", _empty_rules
+        "agentcore.runtime.pipeline.prepare.load_turn_rule_view", _empty_rules
     )
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label", _no_desk_label
@@ -325,13 +326,13 @@ async def test_prepare_aborts_root_not_held_skips_llm(monkeypatch):
         monkeypatch.setattr(pipeline_pkg, "build_turn_router", _should_not_build)
 
         async def _empty_rules(*_a, **_k):
-            return ""
+            return TurnRuleView()
 
         async def _no_desk_label(*_a, **_k):
             return None
 
         monkeypatch.setattr(
-            "agentcore.runtime.pipeline.prepare.assemble_turn_rules",
+            "agentcore.runtime.pipeline.prepare.load_turn_rule_view",
             _empty_rules,
         )
         monkeypatch.setattr(

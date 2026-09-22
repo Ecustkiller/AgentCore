@@ -27,7 +27,7 @@
  * `installerSource=github`——安装包走 GitHub，不经 electron-updater）。
  * 切对话消息窗诊断（落 desktop.jsonl；复制排查包收成 ``routine:`` 普查，warn 仍逐条）：`conversation.slice_diag`（`action`=
  * `message_end_slice_kept` / `release_drop`（仅显式 API）/ `warm_skip_reconcile`
- *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /
+ *（仅 generating）/ `warm_keep_anchor`（pendingFocus）/ `warm_snap_latest` /
  * `load_latest_window` / `open_decide` / `reject_not_resident` /
  * `reject_generating` / `reject_active_has_more_after` / `reject_empty_window` 等）。
  * 发送占位诊断（临时）：`send.assistant_placeholder`（`action`=`reuse`|`mint`，

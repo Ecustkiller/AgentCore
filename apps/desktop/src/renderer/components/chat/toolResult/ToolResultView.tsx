@@ -206,8 +206,6 @@ export function hasToolResultBody(d: ToolResultData): boolean {
   if (isSuccessfulHandoff(d.toolName, d.status)) {
     return hasDebriefDetails(debriefFromHandoffArgs(d.args));
   }
-  // Successful wait: receipt-only — one line, no chevron (same as summary-only handoff).
-  if (d.toolName === "wait" && d.status === "success") return false;
   const diagForBody = extractCodeDiagnostics(d.display);
   if (d.toolName === "code_diagnostics" && diagForBody) {
     if (

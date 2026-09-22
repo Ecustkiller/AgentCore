@@ -57,8 +57,8 @@ describe("conversationIdFromHash", () => {
     expect(conversationIdFromHash("#/conversations/abc/turn/t1")).toBe("abc");
   });
 
-  it("ignores the msg query anchor", () => {
-    expect(conversationIdFromHash("#/conversations/abc?msg=m1")).toBe("abc");
+  it("stops the id before a query string", () => {
+    expect(conversationIdFromHash("#/conversations/abc?x=1")).toBe("abc");
   });
 
   it("returns null off the conversation route", () => {

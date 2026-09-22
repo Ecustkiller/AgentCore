@@ -1,17 +1,34 @@
+import { useLiveCoordinatingTurn } from "@/lib/composerDelivery";
 import { renderInlineLabels } from "@/lib/inlineBody";
 import { notifyError } from "@/lib/toast";
 import {
   cancelQueuedTurn,
-  steerQueuedTurn,
+  reorderQueuedTurns,
+  stopAndSendQueuedTurn,
 } from "@/services/turns/cancelQueuedTurn";
 import { type QueuedTurnEntry, useQueuedTurns } from "@/stores/queuedTurns";
-import { Loader2, X } from "lucide-react";
-import { useState } from "react";
+import { GripVertical, Loader2, X } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import {
+  QueuedTurnEditor,
+  pendingAttachments,
+  pendingMentions,
+} from "./QueuedTurnEditor";
+import {
+  type PendingAgentMention,
+  type PendingAttachment,
+} from "./message-input/composerAttachments";
+
+interface QueueEditDraft {
+  content: string;
+  attachments: PendingAttachment[];
+  mentions: PendingAgentMention[];
+}
 
 /**
- * 排队条：drain 前可按项取消或立刻插队（Stop ≠ 取消排队）。
- * 挂在 composer 上方；正文在主时间线用户泡（ack 即入场），条不是唯一载体。
- * 本端发送 ack 即时 upsert；快照对账兜底。
+ * 排队挂件：生成中再发先挂在输入框上方。
+ * 点行编辑正文、附件和 @；停止并发送 / 取消都在这里；两条以上可拖动改顺序。
+ * 时间线用户泡等到出队再出现，所以单条也画，不跟气泡重复一套按钮。
  */
 export function QueuedTurnsBar({
   conversationId,
@@ -19,7 +36,65 @@ export function QueuedTurnsBar({
   conversationId: string | null;
 }) {
   const items = useQueuedTurns(conversationId);
-  if (!conversationId || items.length === 0) return null;
+  const teamLive = useLiveCoordinatingTurn();
+  const [session, setSession] = useState<{
+    queueId: string;
+    detached: boolean;
+  } | null>(null);
+  const draftRef = useRef<QueueEditDraft | null>(null);
+  const discard = useCallback(() => {
+    draftRef.current = null;
+    setSession(null);
+  }, []);
+  const live = session
+    ? items.find((item) => item.queueId === session.queueId)
+    : undefined;
+  const orphan = Boolean(session && (session.detached || !live));
+  if (!conversationId || (items.length === 0 && !session)) return null;
+  const stopSendLabel = teamLive ? "停掉团队并发送" : "停止并发送";
+
+  const onDropOn = (targetId: string, draggedId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+    const ids = items.map((item) => item.queueId);
+    const without = ids.filter((id) => id !== draggedId);
+    const index = without.indexOf(targetId);
+    if (index < 0) return;
+    without.splice(index, 0, draggedId);
+    void reorderQueuedTurns(conversationId, without).catch((err) => {
+      notifyError(err, "调整排队顺序失败");
+    });
+  };
+
+  const openEdit = (item: QueuedTurnEntry) => {
+    draftRef.current = {
+      content: item.content,
+      attachments: pendingAttachments(item.attachments ?? []),
+      mentions: pendingMentions(item.agentMentions ?? []),
+    };
+    setSession({ queueId: item.queueId, detached: false });
+  };
+
+  const draft = draftRef.current;
+  const editor =
+    session && draft ? (
+      <QueuedTurnEditor
+        key={session.queueId}
+        conversationId={conversationId}
+        queueId={session.queueId}
+        initialContent={draft.content}
+        initialAttachments={draft.attachments}
+        initialMentions={draft.mentions}
+        detached={session.detached || !live}
+        draftRef={draftRef}
+        onDiscard={discard}
+        onSaved={discard}
+        onDetached={() =>
+          setSession((current) =>
+            current ? { ...current, detached: true } : current,
+          )
+        }
+      />
+    ) : null;
 
   return (
     <div
@@ -28,19 +103,45 @@ export function QueuedTurnsBar({
       aria-live="polite"
       aria-label={`已排队 ${items.length} 条`}
     >
+      {orphan ? editor : null}
       {items.length > 1 && (
         <div className="px-2 text-xs text-muted-foreground">
           已排队 {items.length} 条
         </div>
       )}
-      {items.map((item) => (
-        <QueuedTurnRow key={item.queueId} item={item} />
-      ))}
+      {items.map((item) => {
+        if (session?.queueId === item.queueId) {
+          if (orphan) return null;
+          return <div key={item.queueId}>{editor}</div>;
+        }
+        return (
+          <QueuedTurnRow
+            key={item.queueId}
+            item={item}
+            canDrag={items.length > 1 && !session}
+            stopSendLabel={stopSendLabel}
+            onDropOn={onDropOn}
+            onEdit={() => openEdit(item)}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
+function QueuedTurnRow({
+  item,
+  canDrag,
+  stopSendLabel,
+  onDropOn,
+  onEdit,
+}: {
+  item: QueuedTurnEntry;
+  canDrag: boolean;
+  stopSendLabel: string;
+  onDropOn: (targetId: string, draggedId: string) => void;
+  onEdit: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const previewText = renderInlineLabels(
     item.content,
@@ -51,27 +152,13 @@ function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
     previewText.length > 48 ? `${previewText.slice(0, 48)}…` : previewText;
   const fromInterjection = Boolean(item.interjectionId);
 
-  const onCancel = async () => {
+  const run = async (action: () => Promise<unknown>, failure: string) => {
     if (busy) return;
     setBusy(true);
     try {
-      await cancelQueuedTurn(item.conversationId, item.queueId);
-      // 成功 / 404 已在 cancelQueuedTurn 内本地清条。
+      await action();
     } catch (err) {
-      notifyError(err, "取消排队失败");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onSteer = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await steerQueuedTurn(item.conversationId, item.queueId);
-      // toast：steer ack / 降级排队由 SSE → queuedNotify；勿本地伪装「已插入」。
-    } catch (err) {
-      notifyError(err, "插队失败");
+      notifyError(err, failure);
     } finally {
       setBusy(false);
     }
@@ -83,25 +170,64 @@ function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
       data-testid="queued-turn-row"
       data-queue-id={item.queueId}
       data-from-interjection={fromInterjection ? "true" : undefined}
+      onDragOver={
+        canDrag
+          ? (event) => {
+              event.preventDefault();
+            }
+          : undefined
+      }
+      onDrop={
+        canDrag
+          ? (event) => {
+              event.preventDefault();
+              const draggedId = event.dataTransfer.getData("text/plain");
+              onDropOn(item.queueId, draggedId);
+            }
+          : undefined
+      }
     >
-      <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">
+      {canDrag ? (
+        <span
+          draggable
+          className="shrink-0 cursor-grab text-muted-foreground"
+          aria-label="拖动调整顺序"
+          data-testid="queued-turn-drag"
+          onDragStart={(event) => {
+            event.dataTransfer.setData("text/plain", item.queueId);
+            event.dataTransfer.effectAllowed = "move";
+          }}
+        >
+          <GripVertical size={12} aria-hidden />
+        </span>
+      ) : (
+        <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden />
+      )}
+      <button
+        type="button"
+        className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="queued-turn-edit"
+        aria-label={`编辑排队：${preview}`}
+        onClick={onEdit}
+      >
         排队中
-        {item.queueDepth > 1
-          ? `（第 ${item.position}/${item.queueDepth}）`
-          : ""}
         {fromInterjection ? " · 来自你的插话" : ""}：{preview}
-      </span>
+      </button>
       <button
         type="button"
         className="shrink-0 rounded-lg px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-        aria-label="立刻插队"
-        title="取消排队并以插队重发；下一工具步生效，不会立刻打断当前输出"
+        aria-label={stopSendLabel}
+        title="停掉当前回合，这条马上开跑；排在后面的仍留在队里"
         disabled={busy}
-        data-testid="queued-turn-steer"
-        onClick={() => void onSteer()}
+        data-testid="queued-turn-stop-send"
+        onClick={() =>
+          void run(
+            () => stopAndSendQueuedTurn(item.conversationId, item.queueId),
+            "停止并发送失败",
+          )
+        }
       >
-        立刻插队
+        {stopSendLabel}
       </button>
       <button
         type="button"
@@ -110,7 +236,12 @@ function QueuedTurnRow({ item }: { item: QueuedTurnEntry }) {
         title="取消排队"
         disabled={busy}
         data-testid="queued-turn-cancel"
-        onClick={() => void onCancel()}
+        onClick={() =>
+          void run(
+            () => cancelQueuedTurn(item.conversationId, item.queueId),
+            "取消排队失败",
+          )
+        }
       >
         <X size={12} />
       </button>

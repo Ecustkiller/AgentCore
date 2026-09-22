@@ -347,3 +347,112 @@ async def build_fold_file_ledger(turn_ids: Sequence[str]) -> str:
     """Deterministic file list for a compaction fold window, or ``\"\"``."""
     items = await load_working_set_items(turn_ids=turn_ids)
     return render_file_ledger(items)
+
+
+# Fold summarizer: clipped tool I/O (not replayed into the live chat window).
+MAX_FOLD_TOOL_TRACES = 48
+_COMMAND_ARG_KEYS = ("command",)
+_ERROR_CLIP = 160
+
+
+@dataclass(frozen=True, slots=True)
+class FoldToolTrace:
+    """One journal tool_call row clipped later by ``render_tool_traces``."""
+
+    name: str
+    arguments: str
+    result: str
+    success: bool
+
+
+def _command_from_arguments(arguments: str) -> str:
+    data = _parse_arguments(arguments)
+    for key in _COMMAND_ARG_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return _one_line(value)[:_ERROR_CLIP]
+    return ""
+
+
+def _error_from_result(result: str, *, success: object) -> str:
+    if _success(success):
+        return ""
+    text = _one_line(result)
+    return text[:_ERROR_CLIP] if text else ""
+
+
+def identity_items_from_traces(
+    traces: Sequence[FoldToolTrace],
+) -> tuple[list[str], list[str]]:
+    """Paths (file tools) and commands/errors from clipped fold traces."""
+    paths: list[str] = []
+    commands: list[str] = []
+    seen_p: set[str] = set()
+    seen_c: set[str] = set()
+    for row in traces:
+        item = item_from_tool_call(
+            name=row.name, arguments=row.arguments, success=row.success
+        )
+        if item is not None and item.path not in seen_p:
+            seen_p.add(item.path)
+            paths.append(item.path)
+        command = _command_from_arguments(row.arguments)
+        if command and command not in seen_c:
+            seen_c.add(command)
+            commands.append(command)
+        err = _error_from_result(row.result, success=row.success)
+        if err and err not in seen_c:
+            seen_c.add(err)
+            commands.append(err)
+    return paths, commands
+
+
+async def load_fold_tool_traces(turn_ids: Sequence[str]) -> list[FoldToolTrace]:
+    """Journal tool_call rows for folded assistant turns (includes result body)."""
+    ids = [str(t).strip() for t in turn_ids if str(t).strip()]
+    if not ids:
+        return []
+    from sqlalchemy import text
+
+    from agentcore.db.base import async_session_factory
+
+    id_ph = ", ".join(f":t{i}" for i in range(len(ids)))
+    params: dict[str, Any] = {f"t{i}": t for i, t in enumerate(ids)}
+    params["lim"] = MAX_FOLD_TOOL_TRACES
+    sql = f"""
+        SELECT payload->>'name' AS name,
+               payload->>'arguments' AS arguments,
+               payload->>'result' AS result,
+               COALESCE(payload->>'success', 'true') AS success
+        FROM turn_journal
+        WHERE turn_id IN ({id_ph})
+          AND kind = 'tool_call'
+        ORDER BY created_at ASC, band ASC, seq ASC
+        LIMIT :lim
+    """
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(text(sql), params)
+            rows = result.all()
+    except Exception:  # noqa: BLE001 — fold enrichment must never break compact
+        logger.warning("working_set.fold_traces_failed")
+        return []
+    traces: list[FoldToolTrace] = []
+    for row in rows:
+        traces.append(
+            FoldToolTrace(
+                name=str(row[0] or ""),
+                arguments=str(row[1] or ""),
+                result=str(row[2] or ""),
+                success=_success(row[3]),
+            )
+        )
+    return traces
+
+
+async def build_fold_tool_traces(turn_ids: Sequence[str]) -> str:
+    """Clipped tool-trace block for the summarizer, or ``\"\"``."""
+    from agentcore.conversation.compact_prompt import render_tool_traces
+
+    return render_tool_traces(await load_fold_tool_traces(turn_ids))
+

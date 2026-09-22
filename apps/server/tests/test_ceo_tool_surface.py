@@ -1,8 +1,8 @@
-"""CEO tool-surface: wait/replan on the opening table; idle fails at execute.
+"""CEO tool-surface: replan and root control tools on the opening table.
 
-Root CEO (depth 0) opening table includes delegate + ask_user + debate + wait suite
-+ replan. Nested leads get replan without the parent wait suite. Never demote
-mid-chain (prefix cache).
+Root CEO (depth 0) opening table includes delegate + ask_user + debate + the
+control tools + replan. Nested leads get replan without the parent control
+tools. Idle calls fail at execute. Never demote mid-chain (prefix cache).
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.resolve.ceo_surface import (
     COORDINATION_GATED_TOOLS,
-    COORDINATION_PERIOD_HINT,
     coordination_surface_active,
     promote_coordination_surface_if_needed,
     register_coordination_surface,
@@ -89,7 +88,7 @@ def test_solo_worker_enters_coordination_surface():
 
 
 def test_idle_surface_keeps_gated_tools_on_opening_table():
-    """Idle still offers wait/replan; execute is the gate (prefix cache)."""
+    """Idle still offers the control tools and replan; execute is the gate."""
     reg = ToolRegistry()
     delegate = _fake_delegate()
     reg.register(delegate)
@@ -128,8 +127,8 @@ def test_coordination_surface_includes_gated_tools():
         current_execution_id.reset(token)
 
 
-def test_promote_on_root_delegate_adds_wait_suite_and_replan():
-    """Root CEO (depth 0) opening table includes wait suite even before a live graph."""
+def test_promote_on_root_delegate_adds_control_tools_and_replan():
+    """Root CEO (depth 0) opening table includes control tools even before a live graph."""
     reg = ToolRegistry()
     delegate = _fake_delegate(supervised=True)
     reg.register(delegate)
@@ -138,7 +137,7 @@ def test_promote_on_root_delegate_adds_wait_suite_and_replan():
     names = set(reg.names)
     assert "replan" in names
     assert "delegate" in names
-    assert "wait" in names
+    assert "cancel_worker" in names
 
 
 def test_promote_on_coordination_adds_full_surface():
@@ -160,7 +159,7 @@ def test_promote_on_coordination_adds_full_surface():
         current_execution_id.reset(token)
 
 
-def test_harvest_close_keeps_replan_and_wait_suite():
+def test_harvest_close_keeps_replan_and_control_tools():
     """批次收口后会话关掉也不摘表——idle 调用在 execute 失败。"""
     eid = "exec-harvest-keep"
     token = current_execution_id.set(eid)
@@ -171,7 +170,7 @@ def test_harvest_close_keeps_replan_and_wait_suite():
         reg.register(delegate)
         assert promote_coordination_surface_if_needed(reg) is True
         assert "replan" in reg.names
-        assert "wait" in reg.names
+        assert "cancel_worker" in reg.names
 
         clear_active_coordination()
         assert promote_coordination_surface_if_needed(reg) is False
@@ -183,8 +182,8 @@ def test_harvest_close_keeps_replan_and_wait_suite():
         current_execution_id.reset(token)
 
 
-def test_partial_failure_keeps_wait_suite_on_table():
-    """部分失败 stash：计划还开着；会话关掉也不摘 wait（前缀缓存）。"""
+def test_partial_failure_keeps_control_tools_on_table():
+    """部分失败 stash：计划还开着；会话关掉也不摘控制面（前缀缓存）。"""
     eid = "exec-partial-stash"
     token = current_execution_id.set(eid)
     try:
@@ -193,13 +192,12 @@ def test_partial_failure_keeps_wait_suite_on_table():
         delegate = _fake_delegate()
         reg.register(delegate)
         assert promote_coordination_surface_if_needed(reg) is True
-        assert "wait" in reg.names
+        assert "cancel_worker" in reg.names
 
         delegate._supervised = object()
         clear_active_coordination()
         assert promote_coordination_surface_if_needed(reg) is False
         assert "replan" in reg.names
-        assert "wait" in reg.names
         assert "cancel_worker" in reg.names
     finally:
         clear_active_coordination()
@@ -221,8 +219,8 @@ def test_register_include_false_does_not_drop_gated_tools():
     assert set(reg.names) >= COORDINATION_GATED_TOOLS
 
 
-def test_ensure_before_llm_installs_wait_when_coordination_live():
-    """验收钉：协调已活 → 进入 LLM 前 wait 已在工具面（prepare / mid-turn 对齐）。"""
+def test_ensure_before_llm_installs_control_tools_when_coordination_live():
+    """验收钉：协调已活 → 进入 LLM 前控制面已在工具表（prepare / mid-turn 对齐）。"""
     from agentcore.runtime.resolve.ceo_surface import ensure_coordination_surface_before_llm
 
     eid = "exec-ensure-before-llm"
@@ -232,14 +230,14 @@ def test_ensure_before_llm_installs_wait_when_coordination_live():
         reg = ToolRegistry()
         delegate = _fake_delegate()
         reg.register(delegate)
-        assert "wait" not in reg.names
+        assert "cancel_worker" not in reg.names
 
         assert ensure_coordination_surface_before_llm(reg) is True
-        assert "wait" in reg.names
+        assert "cancel_worker" in reg.names
         assert set(reg.names) >= COORDINATION_GATED_TOOLS
         # 再次调用不重复注册
         assert ensure_coordination_surface_before_llm(reg) is False
-        assert "wait" in reg.names
+        assert "cancel_worker" in reg.names
     finally:
         clear_active_coordination()
         current_execution_id.reset(token)
@@ -248,8 +246,8 @@ def test_ensure_before_llm_installs_wait_when_coordination_live():
 def test_member_never_gets_coordination_suite_from_parent_session():
     """回归钉：队员不得因父图协调活跃而拿到 CEO 协调工具面。
 
-    队员 allowed_tools=None（不限名单），注册即被 offer——真实日志里 depth=1 的
-    审计员拿到了 wait / cancel_worker / resolve_escalation。
+    队员 allowed_tools=None（不限名单），注册即被 offer——depth=1 不得拿到
+    cancel_worker / resolve_escalation。
     """
     eid = "exec-parent-graph"
     token = current_execution_id.set(eid)
@@ -261,7 +259,6 @@ def test_member_never_gets_coordination_suite_from_parent_session():
 
         assert promote_coordination_surface_if_needed(reg) is True
         assert "replan" in reg.names
-        assert "wait" not in reg.names
         assert "cancel_worker" not in reg.names
         assert "resolve_escalation" not in reg.names
     finally:
@@ -276,22 +273,20 @@ def test_nested_lead_still_gets_replan_on_supervised_yield():
 
     assert promote_coordination_surface_if_needed(reg) is True
     assert "replan" in reg.names
-    # 但父图的协调四件套仍然不归它
-    assert "wait" not in reg.names
     assert "cancel_worker" not in reg.names
 
 
-def test_nested_lead_opening_includes_replan_without_wait():
-    """嵌套 lead 开场就有 replan；wait 仍是父图的杠杆。Idle 调用在 execute 失败。"""
+def test_nested_lead_opening_includes_replan_without_parent_controls():
+    """嵌套 lead 开场就有 replan。Idle 调用在 execute 失败。"""
     reg = ToolRegistry()
     reg.register(_fake_delegate(supervised=False, depth=1))
     assert promote_coordination_surface_if_needed(reg) is True
     assert "replan" in reg.names
-    assert "wait" not in reg.names
+    assert "cancel_worker" not in reg.names
 
 
 def test_resync_binding_follows_hot_graph_merge():
-    """回归钉：合入热图后 CEO 必须重新绑到宿主图，否则不等待也拿不到 wait。
+    """回归钉：合入热图后 CEO 必须重新绑到宿主图，否则不等队员。
 
     delegate 在 asyncio.gather 子任务里改 ContextVar，父任务读不到；宿主 eid 只
     落在共享 _base_tool_context 上。回绑前工具面判空（复现「CEO 用正文收口、把在跑
@@ -318,10 +313,10 @@ def test_resync_binding_follows_hot_graph_merge():
         reg.register(delegate)
 
         # 回绑前：父任务仍指向本回合 mint 的 eid → 找不到宿主会话（execute 闸）。
-        # 工具表开场已钉死，不靠回绑才挂 wait。
+        # 工具表开场已钉死，不靠回绑才挂控制面。
         assert coordination_surface_active() is False
         assert promote_coordination_surface_if_needed(reg) is True
-        assert "wait" in reg.names
+        assert "cancel_worker" in reg.names
 
         assert resync_coordination_binding(reg) is True
         assert current_execution_id.get() == host
@@ -402,19 +397,19 @@ def test_resync_binding_leaves_binding_alone_without_a_host(delegate_factory):
         current_execution_id.reset(token)
 
 
-def test_assembled_coordination_live_offers_wait_on_tool_defs():
-    """协调已活时 assemble 路径的 OpenAI 工具面含 wait（与 ensure 同一验收）。"""
+def test_assembled_coordination_live_offers_control_tools_on_tool_defs():
+    """协调已活时 assemble 路径的 OpenAI 工具面含控制面（与 ensure 同一验收）。"""
     eid = "exec-assembly"
     token = current_execution_id.set(eid)
     try:
         _activate_coordination(eid)
         reg = _assemble()
-        assert "wait" in reg.names
+        assert "cancel_worker" in reg.names
         defs = reg.get_openai_definitions()
         names = {
             (d.get("function") or {}).get("name") or d.get("name") for d in defs
         }
-        assert "wait" in names
+        assert "cancel_worker" in names
     finally:
         clear_active_coordination()
         current_execution_id.reset(token)
@@ -426,9 +421,20 @@ def test_always_on_tools_not_in_gated_set():
         assert name not in COORDINATION_GATED_TOOLS
 
 
-def test_coordination_period_hint_posture_not_tool_manual():
-    from agentcore.runtime.coordination.tools import WaitTool
+def test_coordination_period_hint_lives_on_start_echo():
+    from agentcore.runtime.coordination.host import (
+        COORDINATION_PERIOD_HINT,
+        _coordination_start_echo,
+    )
 
+    echo = _coordination_start_echo(
+        roster="研究员",
+        added=1,
+        total=1,
+        completed=0,
+        seeded=False,
+    )
+    assert echo.endswith(COORDINATION_PERIOD_HINT)
     assert "【协调期】" in COORDINATION_PERIOD_HINT
     assert "可静默" in COORDINATION_PERIOD_HINT
     assert "请示" in COORDINATION_PERIOD_HINT
@@ -438,20 +444,18 @@ def test_coordination_period_hint_posture_not_tool_manual():
     assert "三选一" not in COORDINATION_PERIOD_HINT
     assert "ceiling" not in COORDINATION_PERIOD_HINT
     assert "max_rounds" not in COORDINATION_PERIOD_HINT
-    assert "同质 wait" not in COORDINATION_PERIOD_HINT
     assert "cancel_worker" not in COORDINATION_PERIOD_HINT
     assert "force" not in COORDINATION_PERIOD_HINT
     assert "移除" not in COORDINATION_PERIOD_HINT
     assert "不可用" not in COORDINATION_PERIOD_HINT
     assert "短说谁在后台" not in COORDINATION_PERIOD_HINT
     assert "谁在后台、完成后会再汇报" not in COORDINATION_PERIOD_HINT
-    assert "人已派出" not in COORDINATION_PERIOD_HINT  # 派完收束在 host/core，不在协调期 hint
-    assert COORDINATION_PERIOD_HINT in WaitTool().schema.description
+    assert "人已派出" not in COORDINATION_PERIOD_HINT
 
 
-def test_wait_in_gated_set():
-    assert "wait" in COORDINATION_GATED_TOOLS
-    assert "wait" not in ("delegate", "ask_user", "debate")
+def test_control_tools_in_gated_set():
+    assert "cancel_worker" in COORDINATION_GATED_TOOLS
+    assert "replan" in COORDINATION_GATED_TOOLS
 
 
 # --- assembly-level 分态（真实 _assemble_ceo_toolset） -----------------------
@@ -517,7 +521,7 @@ def test_assembled_idle_surface_split():
     """闲聊态：delegate / ask_user / debate 与协调套件都在开场表。
 
     ``consult`` is hand-wired via async ``wire_ceo_consult`` (not in sync assemble).
-    debate 已装配即进 OpenAI 表；idle 的 wait/replan 在 execute 失败。
+    debate 已装配即进 OpenAI 表；idle 的控制面 / replan 在 execute 失败。
     """
     reg = _assemble()
     names = set(reg.names)
@@ -567,7 +571,7 @@ def test_register_always_ceo_tools_declare_loop():
     assert "create_folder" not in names
     assert "consult" not in names  # CeoWire.CONSULT — hand-wired, not ALWAYS helper
     assert names.isdisjoint(
-        {"delegate", "debate", "ask_user", "remember", "wait", "code_search"}
+        {"delegate", "debate", "ask_user", "remember", "code_search"}
     )
 
 

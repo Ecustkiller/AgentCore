@@ -11,7 +11,7 @@ from typing import Any, cast
 import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.logging import get_logger
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, new_id
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary, new_id
 from agentcore.llm.credentials import LLMCredentials, bind_credential_pricing_context
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import turn_profiles_for_turn
@@ -100,7 +100,7 @@ async def continue_ceo_pipeline(
     suspension_saver: SuspensionSaver | None = None,
     suspension_deleter: SuspensionDeleter | None = None,
     llm_supports_tools: bool | None = None,
-    permission_axes: PermissionAxes | None = None,
+    permission_axes: WorkspaceBoundary | None = None,
     trace_id: str | None = None,
 ) -> dict:
     """Continue a cloud CEO turn paused on exhausted rate limit.

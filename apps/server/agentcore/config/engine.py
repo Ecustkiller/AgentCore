@@ -53,10 +53,11 @@ class EngineSettings(BaseModel):
     # Worker mid-run window compact (lossy summary of older ReAct rounds).
     # Orthogonal to conversation compaction (cross-user-turn chat). Journal / UI
     # stay full; projection only. Captain / solo loops ignore this. 64k last-prompt
-    # is rot, not 1M overflow; recency=2 keeps the live tool pair.
+    # is rot, not 1M overflow. Recency at the fold cut is a token budget: always
+    # keep the newest round; keep two when both fit. Round count 2 is not a hard keep.
     engine_window_compact_enabled: bool = True
     engine_window_compact_prompt_tokens: int = 64_000
-    engine_window_compact_recency_rounds: int = 2
+    engine_window_compact_recency_token_budget: int = 24_000
     engine_window_compact_min_fold_rounds: int = 4
     engine_window_compact_trigger_fold_rounds: int = 8
     engine_window_compact_max_fold_rounds: int = 12

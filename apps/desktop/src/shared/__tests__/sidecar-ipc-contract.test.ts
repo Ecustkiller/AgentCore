@@ -53,11 +53,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       decision: "continue",
       note: "",
       selected: ["a"],
-      permissionAxes: {
-        file_write: "ask",
-        command: "ask",
-        host: "off",
-      },
+      permissionAxes: { boundary: "read" },
     };
     const withInference = buildSidecarResumeRpcParams(
       req,
@@ -108,11 +104,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       ),
     ]);
     expect(withoutInference.selected).toEqual(["a"]);
-    expect(withoutInference.permissionAxes).toEqual({
-      file_write: "ask",
-      command: "ask",
-      host: "off",
-    });
+    expect(withoutInference.permissionAxes).toEqual({ boundary: "read" });
 
     // Explicit null clears sidecar sticky env / prior turn.
     const clearBridge = buildSidecarResumeRpcParams(req, undefined, null);

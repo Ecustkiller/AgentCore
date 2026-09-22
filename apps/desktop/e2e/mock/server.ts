@@ -516,9 +516,7 @@ async function route(
     let folderId: string | null = null;
     let localRoot: string | null = null;
     let axes: NonNullable<ConversationSummary["permission_axes"]> = {
-      file_write: "session",
-      command: "auto",
-      host: "session",
+      boundary: "folder",
     };
     try {
       const body = JSON.parse(raw) as {
@@ -628,7 +626,7 @@ async function route(
   }
 
   if (method === "GET" && path === "/v1/users/me/autonomy") {
-    json(req, res, 200, { policy: "less_interrupt" });
+    json(req, res, 200, { policy: "folder" });
     return;
   }
 

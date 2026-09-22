@@ -27,6 +27,7 @@ from agentcore.api.schemas import (
     AgentMention,
     BeginLocalTurnRequest,
     BeginLocalTurnResponse,
+    EditQueuedTurnRequest,
     LocalTurnHeartbeatRequest,
     LocalTurnHeartbeatResponse,
     LocalTurnJournalRequest,
@@ -39,9 +40,9 @@ from agentcore.api.schemas import (
     QueuedTurnListResponse,
     RecordTurnRequest,
     RecordTurnResponse,
+    ReorderQueuedTurnsRequest,
     RunsPayload,
     SendMessageRequest,
-    SetMessageFeedbackRequest,
     StatusResponse,
     StopTurnResponse,
 )
@@ -378,31 +379,6 @@ async def delete_message(
     return StatusResponse()
 
 
-@router.patch("/{conversation_id}/messages/{message_id}/feedback", response_model=StatusResponse)
-async def set_message_feedback(
-    conversation_id: str,
-    message_id: str,
-    body: SetMessageFeedbackRequest,
-    user: AuthUser,
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
-    repo: MessageRepository = Depends(get_message_repo),
-):
-    """Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈).
-
-    Owner-scoped like delete (prove conversation ownership first, then update only within
-    it, so a guessed cross-user ``message_id`` can't be rated — IDOR-safe). ``feedback`` is
-    ``"up"`` / ``"down"`` to rate, or ``null`` to clear the rating (toggling the same side
-    off). 404 when the message isn't in this conversation.
-    """
-    await _require_conversation_write(conversation_id, user.user_id, conv_repo._session)
-    updated = await repo.set_feedback(
-        message_id, conversation_id=conversation_id, feedback=body.feedback
-    )
-    if not updated:
-        raise NotFoundError("消息不存在")
-    return StatusResponse()
-
-
 @router.post(
     "/{conversation_id}/messages",
     # response_class 压掉 FastAPI 默认 200 application/json 空 schema——本端点恒返回
@@ -442,9 +418,11 @@ async def send_message(
     - **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。
     - **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。
     - **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。
-    - **经典 in-flight + steer** → 挂到 live turn 进程内 pending（DURABLE
-      ``user_interjection(received)``；步顶注入后再发 ``injected``）；
-      无 accepting 窗口 / 回合已收口 → 回落 FIFO（``turn_queued.degraded_from=steer``）。
+    - **经典 in-flight + steer** → 队长循环还在接受时挂到进程内 pending（DURABLE
+      ``user_interjection(received)``；下一工具步顶再发 ``injected``）。散文收口
+      不为未读插话多留一轮；赶不上下一步的 leftover 升成下一回合
+      （``queued`` + ``turn_queued.degraded_from=steer``）。无 accepting 窗口 →
+      普通 FIFO，不标 ``degraded_from``。
     - **热路 pending**（approval / escalation / …）仍 409。
 
     Gated before the stream starts (成本配额与计费.md §一) so a refused turn gets a
@@ -560,6 +538,7 @@ async def send_message(
                     status="received",
                     attachments=delivered.attachments_meta or None,
                     agent_mentions=delivered.agent_mentions or None,
+                    user_message_id=user_message_id,
                 )
             )
             confirm.emit_sse_only(turn_saved(user_message_id=user_message_id))
@@ -627,6 +606,7 @@ async def list_queued_turns(
                 content=item.content,
                 position=idx,
                 interjection_id=item.interjection_id,
+                user_message_id=item.user_message_id,
                 attachments=[MessageAttachment.model_validate(a) for a in item.attachments],
                 agent_mentions=[AgentMention.model_validate(m) for m in item.agent_mentions],
             )
@@ -657,14 +637,91 @@ async def cancel_queued_turn(
     now cancelling in that window told the other端 nothing.
     """
     await _require_conversation_write(conversation_id, user.user_id, conv_repo._session)
-    from agentcore.runtime.turn.delivery import cancel_queued_item
+    from agentcore.runtime.turn.delivery import withdraw_queued_item
 
-    item = cancel_queued_item(conversation_id, queue_id)
+    item = await withdraw_queued_item(conversation_id, queue_id)
     if item is None:
         raise NotFoundError("排队项不存在或已开始")
     from agentcore.conversation.midflight_persist import delete_midflight_user_message
 
     await delete_midflight_user_message(conversation_id, item.user_message_id)
+    return StatusResponse()
+
+
+@router.post(
+    "/{conversation_id}/queued-turns/reorder",
+    response_model=StatusResponse,
+)
+async def reorder_queued_turns(
+    conversation_id: str,
+    body: ReorderQueuedTurnsRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Permute the process-local FIFO. The id list must be the current set."""
+    await _require_conversation_write(conversation_id, user.user_id, conv_repo._session)
+    from agentcore.core.errors import ValidationError
+    from agentcore.runtime.turn.delivery import reorder_queued_items
+
+    if not await reorder_queued_items(conversation_id, body.queue_ids):
+        raise ValidationError("排队顺序须是当前队列的完整排列")
+    return StatusResponse()
+
+
+@router.post(
+    "/{conversation_id}/queued-turns/{queue_id}/stop-and-send",
+    response_model=StatusResponse,
+)
+async def stop_and_send_queued_turn(
+    conversation_id: str,
+    queue_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Move this queued item to the front, then hard-stop the live turn.
+
+    The next drain starts this item. Items that were ahead of it stay behind.
+    Stop still does not clear the rest of the FIFO.
+    """
+    await _require_conversation_write(conversation_id, user.user_id, conv_repo._session)
+    from agentcore.runtime.turn.delivery import stop_and_send_queued_item
+
+    item = await stop_and_send_queued_item(conversation_id, queue_id)
+    if item is None:
+        raise NotFoundError("排队项不存在或已开始")
+    return StatusResponse()
+
+
+@router.post(
+    "/{conversation_id}/queued-turns/{queue_id}/edit",
+    response_model=StatusResponse,
+)
+async def edit_queued_turn(
+    conversation_id: str,
+    queue_id: str,
+    body: EditQueuedTurnRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Replace one queued turn's text, attachments, and mentions before drain.
+
+    Same ``queue_id`` and persisted user row. Position, credentials,
+    ``interjection_id``, and table selection stay as captured at enqueue.
+    Already started / unknown id / missing user row → 404. Blank text with no
+    attachments → 422.
+    """
+    await _require_conversation_write(conversation_id, user.user_id, conv_repo._session)
+    from agentcore.runtime.turn.delivery import edit_queued_item
+
+    item = await edit_queued_item(
+        conversation_id,
+        queue_id,
+        content=body.content,
+        attachments=[a.model_dump() for a in body.attachments],
+        agent_mentions=[m.model_dump() for m in body.agent_mentions],
+    )
+    if item is None:
+        raise NotFoundError("排队项不存在或已开始")
     return StatusResponse()
 
 
@@ -682,27 +739,9 @@ async def stop_message(
     ``POST …/queued-turns/{queue_id}/cancel``.
     """
     await _require_conversation_write(conversation_id, user.user_id, conv_repo._session)
-    from agentcore.runtime.events.client_tool_reattach import cancel_pending_client_tools
-    from agentcore.runtime.interaction_orphan import orphan_live_turn_hot_pending
+    from agentcore.runtime.turn.delivery import stop_live_turn
 
-    # 用户主动停止先成立，再发任何取消：the orphan pass below awaits the DB between
-    # pending cards and cancels their Futures, so the turn can already unwind inside
-    # it — with the flag unset that unwind orphans the lease (气泡「中断」+ sweeper
-    # 重驱) instead of closing as 已停止.
-    turn_runs.mark_user_stop(conversation_id)
-    await orphan_live_turn_hot_pending(conversation_id)
-    # Before the task cancel below: the awaiter's ``finally`` discards these
-    # entries, and an already-dispatched op (host_shell…) would otherwise run to
-    # completion on the user's machine with nobody left to receive it.
-    cancel_pending_client_tools(conversation_id)
-
-    stopped = turn_runs.stop(conversation_id)
-    if not stopped:
-        from agentcore.runtime.coordination.session import (
-            cancel_coordination_on_user_stop,
-        )
-
-        stopped = cancel_coordination_on_user_stop(conversation_id)
+    stopped = await stop_live_turn(conversation_id)
     return StopTurnResponse(stopped=stopped)
 
 

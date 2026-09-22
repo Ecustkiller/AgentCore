@@ -66,23 +66,14 @@ class Conversation(Base):
         Boolean, server_default=text("false")
     )
     mode: Mapped[str] = mapped_column(String(20), default="chat", server_default=text("'chat'"))
-    # Permission axes (会话级权限 · 安全权限与治理):
-    # {file_write, command, host}. Runtime gates read THIS column — not
-    # users.autonomy_policy (which only seeds new conversations with a recipe).
-    # Default = 少打断/托管: session + auto + session.
-    # ``team_kickoff`` / ``command=kickoff`` were rewritten by
-    # ``c1d8e4a7b2f6``; leftover keys are ignored / fail enum (no read-side merge).
+    # Conversation boundary (会话级权限 · 安全权限与治理):
+    # {"boundary": "read"|"folder"|"computer"}. Runtime gates read THIS column.
+    # users.autonomy_policy only seeds new conversations.
     permission_axes: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
-        default=lambda: {
-            "file_write": "session",
-            "command": "auto",
-            "host": "session",
-        },
-        server_default=text(
-            "'{\"file_write\":\"session\",\"command\":\"auto\",\"host\":\"session\"}'::jsonb"
-        ),
+        default=lambda: {"boundary": "folder"},
+        server_default=text("'{\"boundary\":\"folder\"}'::jsonb"),
     )
     # 深度研究自治（会话级独立旗标）: when True, CEO may auto-adopt worker motion_cards
     # and call debate (prompt-layer fork). Only this column enables that path.
@@ -356,12 +347,6 @@ class Message(Base):
     # 直接用；hover 工资单明细仍走 GET /v1/messages/{id}/cost（cost_events 台账）。
     # NULL for user / unmetered / pre-feature rows.
     cost: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    # 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's explicit satisfaction signal on an
-    # assistant reply — "up" | "down" | NULL(未评价). Toggleable (re-clicking the same
-    # side clears it back to NULL). Stored as a plain durable signal only; it does not
-    # feed any runtime logic yet — the column exists so future quality analysis has a
-    # first-class place to read from instead of being lost. NULL on user rows.
-    feedback: Mapped[str | None] = mapped_column(String(4), nullable=True)
     # The turn's replay payload (team graph / single-agent 思考+工具 timeline) is NO
     # LONGER stored here — it is the唯一事实源 ``turn_journal`` table (§8.3 Turn
     # Journal), keyed by this message id, and PROJECTED into MessageDetail.runs on

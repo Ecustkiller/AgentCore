@@ -12,6 +12,7 @@ import pytest
 
 from agentcore.config import settings
 from agentcore.runtime.events import EventSink
+from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.pipeline.prepare import prepare_fresh_turn
 from agentcore.tools.builtin import build_worker_registry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -35,13 +36,13 @@ def _cloud(tmp_path) -> ServerWorkspace:
 
 def _stub_prepare_io(monkeypatch, *, on_attach, on_registry) -> None:
     async def _empty_rules(*_a, **_k):
-        return ""
+        return TurnRuleView()
 
     async def _no_desk_label(*_a, **_k):
         return None
 
     monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.assemble_turn_rules", _empty_rules
+        "agentcore.runtime.pipeline.prepare.load_turn_rule_view", _empty_rules
     )
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label", _no_desk_label

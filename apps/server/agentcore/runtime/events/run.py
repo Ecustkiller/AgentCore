@@ -539,6 +539,7 @@ def user_interjection(
     note: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
     agent_mentions: list[dict[str, Any]] | None = None,
+    user_message_id: str | None = None,
 ) -> SSEEvent:
     """运行中用户插话（经典 steer + 协调插话共用契约）。
 
@@ -563,6 +564,9 @@ def user_interjection(
     mentions = wire_agent_mentions(agent_mentions)
     if mentions:
         payload["agent_mentions"] = mentions
+    umid = (user_message_id or "").strip()
+    if umid:
+        payload["user_message_id"] = umid
     return SSEEvent(type=EventType.USER_INTERJECTION, payload=payload)
 
 
@@ -576,8 +580,9 @@ def turn_queued(
 ) -> SSEEvent:
     """同对话 FIFO 排队 ack（D9 · 发送即有流）——取代退役的 HTTP 202 queued JSON。
 
-    ``degraded_from="steer"`` when classic in-flight could not soft-insert
-    (无 accepting 窗口 / 回合已收口 → 回落 FIFO).
+    ``degraded_from="steer"`` when an accepted classic steer missed the next
+    tool step and was promoted at turn close. A steer that never entered the
+    accepting window is a normal queue and does not carry this field.
     """
     payload: dict[str, Any] = {
         "queue_id": queue_id,
@@ -596,13 +601,14 @@ def turn_queue_started(
     conversation_id: str,
     remaining_depth: int,
     content: str,
+    user_message_id: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
     agent_mentions: list[dict[str, Any]] | None = None,
 ) -> SSEEvent:
     """同对话 FIFO 出队开跑——新回合 sink 首帧（先于 ``message_start``）。
 
-    自描述时间线入场（正文在帧上）。``attachments`` / ``agent_mentions`` 空则不上 wire。
-    EPHEMERAL——不落 journal；reload 靠 REST。
+    已经拿到这一帧的连接用它提前插入同一用户行。入场权威是段首 ``message_start``
+    上的同名点名；本帧不进 journal。``attachments`` / ``agent_mentions`` 空则不上 wire。
     """
     from agentcore.core.mentions import wire_agent_mentions
 
@@ -612,6 +618,9 @@ def turn_queue_started(
         "remaining_depth": remaining_depth,
         "content": content,
     }
+    umid = (user_message_id or "").strip()
+    if umid:
+        payload["user_message_id"] = umid
     if attachments:
         payload["attachments"] = attachments
     mentions = wire_agent_mentions(agent_mentions)

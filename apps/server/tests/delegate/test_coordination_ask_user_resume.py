@@ -38,7 +38,6 @@ from agentcore.runtime.coordination.session import (
     active_coordination,
     clear_active_coordination,
 )
-from agentcore.runtime.coordination.tools import WaitTool
 from agentcore.runtime.coordination.wait import await_coordination_injection
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.facts import FactKind, LlmCallFact, RoundBoundaryFact, TurnStartedFact
@@ -279,7 +278,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
     """挂起快照入 journal → claim → settle 重建协调态 → CEO 可续协调。"""
     paused = await _pause_mid_coord_ask(monkeypatch)
     restored, snap, user_message = paused.restored, paused.snap, paused.user_message
-    resume_sink, resume_delegate, resume_ctx = _resume_delegate(user_message)
+    resume_sink, resume_delegate, _resume_ctx = _resume_delegate(user_message)
 
     settled = await settle_resumed_suspension(
         restored,
@@ -300,12 +299,6 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
     assert session.total_workers == 2
     assert session.budget_remaining == snap.budget_remaining
     assert set(snap.completed_run_ids).issubset(session.completed_run_ids)
-
-    # Behaviour: restored session still accepts wait + team events.
-    wait = WaitTool()
-    wait_result = await wait.execute({"reason": "续跑听团"}, resume_ctx)
-    assert wait_result.success is True
-    assert session.draft == DRAFT_TEXT
 
     session.post(
         CoordinationEvent(

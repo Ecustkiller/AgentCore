@@ -12,6 +12,7 @@ from agentcore.runtime.events import (
     content_reset,
     message_start,
     tool_use_start,
+    turn_queue_started,
 )
 from agentcore.runtime.events.attach_replay import (
     _incremental_verdict,
@@ -24,6 +25,8 @@ from agentcore.runtime.events.attach_replay import (
     replay_open_event,
     synthesize_segment_deltas,
 )
+from agentcore.runtime.events.chat import reused_user_row_from_events
+from agentcore.runtime.events.payloads.chat import MessageStartPayload
 from agentcore.runtime.events.stream_checkpointer import (
     CHANNEL_CAPTAIN_CONTENT,
     CHANNEL_CAPTAIN_REASONING,
@@ -494,6 +497,134 @@ def test_live_message_start_is_not_flagged_as_replay():
     """Live 首帧不带 full_replay：只有回放段才下达重置指令。"""
     ev = message_start("m1", conversation_id="c1", trace_id="")
     assert "full_replay" not in ev.payload
+    assert "user_message_id" not in ev.payload
+
+
+def test_reused_user_row_reads_only_turn_queue_started():
+    """点名只跟本 sink 的出队帧。裸 message_start、没有用户行 id 的出队帧都不算。"""
+    named_head = message_start(
+        "m-idle",
+        conversation_id="c1",
+        trace_id="",
+        user_message_id="u-should-not-count",
+        content="不是出队",
+    )
+    bare_started = turn_queue_started(
+        queue_id="q-bare",
+        conversation_id="c1",
+        remaining_depth=0,
+        content="无 id",
+    )
+    assert reused_user_row_from_events([named_head, bare_started]) == {}
+
+    started = turn_queue_started(
+        queue_id="q1",
+        conversation_id="c1",
+        remaining_depth=0,
+        content="好的",
+        user_message_id="u-queued",
+        attachments=[{"name": "a.txt", "path": "/a.txt"}],
+        agent_mentions=[{"agent_id": "ag1", "role": "研究员"}],
+    )
+    binding = reused_user_row_from_events([started])
+    assert binding["user_message_id"] == "u-queued"
+    assert binding["content"] == "好的"
+    assert binding["attachments"] == [{"name": "a.txt", "path": "/a.txt"}]
+    assert binding["agent_mentions"] == started.payload["agent_mentions"]
+
+    ev = message_start("m1", conversation_id="c1", trace_id="", **binding)
+    assert ev.payload["user_message_id"] == "u-queued"
+    assert ev.payload["content"] == "好的"
+    assert ev.payload["attachments"][0]["name"] == "a.txt"
+    assert "full_replay" not in ev.payload
+    MessageStartPayload.model_validate(ev.payload)
+
+
+def test_history_replay_synthesizes_named_head_from_started():
+    started = turn_queue_started(
+        queue_id="q1",
+        conversation_id="c1",
+        remaining_depth=0,
+        content="好的",
+        user_message_id="u-queued",
+    )
+    events = mark_full_replay_segment([started], turn_id="m1", conversation_id="c1")
+    assert events[0].type == EventType.MESSAGE_START
+    assert events[0].payload["user_message_id"] == "u-queued"
+    assert events[0].payload["content"] == "好的"
+    assert events[0].payload["full_replay"] is True
+    MessageStartPayload.model_validate(events[0].payload)
+
+
+def test_history_replay_keeps_naming_already_on_the_live_head():
+    head = message_start(
+        "m1",
+        conversation_id="c1",
+        trace_id="",
+        user_message_id="u-queued",
+        content="好的",
+    )
+    events = mark_full_replay_segment([head], turn_id="m1", conversation_id="c1")
+    assert events[0].payload["user_message_id"] == "u-queued"
+    assert events[0].payload["content"] == "好的"
+    assert events[0].payload["full_replay"] is True
+
+
+async def test_cursor_catch_up_names_the_head_from_turn_queue_started(monkeypatch):
+    sink = EventSink(conversation_id="c1", message_id="asst-1")
+    sink.emit(
+        turn_queue_started(
+            queue_id="q1",
+            conversation_id="c1",
+            remaining_depth=0,
+            content="好的",
+            user_message_id="u-queued",
+        )
+    )
+    seen: dict[str, object] = {}
+
+    async def fake_build(**kwargs):
+        seen.update(kwargs)
+        return [
+            replay_open_event(
+                turn_id=kwargs["turn_id"],
+                conversation_id=kwargs["conversation_id"],
+                user_message_id=kwargs.get("user_message_id"),
+                content=kwargs.get("content"),
+            )
+        ]
+
+    monkeypatch.setattr(
+        "agentcore.runtime.events.attach_replay.build_cursor_replay",
+        fake_build,
+    )
+    events = await sse._catch_up_replay(
+        sink, cursor=sse.ReplayCursor(seq=0, turn_id="asst-1")
+    )
+    assert seen["user_message_id"] == "u-queued"
+    assert seen["content"] == "好的"
+    assert events[0].payload["user_message_id"] == "u-queued"
+    assert events[0].payload["content"] == "好的"
+    assert events[0].payload["message_id"] == "asst-1"
+
+
+async def test_cursor_catch_up_without_queue_start_stays_unnamed(monkeypatch):
+    """空闲 / 续跑只有裸 message_start：回放头不点名，也不去翻最后一条用户行。"""
+    sink = EventSink(conversation_id="c1", message_id="asst-1")
+    sink.emit(message_start("asst-1", conversation_id="c1", trace_id=""))
+    seen: dict[str, object] = {}
+
+    async def fake_build(**kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        "agentcore.runtime.events.attach_replay.build_cursor_replay",
+        fake_build,
+    )
+    await sse._catch_up_replay(sink, cursor=sse.ReplayCursor(seq=0, turn_id="asst-1"))
+    assert "user_message_id" not in seen
+    assert "content" not in seen
 
 
 async def test_build_cursor_replay_stamps_bubble_before_the_durable_card(monkeypatch):

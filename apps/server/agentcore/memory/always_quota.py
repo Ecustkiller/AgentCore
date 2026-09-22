@@ -209,7 +209,14 @@ async def _always_docs_for_scope(
     off the pool. Callers that need global vs project meters still invoke this
     once per scope — that split cannot be collapsed into a single query.
     """
-    return await repo.list_injectable_rules(user_id, scope, ai_maintained=False)
+    from agentcore.memory.rule_resolve import counts_as_always_content
+
+    always = await repo.list_injectable_rules(user_id, scope, ai_maintained=False)
+    path = await repo.list_path_user_rules(user_id, scope)
+    return [
+        *always,
+        *[doc for doc in path if counts_as_always_content(doc.content or "")],
+    ]
 
 
 async def list_always_quota_docs(

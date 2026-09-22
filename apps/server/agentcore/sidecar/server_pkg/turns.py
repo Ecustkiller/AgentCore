@@ -479,6 +479,7 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     remaining_depth=turn_queue.depth(conversation_id),
                     content=user_message,
+                    user_message_id=user_message_id,
                     attachments=attachments or None,
                     agent_mentions=agent_mentions or None,
                 )

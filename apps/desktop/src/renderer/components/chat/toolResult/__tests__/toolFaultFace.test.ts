@@ -59,13 +59,6 @@ describe("toolRowFaultLabel", () => {
     ).toBeNull();
     expect(
       toolRowFaultLabel({
-        tool_name: "wait",
-        status: "error",
-        failure: { code: "WAIT_TIMEOUT" },
-      }),
-    ).toBeNull();
-    expect(
-      toolRowFaultLabel({
         tool_name: "browser_screenshot",
         status: "error",
         failure: { code: "no_frame" },
@@ -136,7 +129,7 @@ describe("toolGroupFaultLabel", () => {
     expect(
       toolGroupFaultLabel([
         { tool_name: "read", status: "error" },
-        { tool_name: "wait", status: "error" },
+        { tool_name: "replan", status: "error" },
       ]),
     ).toBeNull();
   });

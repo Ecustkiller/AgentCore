@@ -56,8 +56,8 @@ export function RecentConversations({
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
         <MessageSquare size={24} className="text-sidebar-foreground/30" />
-        <p className="text-sm text-sidebar-foreground/50">暂无对话</p>
-        <p className="text-xs text-sidebar-foreground/40">开始第一次对话 →</p>
+        <p className="text-sm text-sidebar-muted">暂无对话</p>
+        <p className="text-xs text-sidebar-muted">开始第一次对话 →</p>
       </div>
     );
   }
@@ -108,7 +108,7 @@ export function ViewAllConversations({
           navigate("/conversations");
           onActivate?.();
         }}
-        className="h-8 justify-between text-sidebar-foreground/55 hover:text-sidebar-foreground"
+        className="h-8 justify-between text-sidebar-muted hover:text-sidebar-foreground"
       >
         <span>查看全部对话</span>
         <ChevronRight size={14} className="shrink-0" />

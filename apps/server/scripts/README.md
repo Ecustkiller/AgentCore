@@ -22,7 +22,7 @@
 
 | 我要… | 用哪个 |
 |------|-------|
-| 一条 trace / 会话的时间线、排查包 | `log_timeline.py` |
+| 一条 trace / 会话的时间线；回复正文 `--messages`（stdout）；排查包 `--pack` | `log_timeline.py` |
 | 一个窗的事件分布、成本、协作质量 | `log_stats.py` |
 | 巡检①：全量 CID 清单 + 失败榜（带 trace/cid 反查）+ 跨窗快照 diff（主 Agent 自跑，不另派 Task） | `log_patrol.py` |
 

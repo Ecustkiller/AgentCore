@@ -1,44 +1,16 @@
 // @vitest-environment jsdom
 import { ApprovalCard } from "@/components/chat/ApprovalPrompt";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { patchConversationCache } from "@/hooks/useConversations";
-import { setConversationPermissionAxes } from "@/services/permissionAxes";
 import type { ApprovalView } from "@/stores/interactions";
-import { useInteractionStore } from "@/stores/interactions";
-import { usePermissionChangeStore } from "@/stores/permissionChanges";
 import {
   cleanup,
   fireEvent,
   render,
   screen,
-  waitFor,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/hooks/useConversations", () => ({
-  getConversations: () => [
-    {
-      id: "c1",
-      permissionAxes: {
-        file_write: "session",
-        command: "auto",
-        host: "ask",
-      },
-    },
-  ],
-  patchConversationCache: vi.fn(),
-}));
-
-vi.mock("@/services/permissionAxes", () => ({
-  setConversationPermissionAxes: vi.fn(),
-  matchRecipe: () => "less_interrupt",
-  recipeToAxes: () => ({
-    file_write: "session",
-    command: "auto",
-    host: "session",
-  }),
-}));
 
 vi.mock("@/services/approvals", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/approvals")>();
@@ -52,12 +24,6 @@ vi.mock("@/lib/toast", () => ({
 
 afterEach(() => {
   cleanup();
-  useInteractionStore.setState({ byId: new Map() });
-});
-
-beforeEach(() => {
-  vi.mocked(setConversationPermissionAxes).mockReset();
-  vi.mocked(patchConversationCache).mockReset();
 });
 
 function card(over: Partial<ApprovalView> = {}): ApprovalView {
@@ -80,22 +46,6 @@ function renderCard(approval: ApprovalView) {
       </TooltipProvider>
     </MemoryRouter>,
   );
-}
-
-/** Seed enough same-tool approvals so the「全放行」nudge appears. */
-function seedSameToolApprovals(n: number, toolName = "terminal") {
-  const byId = new Map();
-  for (let i = 0; i < n; i++) {
-    byId.set(`hist-${i}`, {
-      id: `hist-${i}`,
-      kind: "approval" as const,
-      status: "resolved" as const,
-      conversationId: "c1",
-      messageId: "m1",
-      payload: { tool_name: toolName, approval_id: `hist-${i}` },
-    });
-  }
-  useInteractionStore.setState({ byId });
 }
 
 describe("ApprovalCard git headline", () => {
@@ -430,30 +380,6 @@ describe("ApprovalCard CTA (工具审批 A+B)", () => {
     expect(onceIdx).toBeLessThan(turnIdx);
     const denyIdx = labels.findIndex((t) => t.includes("拒绝"));
     expect(denyIdx).toBeGreaterThan(turnIdx);
-  });
-
-  it("switching to 全放行 patches cache and reloads permission change lines", async () => {
-    seedSameToolApprovals(3);
-    const managed = {
-      file_write: "session" as const,
-      command: "auto" as const,
-      host: "session" as const,
-    };
-    vi.mocked(setConversationPermissionAxes).mockResolvedValue(managed);
-    const load = vi.fn().mockResolvedValue(undefined);
-    usePermissionChangeStore.setState({ load });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-
-    renderCard(card());
-    fireEvent.click(screen.getByRole("button", { name: "全放行" }));
-
-    await waitFor(() => {
-      expect(setConversationPermissionAxes).toHaveBeenCalledWith("c1", managed);
-      expect(patchConversationCache).toHaveBeenCalledWith("c1", {
-        permissionAxes: managed,
-      });
-      expect(load).toHaveBeenCalledWith("c1");
-    });
   });
 });
 

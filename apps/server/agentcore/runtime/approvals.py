@@ -20,7 +20,7 @@ from enum import StrEnum
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, ToolApproval
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, ToolApproval, WorkspaceBoundary
 from agentcore.runtime.always_confirm import is_git_remote_publish, requires_always_confirm
 from agentcore.runtime.events import (
     EventSink,
@@ -188,7 +188,7 @@ class ApprovalGate:
     # (shell / open_settings / set_audio / restart_service);
     # session = trust those via ``_session_host_trust_covers``.
     # ``install_package`` is always-confirm and never covered.
-    permission_axes: PermissionAxes = field(default_factory=lambda: DEFAULT_PERMISSION_AXES)
+    permission_axes: WorkspaceBoundary = DEFAULT_PERMISSION_AXES
     _granted: set[str] = field(default_factory=set)
     # Tools the user (or timeout→deny) refused this turn — later calls skip the card.
     _denied: set[str] = field(default_factory=set)
@@ -197,7 +197,7 @@ class ApprovalGate:
     def _delegation_covers(self, execution_id: str, tool_name: str) -> bool:
         # command=ask: never silently consume a delegation grant (对齐 observe 执行侧).
         # command=auto: execution auto-passes elsewhere; grant still covers if present.
-        if not self.permission_axes.auto_executes:
+        if not self.permission_axes.allows_execution:
             return False
         if not execution_id or tool_name not in self.delegation_grantable_tools:
             return False
@@ -210,7 +210,7 @@ class ApprovalGate:
         Execution-class tools are not in ``file_op_tools`` and still need a
         delegation grant / turn grant / per-call / auto.
         """
-        if not self.permission_axes.trusts_file_writes:
+        if not self.permission_axes.allows_write:
             return False
         if tool_name not in self.file_op_tools:
             return False
@@ -220,7 +220,7 @@ class ApprovalGate:
 
     def _session_host_trust_covers(self, tool_name: str) -> bool:
         """host=session: trust Host GRANTABLE tools without per-call cards."""
-        if not self.permission_axes.trusts_host:
+        if not self.permission_axes.allows_host:
             return False
         return tool_name in self.host_class_tools
 

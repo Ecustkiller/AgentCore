@@ -24,7 +24,7 @@ import {
 } from "react";
 import type { AskTone } from "./AskUserFields";
 
-/** 灰阶为主 —— 卡内不出现品牌色，强调只靠选中态。 */
+/** 灰阶为主 —— 卡内保持中性，强调只靠选中态。 */
 export const ASK_ROW_TONE = interactiveCheckpointTone.neutral;
 
 export type AskRow = {
@@ -184,8 +184,8 @@ function OptionRow({
           onMove(-1);
         }
       }}
-      className={`group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left focus:outline-none disabled:opacity-40 ${
-        selected ? "bg-muted" : "hover:bg-accent focus-visible:bg-accent"
+      className={`group touch-row flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40 ${
+        selected ? "bg-muted" : "hover:bg-accent"
       }`}
     >
       <span
@@ -266,8 +266,10 @@ function NoteRow({
   return (
     <label
       data-ask-note-row=""
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
-        disabled ? "opacity-40" : "hover:bg-accent focus-within:bg-accent"
+      className={`touch-row flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left ${
+        disabled
+          ? "opacity-40"
+          : "hover:bg-accent focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring"
       }`}
       onMouseEnter={() => onActive(true)}
       onMouseLeave={() => {

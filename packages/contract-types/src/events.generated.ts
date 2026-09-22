@@ -21,6 +21,14 @@ export interface MessageStartPayload {
   trace_id?: string;
   /** This frame opens a FULL REPLAY of the turn (an attach catch-up segment), not a live turn: the client MUST reset the local streaming state it holds for this `message_id` (streamed content / reasoning / process timeline) and then fold the frames that follow as the turn's whole story. Absent (or false) on a live first frame and on a repeated same-id stamp, which stay「同回合重开」(keep the bubble). The instruction is the server's — clients must not infer it by comparing the id against whatever bubble is on screen. */
   full_replay?: boolean;
+  /** Persisted user-row id when this open reuses a row already saved at send time (a queue drain). Copied from this sink's turn_queue_started. Absent on idle, resume, steer, and any other bare open — a message_start without it is not a dequeue. */
+  user_message_id?: string;
+  /** Text of that reused user row, so a follower who never held the queue snapshot can paint it. Present only together with user_message_id. Not assistant text. */
+  content?: string;
+  /** Attachments of that reused user row. Same shape as turn_queue_started.attachments. Omitted when empty. */
+  attachments?: MessageAttachment[];
+  /** Mentions on that reused user row. Same shape as turn_queue_started.agent_mentions. Omitted when empty. */
+  agent_mentions?: AgentMention[];
 }
 
 export interface ContentDeltaPayload {
@@ -613,14 +621,17 @@ export interface UserInterjectionPayload {
   note?: string;
   attachments?: UserInterjectionAttachment[];
   agent_mentions?: UserInterjectionAgentMention[];
+  user_message_id?: string;
 }
 
 /** FIFO queue ack on the send SSE while another turn is in-flight (D9 · 发送即有流).
  * 
  * Replaces the retired HTTP 202 ``SendMessageQueuedResponse`` JSON. Same visibility
  * fields; the waiting connection later continues with the drained turn on this stream.
- * ``degraded_from=steer`` when the client asked for steer but soft-insert was
- * unavailable (无 live accepting 窗口 / 回合已收口；协调插话路径不会带此字段). */
+ * ``degraded_from=steer`` when an accepted classic steer missed the next tool
+ * step and was promoted at turn close. A steer that never entered the
+ * accepting window is a normal queue and does not carry this field.
+ * Coordination interjections do not set it. */
 export interface TurnQueuedPayload {
   queue_id: string;
   position: number;
@@ -651,18 +662,21 @@ export interface AgentMention {
   role: string;
 }
 
-/** FIFO dequeue → timeline user-bubble entrance (D9 · 发送即有流).
+/** FIFO dequeue, early timeline insert for connections that already have this frame.
  * 
  * Emitted as the **first frame** of the drained turn's EventSink (after ``pop_next``,
- * before ``stream_chat`` / ``message_start``). ``content`` is the queued user text
- * (on the frame — not persist-first). Empty ``attachments`` / ``agent_mentions`` are
- * absent. ``remaining_depth`` is the queue length after this item left the FIFO.
- * EPHEMERAL — reload 靠 REST; 不落 journal. */
+ * before ``stream_chat`` / ``message_start``). ``content`` is the queued user text.
+ * ``user_message_id`` is the persisted user row (same id as the queue snapshot).
+ * The entrance authority is the same binding copied onto that turn's ``message_start``;
+ * this frame is the early same insert, not a signal followers must replay.
+ * Empty ``attachments`` / ``agent_mentions`` are absent. ``remaining_depth`` is the
+ * queue length after this item left the FIFO. EPHEMERAL — reload 靠 REST; 不落 journal. */
 export interface TurnQueueStartedPayload {
   queue_id: string;
   conversation_id: string;
   remaining_depth: number;
   content: string;
+  user_message_id?: string;
   attachments?: MessageAttachment[];
   agent_mentions?: AgentMention[];
 }

@@ -142,7 +142,7 @@ export type TurnOutcome = {
    */
   showSessionBanner: boolean;
   /**
-   * Assistant utility chrome (copy / clone / feedback / cost / time).
+   * Assistant utility chrome (copy / clone / cost / time).
    * True once the turn has stopped writing and there is copyable product
    * (body / reasoning / process). Named recovery does **not** hide this.
    * An empty failure has no bubble, so it has no footer.
@@ -183,9 +183,10 @@ export type TurnOutcome = {
    */
   showTurnWarning: boolean;
   /**
-   * 「复制排查包」host. `more` while the assistant bubble is still on screen
-   * (body or a team strip). An empty shell has no bubble and no pack.
-   * The failure banner and the status strip never host it.
+   * 「复制排查包」host. Token `more` = the bubble-footer button (conformance
+   * name kept) while that reply is still on screen (body or a team strip).
+   * An empty shell has no bubble and no pack. The failure banner and the
+   * status strip never host it.
    */
   supportPackHost: TurnSupportPackHost;
 };
@@ -270,7 +271,7 @@ function emptyShell(input: TurnOutcomeInput): boolean {
   return true;
 }
 
-/** Pack stays in bubble「更多」only while that reply is still on screen. */
+/** Pack button stays on the bubble footer only while that reply is still on screen. */
 function supportPackHostFor(args: {
   input: TurnOutcomeInput;
   hideEmptyBubble: boolean;

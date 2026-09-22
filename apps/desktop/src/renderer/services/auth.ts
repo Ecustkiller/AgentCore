@@ -119,7 +119,7 @@ export async function login(
   clearSidecarFoldersAuth();
   clearSidecarAccountAuth();
   clearSidecarWorkspacesAuth();
-  clearDefaultPermissionAxesCache(); // 自主度同为按用户的设置，换人重取
+  clearDefaultPermissionAxesCache(); // 对话边界同为按用户的设置，换人重取
   await persistDesktopAuthCookies();
   return user;
 }

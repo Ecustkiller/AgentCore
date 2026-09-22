@@ -202,7 +202,7 @@ def test_gh_pr_create_always_confirms() -> None:
 
 
 def test_create_pr_always_prompts_like_push() -> None:
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.events import EventSink
     from agentcore.runtime.interaction import InteractionRegistry
@@ -218,7 +218,7 @@ def test_create_pr_always_prompts_like_push() -> None:
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
     from agentcore.runtime.always_confirm import requires_always_confirm
 

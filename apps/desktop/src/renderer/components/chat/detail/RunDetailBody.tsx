@@ -15,7 +15,6 @@ import { runActCapabilities } from "@/components/graph/planCapabilities";
 import { Badge, Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
-import { openWorkspaceDeliverable } from "@/lib/openWorkspaceDeliverable";
 import { groupToolRuns, timelineNodeKeys } from "@/lib/processTimeline";
 import type { AgentAuditEvent } from "@/services/audit";
 import { permissionAxesShortLabel } from "@/services/permissionAxes";
@@ -339,12 +338,7 @@ export function RunDetailBody({
           <DebriefSection debrief={run.debrief} />
         ) : showConclusion && run.outputSummary ? (
           <Section title="结论">
-            <Markdown
-              content={run.outputSummary}
-              onOpenWorkspacePath={(path) =>
-                openWorkspaceDeliverable(conversationId, path)
-              }
-            />
+            <Markdown content={run.outputSummary} />
           </Section>
         ) : null}
         {showResources &&
@@ -382,9 +376,6 @@ export function RunDetailBody({
           conversationId={conversationId}
           checkpoints={[]}
           isStreaming={live}
-          onOpenWorkspacePath={(path) =>
-            openWorkspaceDeliverable(conversationId, path)
-          }
         />
       )}
     />

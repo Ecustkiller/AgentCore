@@ -2,12 +2,12 @@
 
 Injection aligns with the coordination tools' execution gate
 (``active_coordination``): ``delegate`` + ``ask_user`` stay always-on;
-the wait / replan suite is on the opening table too. Idle calls fail at
-execute. Never demote mid-chain (prefix cache).
+replan and the root control tools are on the opening table too. Idle calls
+fail at execute. Never demote mid-chain (prefix cache).
 
 Also owns COST-004 tools-surface observation (exact JSON chars + a token band)
-for ``ceo_turn`` and ``worker_run``. The coordination-period hint is owned by
-the ``wait`` tool description (not copied into each inject).
+for ``ceo_turn`` and ``worker_run``. The coordination-period hint lives on the
+team-start receipt (``host._coordination_start_echo``), not on each inject.
 """
 
 from __future__ import annotations
@@ -24,19 +24,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# wait 套件只跟根 CEO 开场表；嵌套 lead 只有 replan。Idle 调用在 execute 失败。
-_WAIT_SUITE: tuple[str, ...] = (
-    "wait",
+# 根 CEO 协调控制面开场即在表上；嵌套 lead 只有 replan。Idle 调用在 execute 失败。
+_ROOT_COORD_TOOLS: tuple[str, ...] = (
     "cancel_worker",
     "resolve_escalation",
     "queue_user_message",
 )
 
-COORDINATION_GATED_TOOLS: frozenset[str] = frozenset(("replan", *_WAIT_SUITE))
-
-COORDINATION_PERIOD_HINT = (
-    "【协调期】图在转、无新结论可静默；对用户开口只谈请示/阻塞/阶段结论/回应中途插话。"
-)
+COORDINATION_GATED_TOOLS: frozenset[str] = frozenset(("replan", *_ROOT_COORD_TOOLS))
 
 # A tool schema is Chinese prose (every ``description``) wrapped in ASCII JSON, and the two
 # halves tokenize an order of magnitude apart: a Han character costs about one token on
@@ -80,7 +75,7 @@ def _owns_coordination(delegate: Any) -> bool:
 
     ``should_enter_coordination`` only ever arms a session at ``depth == 0``, but a
     ``depth >= 1`` worker carries its own nested ``delegate`` handle AND shares the
-    parent's ``execution_id`` — so an identity-blind promote hands ``wait`` /
+    parent's ``execution_id`` — so an identity-blind promote hands
     ``cancel_worker`` to plain members, which are then offered for real because
     workers run unrestricted (``allowed_tools=None``). Nested leads keep
     ``delegate`` from round 1; ``replan`` is promoted here once ``_supervised``
@@ -95,7 +90,7 @@ def resync_coordination_binding(chat_tools: ToolRegistry) -> bool:
     """Re-point the turn ContextVar at the execution ``delegate`` actually coordinated.
 
     ``current_execution_id`` is bound at turn entry (``pipeline/prepare``). Cross-turn
-    adopt leaves it on the previous live graph for wait / cancel / interjection, while
+    adopt leaves it on the previous live graph for cancel / interjection, while
     ``base_tool_context.execution_id`` stays this turn's mint for dispatch. Same-turn
     merge re-binds the shared tool context onto the host from inside the delegate
     tool's ``asyncio.gather`` child, where the ContextVar write stays in the child
@@ -157,7 +152,7 @@ def register_coordination_surface(
     sink: Any,
     include: bool,
 ) -> None:
-    """Put replan + wait suite on the opening table. ``include`` is ignored.
+    """Put replan + root control tools on the opening table. ``include`` is ignored.
 
     Idle calls fail at execute. Never unregister mid-chain (prefix cache).
     """
@@ -166,14 +161,11 @@ def register_coordination_surface(
         CancelWorkerTool,
         QueueUserMessageTool,
         ResolveEscalationTool,
-        WaitTool,
     )
     from agentcore.tools.builtin.replan import ReplanTool
 
     if chat_tools.get_optional("replan") is None:
         chat_tools.register(ReplanTool(delegate=delegate_tool))
-    if chat_tools.get_optional("wait") is None:
-        chat_tools.register(WaitTool())
     if chat_tools.get_optional("cancel_worker") is None:
         chat_tools.register(CancelWorkerTool())
     if chat_tools.get_optional("resolve_escalation") is None:
@@ -190,8 +182,8 @@ def ensure_coordination_surface_before_llm(chat_tools: ToolRegistry) -> bool:
 def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
     """Ensure gated tools are registered. Never drop them mid-chain.
 
-    Root CEO (depth 0): wait suite + replan stay on the opening table.
-    Nested leads (depth ≥ 1): replan only — wait is the parent's lever.
+    Root CEO (depth 0): control tools + replan stay on the opening table.
+    Nested leads (depth ≥ 1): replan only.
     Idle calls fail at execute. Removing tools would forfeit the prefix cache.
     """
     delegate = chat_tools.get_optional("delegate")
@@ -204,7 +196,6 @@ def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
         CancelWorkerTool,
         QueueUserMessageTool,
         ResolveEscalationTool,
-        WaitTool,
     )
     from agentcore.tools.builtin.replan import ReplanTool
 
@@ -215,9 +206,6 @@ def promote_coordination_surface_if_needed(chat_tools: ToolRegistry) -> bool:
         added.append("replan")
 
     if depth == 0:
-        if chat_tools.get_optional("wait") is None:
-            chat_tools.register(WaitTool())
-            added.append("wait")
         if chat_tools.get_optional("cancel_worker") is None:
             chat_tools.register(CancelWorkerTool())
             added.append("cancel_worker")

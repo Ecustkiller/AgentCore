@@ -469,9 +469,10 @@ async def load_chat_context(
     Same ``[{role, content}]`` shape as :func:`load_recent_history`, so the pipeline is
     unchanged — this only swaps WHAT fills the window. When the conversation has a
     summary, the tail is everything strictly newer than the watermark (recent-biased
-    and capped, so a stalled compaction degrades by dropping the oldest un-folded tail,
-    never the newest — see ``MessageRepository.list_recent_after``), taken from its first
-    ``user`` on so that cap-driven drop keeps the near-end aligned (:func:`_from_first_user`).
+    and capped at ``compaction_context_max_messages``, not the fold-time 24k token
+    budget — that budget decides where to fold, never a per-request sliding cut),
+    taken from its first ``user`` on so that cap-driven drop keeps the near-end
+    aligned (:func:`_from_first_user`).
     The summary rides as the FIRST item (assistant block) right after the system prompt,
     keeping the stable system prefix cached and re-caching only summary+tail when a
     re-compaction changes the summary (执行引擎架构设计 §三 长对话压缩).

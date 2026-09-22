@@ -1774,12 +1774,10 @@ def _drain_events(sink: EventSink) -> list:
     return events
 
 
-async def test_cloud_worker_file_write_ask_still_prompts():
-    """云端 worker + file_write=ask：写文件类必须走审批（谨慎名副其实）。"""
-    import asyncio
-
-    from agentcore.core.types import AutonomyPolicy, ToolApproval, recipe_to_axes
-    from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
+async def test_read_boundary_denies_file_write_without_a_card():
+    """只看：写文件直接拒绝，不弹审批卡。"""
+    from agentcore.core.types import ToolApproval, WorkspaceBoundary
+    from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.interaction import InteractionRegistry
     from agentcore.tools.builtin import approval_class_tool_names
 
@@ -1808,22 +1806,12 @@ async def test_cloud_worker_file_write_ask_still_prompts():
         registry=registry,
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS),
+        permission_axes=WorkspaceBoundary.READ,
     )
     tool = _WriteTool()
     reg = ToolRegistry()
     reg.register(tool)
 
-    async def _approve() -> None:
-        for _ in range(2000):
-            if registry.resolve(
-                "tc-cloud-ask", ApprovalDecision.APPROVE, conversation_id="conv-cloud-ask"
-            ):
-                return
-            await asyncio.sleep(0)
-        raise AssertionError("approval never pending")
-
-    approve_task = asyncio.create_task(_approve())
     messages, terminal, attempts = await execute_tools(
         [_call("tc-cloud-ask", "write", '{"file_path":"a.md","content":"x"}')],
         reg,
@@ -1833,18 +1821,17 @@ async def test_cloud_worker_file_write_ask_still_prompts():
         run_id="worker-1",
         role="worker",
     )
-    await approve_task
     assert terminal is None
-    assert tool.executed is True
-    assert attempts[0].success is True
-    assert messages[0].content == "wrote"
+    assert tool.executed is False
+    assert attempts[0].success is False
+    assert "只看" in messages[0].content
     required = [e for e in _drain_events(sink) if e.type is EventType.APPROVAL_REQUIRED]
-    assert len(required) == 1
+    assert required == []
 
 
 async def test_cloud_worker_file_write_session_still_ungated():
     """云端 worker + file_write=session：写文件仍免逐次卡（少打断/托管）。"""
-    from agentcore.core.types import AutonomyPolicy, ToolApproval, recipe_to_axes
+    from agentcore.core.types import ToolApproval, WorkspaceBoundary
     from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.interaction import InteractionRegistry
     from agentcore.tools.builtin import approval_class_tool_names
@@ -1874,7 +1861,7 @@ async def test_cloud_worker_file_write_session_still_ungated():
         registry=registry,
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
     # Cloud session path must drop needs_approval before authorize/will_prompt.
     gate.will_prompt = (  # type: ignore[method-assign]

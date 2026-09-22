@@ -172,7 +172,7 @@ def apply_delegation_grant(
     auto = bool(getattr(tool, "_auto_grant_pending", False))
     already = worker_gate.has_delegation_grant(execution_id)
     axes = getattr(tool, "_permission_axes", None) or DEFAULT_PERMISSION_AXES
-    if auto or already or axes.auto_executes:
+    if auto or already or axes.allows_execution:
         if not already:
             worker_gate.grant_delegation(execution_id)
         tool._auto_grant_pending = False  # type: ignore[attr-defined]

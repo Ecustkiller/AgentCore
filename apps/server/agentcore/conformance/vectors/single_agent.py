@@ -66,32 +66,7 @@ def _single_agent_queued_then_run() -> list[SSEEvent]:
             conversation_id=_CONV,
             remaining_depth=0,
             content="next",
-        ),
-        *_single_agent_text(),
-    ]
-
-
-def _single_agent_queued_degraded_from_steer() -> list[SSEEvent]:
-    """经典 in-flight + ``delivery=steer`` 回落：无 accepting 窗口时 ``turn_queued.degraded_from=steer``。
-
-    EPHEMERAL / fold no-op；golden 与纯单聊同形。客户端据此 toast「已改为排队」。
-    开跑仍带 ``turn_queue_started``（与强制 queue 同形闭环）。
-    """
-    from agentcore.runtime.events import turn_queue_started, turn_queued
-
-    return [
-        turn_queued(
-            queue_id="q-degraded",
-            position=1,
-            queue_depth=1,
-            conversation_id=_CONV,
-            degraded_from="steer",
-        ),
-        turn_queue_started(
-            queue_id="q-degraded",
-            conversation_id=_CONV,
-            remaining_depth=0,
-            content="next",
+            user_message_id="u-next",
         ),
         *_single_agent_text(),
     ]
@@ -128,9 +103,9 @@ def _single_agent_user_interjection_steer() -> list[SSEEvent]:
 
 
 def _single_agent_user_interjection_steer_queued() -> list[SSEEvent]:
-    """经典 steer 收口 leftover 降级：received→queued + ``turn_queued.degraded_from=steer``。
+    """经典 steer 赶不上下一工具步：received→queued + ``turn_queued.degraded_from=steer``。
 
-    双发对齐协调升队先例；queued 为经典终态之一（无 addressed）。
+    散文收口不为未读插话多留一轮。双发对齐协调升队先例；queued 为经典终态之一（无 addressed）。
     收口升队发生在回合 finally，故排在正文之后、``message_end`` 之前。
     """
     from agentcore.runtime.events import turn_queued, user_interjection

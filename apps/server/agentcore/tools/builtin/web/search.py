@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from agentcore.core.citation_tier import citation_tier_for_url, stamp_citation_tier
 from agentcore.core.logging import get_logger
-from agentcore.core.net import describe_net_error, site_of
+from agentcore.core.net import site_of
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.tools.builtin.web.cloud_fallback import (
     CLOUD_FALLBACK_NOTE,
@@ -29,12 +29,9 @@ from agentcore.tools.builtin.web.relevance import (
     unquoted_span,
 )
 from agentcore.tools.builtin.web.search_backend import (
-    FallbackSearchBackend,
-    PhaseCallback,
     SearchBackend,
     SearchResult,
     SearXNGBackend,
-    TavilyBackend,
     describe_search_error,
     get_search_backend,
     infer_search_language,
@@ -464,12 +461,8 @@ def _backend_label(
         return "cloud_inference"
     if backend is None:
         return "unknown"
-    if isinstance(backend, FallbackSearchBackend):
-        return "searxng+tavily"
     if isinstance(backend, SearXNGBackend):
         return "searxng"
-    if isinstance(backend, TavilyBackend):
-        return "tavily"
     return type(backend).__name__
 
 
@@ -590,9 +583,9 @@ class WebSearchTool:
         # Conversation-scoped result cache (案例1 #5 检索去重 / 共享检索缓存): a repeat of
         # the same query within the conversation — including across delegated workers,
         # which share the conversation_id — is served from memory instead of re-hitting
-        # SearXNG/Tavily, cutting duplicate searches that pressure the shared instance.
+        # SearXNG, cutting duplicate searches that pressure the shared instance.
         # Unscoped call sites (conversation_id == "") skip the cache entirely.
-        # Task-language proxy: pin SearXNG/Tavily locale so IP / default_lang=auto
+        # Task-language proxy: pin SearXNG locale so IP / default_lang=auto
         # cannot hijack 中文调研 into Japanese SERPs.
         language = infer_search_language(query)
         # A4 debate carve-out: debate runs keep exact keys (no Latin word-order share).
@@ -645,7 +638,7 @@ class WebSearchTool:
         try:
             backend = get_search_backend()
             # 工具执行阶段进度 (联网搜索前端展示优化): thread the engine-injected phase
-            # callback so the backend can surface「排队中 / 正在检索 / 改用备用引擎」live
+            # callback so the backend can surface「排队中 / 正在检索」live
             # while this blocking request is in flight. ``None`` on unscoped call
             # sites (tests / evals) — the backend skips it; duration logging still runs
             # when phases fire.
@@ -676,7 +669,7 @@ class WebSearchTool:
             reason = describe_search_error(e, backend)
             logger.warning("tool.web_search_error", query=query, error=reason, error_repr=repr(e))
             # Local SearXNG product copy → stable code for curated user face (never lift
-            # ``: detail`` / host tokens from describe_net_error onto failure.message).
+            # ``: detail`` / host tokens from the net-error copy onto failure.message).
             searxng_face = reason.startswith("本地搜索服务")
             return ToolResult(
                 tool_call_id="",
@@ -697,22 +690,6 @@ class WebSearchTool:
             # so this fires once per genuinely-live empty, not per retry.
             logger.warning("tool.web_search_empty", query=query)
 
-        # 全垃圾 SERP 兜底重试 (tool 层决策): a LIVE, non-empty set whose relevance filter fell
-        # to the uniformly-weak path (HTTP 200 + 全垃圾, not caught by the backend's
-        # exception-only fallback) is retried ONCE via the Tavily leg when configured — see
-        # ``_maybe_retry_weak_serp``. Kept BEFORE ``finish_phases`` so the retry's
-        # 「改用备用引擎 / 正在检索」phases are still tracked and drive the waiting UI. The
-        # final adopted set flows into the cache write + ``_success_result`` below unchanged.
-        # Skip when results already came from cloud inference (sidecar has no Tavily).
-        if not cloud_fallback:
-            results = await self._maybe_retry_weak_serp(
-                query,
-                results,
-                backend,
-                max_results=max_results,
-                language=language,
-                on_phase=on_phase,
-            )
         finish_phases()
 
         # Cache the outcome: a non-empty set positively (served for the TTL), an EMPTY
@@ -747,78 +724,6 @@ class WebSearchTool:
             adjustment_note=adjustment_note,
             cloud_fallback=cloud_fallback,
         )
-
-    async def _maybe_retry_weak_serp(
-        self,
-        query: str,
-        results: list[SearchResult],
-        backend: SearchBackend,
-        *,
-        max_results: int,
-        language: str,
-        on_phase: PhaseCallback | None,
-    ) -> list[SearchResult]:
-        """全垃圾 SERP 兜底 (tool 层): retry a uniformly-weak LIVE result set once via Tavily.
-
-        Fires ONLY when (1) the primary set is non-empty, (2) it went through the relevance
-        filter's uniformly-weak path (reusing that exact判据 — no new threshold),
-        and (3) the process backend carries a Tavily fallback leg. The retry result passes
-        the SAME relevance filter: non-weak → adopt it; still weak (or the retry raised /
-        came back empty) → keep the original raw set (injection empties + quality note).
-        Exactly one extra search; the backend's exception-only fallback semantics stay
-        untouched (the decision lives here, not there).
-        """
-        if not results:
-            return results
-        # Only FallbackSearchBackend carries a Tavily leg; without a key configured the
-        # backend is bare SearXNG → zero behaviour change (no retry, no extra cost).
-        if not isinstance(backend, FallbackSearchBackend):
-            return results
-        if not self._is_uniformly_weak(query, results):
-            return results
-
-        logger.info("search.weak_serp_retry", query=query, result_count=len(results))
-        # Reuse the「改用备用引擎」phase so the waiting UI explains the Tavily leg's latency.
-        if on_phase:
-            on_phase("fallback")
-        try:
-            retry = await backend.fallback.search(
-                query, max_results=max_results, on_phase=on_phase, language=language
-            )
-        except Exception as exc:  # noqa: BLE001 - best-effort; a failed retry keeps the primary set
-            logger.warning(
-                "search.weak_serp_retry_failed",
-                query=query,
-                error=describe_net_error(exc),
-                error_repr=repr(exc),
-            )
-            return results
-
-        if retry and not self._is_uniformly_weak(query, retry):
-            logger.info(
-                "search.weak_serp_retry_adopted", query=query, result_count=len(retry)
-            )
-            return retry
-        # Retry no better than the primary (still weak / empty) → keep the original raw
-        # set; injection will still empty + note (uniformly_weak empty-success).
-        logger.info(
-            "search.weak_serp_retry_still_weak",
-            query=query,
-            primary_count=len(results),
-            retry_count=len(retry),
-        )
-        return results
-
-    @staticmethod
-    def _is_uniformly_weak(query: str, results: list[SearchResult]) -> bool:
-        """Whether ``results`` would inject as a uniformly-weak set (全垃圾 SERP判据).
-
-        Mirrors ``_success_result``'s pipeline exactly — hard-blocked hits are dropped
-        first, then the SAME relevance filter runs — so the retry decision matches the set
-        the model would actually see. Pure / cheap: it only re-runs in-memory scoring.
-        """
-        kept, _ = _split_blocked(results)
-        return filter_results_for_injection(query, kept).uniformly_weak
 
     @staticmethod
     def _record_source_domains(conversation_id: str, results: list[SearchResult]) -> None:

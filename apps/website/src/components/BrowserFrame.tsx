@@ -20,7 +20,7 @@ export default function BrowserFrame({
       <div
         aria-hidden="true"
         className="pointer-events-none absolute -inset-x-10 -inset-y-8 rounded-[2rem] opacity-60 blur-3xl"
-        style={{ background: "var(--brand-gradient)" }}
+        style={{ background: "var(--blue-gradient)" }}
       />
 
       <div

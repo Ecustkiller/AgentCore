@@ -77,7 +77,6 @@ _MSG_KEEP = (
     "evidence_ledger",
     "followups",
     "cost",
-    "feedback",
     "trace_id",
     "baseline_snapshot_id",
     "created_at",

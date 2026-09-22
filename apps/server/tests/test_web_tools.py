@@ -56,10 +56,8 @@ from agentcore.tools.builtin.web.search import (
     validate_search_query,
 )
 from agentcore.tools.builtin.web.search_backend import (
-    FallbackSearchBackend,
     SearchResult,
     SearXNGBackend,
-    TavilyBackend,
     _parse_results,
     infer_search_language,
     track_phase_durations,
@@ -1660,45 +1658,6 @@ async def test_web_search_fast_fails_when_circuit_open(monkeypatch):
     assert result.duration_ms < 500
 
 
-# --- search_backend: Tavily fallback leg ---
-
-
-async def test_tavily_backend_parses_results_and_sends_bearer(monkeypatch):
-    # Tavily's result objects share SearXNG's title/url/content shape, so the same
-    # _parse_results handles both. Verify the request carries the Bearer key + query.
-    captured: dict = {}
-    req = httpx.Request("POST", "https://api.tavily.com/search")
-    payload = {
-        "results": [
-            {"title": "T1", "url": "https://a.com", "content": "snip a", "score": 0.9},
-            {"title": "T2", "url": "https://b.com", "content": "snip b", "score": 0.8},
-        ]
-    }
-
-    class _Client:
-        async def post(self, url, json=None, headers=None):
-            captured["url"] = url
-            captured["json"] = json
-            captured["headers"] = headers
-            return httpx.Response(200, json=payload, request=req)
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
-
-    backend = TavilyBackend(api_key="tvly-test", base_url="https://api.tavily.com")
-    results = await backend.search("深圳天气", max_results=2)
-
-    assert [(r.title, r.url, r.snippet) for r in results] == [
-        ("T1", "https://a.com", "snip a"),
-        ("T2", "https://b.com", "snip b"),
-    ]
-    assert captured["url"] == "https://api.tavily.com/search"
-    assert captured["headers"]["Authorization"] == "Bearer tvly-test"
-    assert captured["json"]["query"] == "深圳天气"
-    assert captured["json"]["max_results"] == 2
-    # Chinese query → country boost (Tavily has no language param).
-    assert captured["json"]["country"] == "china"
-
-
 async def test_searxng_backend_sends_explicit_language(monkeypatch):
     """Pin language on the wire so default_lang=auto / IP locale cannot hijack locale."""
     from agentcore.tools.builtin.web.search_backend import infer_search_language
@@ -1725,42 +1684,6 @@ async def test_searxng_backend_sends_explicit_language(monkeypatch):
     assert captured["params"]["q"] == "OpenAI 股权分析"
 
 
-async def test_tavily_backend_requires_api_key():
-    # Defensive: an unconfigured Tavily leg fails honestly rather than calling the API.
-    backend = TavilyBackend(api_key="", base_url="https://api.tavily.com")
-    with pytest.raises(EgressError, match="API key"):
-        await backend.search("q")
-
-
-async def test_tavily_backend_raises_on_http_error(monkeypatch):
-    req = httpx.Request("POST", "https://api.tavily.com/search")
-
-    class _Client:
-        async def post(self, *args, **kwargs):
-            return httpx.Response(401, request=req)
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
-    backend = TavilyBackend(api_key="tvly-bad", base_url="https://api.tavily.com")
-    with pytest.raises(httpx.HTTPStatusError):
-        await backend.search("q")
-
-
-async def test_tavily_backend_emits_querying_phase(monkeypatch):
-    # 工具执行阶段进度 (联网搜索前端展示优化): the leg signals「正在检索」right before its
-    # request flies, so the waiting UI is live instead of a dead spinner.
-    req = httpx.Request("POST", "https://api.tavily.com/search")
-
-    class _Client:
-        async def post(self, *args, **kwargs):
-            return httpx.Response(200, json={"results": []}, request=req)
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
-    backend = TavilyBackend(api_key="tvly-test", base_url="https://api.tavily.com")
-    phases: list[str] = []
-    await backend.search("q", on_phase=phases.append)
-    assert "querying" in phases
-
-
 class _StubBackend:
     """Minimal SearchBackend: returns canned results or raises a canned error."""
 
@@ -1776,85 +1699,6 @@ class _StubBackend:
         if self._exc is not None:
             raise self._exc
         return self._results
-
-
-async def test_fallback_uses_primary_on_success():
-    # A successful primary never touches the fallback (no per-query Tavily cost).
-    primary = _StubBackend(results=[SearchResult("P", "https://p.com", "ps")])
-    fallback = _StubBackend(results=[SearchResult("F", "https://f.com", "fs")])
-    results = await FallbackSearchBackend(primary, fallback).search("q")
-
-    assert [r.url for r in results] == ["https://p.com"]
-    assert primary.calls == 1
-    assert fallback.calls == 0
-
-
-async def test_fallback_switches_on_primary_failure():
-    # The 案例1 mode: SearXNG breaker open → retry once via Tavily.
-    primary = _StubBackend(exc=EgressError("熔断"))
-    fallback = _StubBackend(results=[SearchResult("F", "https://f.com", "fs")])
-    results = await FallbackSearchBackend(primary, fallback).search("q")
-
-    assert [r.url for r in results] == ["https://f.com"]
-    assert primary.calls == 1 and fallback.calls == 1
-
-
-async def test_fallback_surfaces_primary_error_when_both_fail():
-    # Both down → the PRIMARY's (already-tuned, honest) reason is what the model sees.
-    primary = _StubBackend(exc=EgressError("主熔断信息"))
-    fallback = _StubBackend(exc=httpx.ConnectError("tavily down"))
-
-    with pytest.raises(EgressError, match="主熔断信息"):
-        await FallbackSearchBackend(primary, fallback).search("q")
-
-
-async def test_fallback_does_not_run_on_wrapped_cancel():
-    req = httpx.Request("GET", "http://example.invalid/search")
-    wrapped = httpx.ConnectError("wrapped-cancel", request=req)
-    wrapped.__cause__ = asyncio.CancelledError()
-    primary = _StubBackend(exc=wrapped)
-    fallback = _StubBackend(results=[SearchResult("F", "https://f.com", "fs")])
-
-    with pytest.raises(asyncio.CancelledError):
-        await FallbackSearchBackend(primary, fallback).search("q")
-    assert fallback.calls == 0
-
-
-async def test_fallback_emits_fallback_phase():
-    # 工具执行阶段进度: when the primary goes search-blind, the wrapper signals「改用备用引擎」
-    # so the waiting UI explains the Tavily leg's extra latency (not a stalled spinner).
-    primary = _StubBackend(exc=EgressError("熔断"))
-    fallback = _StubBackend(results=[SearchResult("F", "https://f.com", "fs")])
-    phases: list[str] = []
-    results = await FallbackSearchBackend(primary, fallback).search(
-        "q", on_phase=phases.append
-    )
-    assert [r.url for r in results] == ["https://f.com"]
-    assert "fallback" in phases
-
-
-async def test_success_path_emits_no_fallback_phase():
-    # A healthy primary never signals fallback — the fallback leg (and its phase) stays untouched.
-    primary = _StubBackend(results=[SearchResult("P", "https://p.com", "ps")])
-    fallback = _StubBackend(results=[])
-    phases: list[str] = []
-    await FallbackSearchBackend(primary, fallback).search("q", on_phase=phases.append)
-    assert "fallback" not in phases
-
-
-async def test_fallback_aclose_closes_both_legs():
-    closed: list[str] = []
-
-    class _Closeable(_StubBackend):
-        def __init__(self, name):
-            super().__init__()
-            self._name = name
-
-        async def aclose(self):
-            closed.append(self._name)
-
-    await FallbackSearchBackend(_Closeable("p"), _Closeable("f")).aclose()
-    assert sorted(closed) == ["f", "p"]
 
 
 # --- Sidecar cloud inference web_search fallback (local SearXNG unreachable) ---
@@ -2031,10 +1875,7 @@ async def test_web_search_no_cloud_fallback_on_http_403(monkeypatch):
     assert cloud_calls["n"] == 0
 
 
-# --- 全垃圾 SERP 兜底: tool-layer Tavily weak-retry (decision lives in the tool, not the
-# backend — FallbackSearchBackend stays exception-only). Trace 1fd37500b7ed49...: EN academic
-# queries returned HTTP 200 + all-junk SERPs (coolmathgames / opentable) that the backend's
-# exception fallback can't catch. ---
+# --- uniformly weak SERP: inject empty + quality note, one live search ---
 
 # An English academic query whose overlap tokens are {qmix, mappo, multi, agent}.
 _WEAK_QUERY = "QMIX MAPPO multi agent"
@@ -2066,46 +1907,24 @@ def _ontopic_results() -> list[SearchResult]:
     ]
 
 
-async def test_weak_serp_retries_via_tavily_and_adopts_strong(monkeypatch):
-    # 实搜全垃圾 + 有 Tavily 腿 → 恰好重试一次，且采用非 weak 的重试结果。
-    primary = _StubBackend(results=_junk_results())
-    fallback = _StubBackend(results=_ontopic_results())
-    monkeypatch.setattr(
-        search_mod, "get_search_backend", lambda: FallbackSearchBackend(primary, fallback)
-    )
-    result = await WebSearchTool().execute({"query": _WEAK_QUERY}, _ctx())
-
-    assert result.success is True
-    urls = [r["url"] for r in json.loads(result.output)["results"]]
-    assert "https://arxiv.org/abs/2003.08839" in urls  # adopted the strong retry set
-    assert "https://coolmathgames.com/" not in urls  # weak primary discarded
-    assert primary.calls == 1
-    assert fallback.calls == 1  # exactly one retry
-    assert result.metadata.get("low_relevance") is not True  # adopted set is non-weak
-
-
-async def test_strong_serp_does_not_retry(monkeypatch):
-    # 非 weak → 不重试（Tavily 腿零调用，稳态查询不付外部 API 成本）。
+async def test_strong_serp_is_one_search(monkeypatch):
     primary = _StubBackend(results=_ontopic_results())
-    fallback = _StubBackend(results=_ontopic_results())
-    monkeypatch.setattr(
-        search_mod, "get_search_backend", lambda: FallbackSearchBackend(primary, fallback)
-    )
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: primary)
     result = await WebSearchTool().execute({"query": _WEAK_QUERY}, _ctx())
 
     assert result.success is True
     assert primary.calls == 1
-    assert fallback.calls == 0  # non-weak → no retry
+    urls = [r["url"] for r in json.loads(result.output)["results"]]
+    assert "https://arxiv.org/abs/2003.08839" in urls
 
 
-async def test_weak_serp_no_retry_without_tavily_leg(monkeypatch):
-    # 无 Tavily 腿（裸 SearXNG 后端）→ 不重试；uniformly_weak → 空注入 + 诚实质量警告。
+async def test_weak_serp_injects_empty_with_warning(monkeypatch):
     primary = _StubBackend(results=_junk_results())
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: primary)
     result = await WebSearchTool().execute({"query": _WEAK_QUERY}, _ctx())
 
     assert result.success is True
-    assert primary.calls == 1  # no fallback leg → no extra search
+    assert primary.calls == 1
     payload = json.loads(result.output)
     assert payload["results"] == []
     assert "字面重合不足" in payload["note"]
@@ -2115,103 +1934,28 @@ async def test_weak_serp_no_retry_without_tavily_leg(monkeypatch):
     assert result.metadata.get("empty") is True
 
 
-async def test_weak_serp_retry_still_weak_empties_with_warning(monkeypatch):
-    # 重试仍 weak → 保留原 raw 集但注入为空 + 强警告 note（备用引擎也没救回来）。
-    primary = _StubBackend(results=_junk_results())
-    fallback = _StubBackend(
-        results=[SearchResult("Random Blog", "https://randomblog.example/", "cooking recipes")]
-    )
-    monkeypatch.setattr(
-        search_mod, "get_search_backend", lambda: FallbackSearchBackend(primary, fallback)
-    )
-    result = await WebSearchTool().execute({"query": _WEAK_QUERY}, _ctx())
-
-    assert result.success is True
-    assert primary.calls == 1 and fallback.calls == 1  # retried exactly once
-    payload = json.loads(result.output)
-    assert payload["results"] == []
-    assert "字面重合不足" in payload["note"]
-    assert result.metadata.get("low_relevance") is True
-
-
-async def test_weak_cache_hit_does_not_retry(monkeypatch):
-    # 缓存写入最终采用集；缓存命中的 weak 不重试。primary+fallback 都 weak → 首搜保留 weak
-    # raw 并缓存之；二搜命中缓存（weak）→ 不再打网、不再重试；注入仍为空。
+async def test_weak_cache_hit_does_not_search_again(monkeypatch):
     monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
     primary = _StubBackend(results=_junk_results())
-    fallback = _StubBackend(
-        results=[SearchResult("Random Blog", "https://randomblog.example/", "cooking recipes")]
-    )
-    monkeypatch.setattr(
-        search_mod, "get_search_backend", lambda: FallbackSearchBackend(primary, fallback)
-    )
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: primary)
     ctx = _ctx(conversation_id="conv-weak-cache")
     tool = WebSearchTool()
 
-    r1 = await tool.execute({"query": _WEAK_QUERY}, ctx)  # live: weak → retry weak → empty inject
+    r1 = await tool.execute({"query": _WEAK_QUERY}, ctx)
     assert r1.metadata.get("cached") is not True
-    assert primary.calls == 1 and fallback.calls == 1
+    assert primary.calls == 1
     assert json.loads(r1.output)["results"] == []
 
-    r2 = await tool.execute({"query": _WEAK_QUERY}, ctx)  # served from cache (weak set)
+    r2 = await tool.execute({"query": _WEAK_QUERY}, ctx)
     assert r2.metadata.get("cached") is True
-    assert primary.calls == 1  # no second live search
-    assert fallback.calls == 1  # crucially: the cached weak hit does NOT retry
+    assert primary.calls == 1
     assert "字面重合不足" in json.loads(r2.output)["note"]
     assert json.loads(r2.output)["results"] == []
 
 
-async def test_weak_serp_retry_emits_structured_logs(monkeypatch):
-    from tests.conftest import LogSpy
-
-    spy = LogSpy()
-    monkeypatch.setattr(search_mod, "logger", spy)
-    primary = _StubBackend(results=_junk_results())
-    fallback = _StubBackend(results=_ontopic_results())
-    monkeypatch.setattr(
-        search_mod, "get_search_backend", lambda: FallbackSearchBackend(primary, fallback)
-    )
-    await WebSearchTool().execute({"query": _WEAK_QUERY}, _ctx())
-
-    names = [n for n, _ in spy.events]
-    assert "search.weak_serp_retry" in names
-    assert "search.weak_serp_retry_adopted" in names
-
-
-def test_get_search_backend_is_bare_searxng_without_tavily(monkeypatch):
+def test_get_search_backend_is_searxng(monkeypatch):
     monkeypatch.setattr(search_backend_mod, "_backend", None)
-    monkeypatch.setattr(search_backend_mod.settings, "tavily_api_key", "")
     assert isinstance(search_backend_mod.get_search_backend(), SearXNGBackend)
-
-
-def test_get_search_backend_wraps_fallback_when_tavily_configured(monkeypatch):
-    monkeypatch.setattr(search_backend_mod, "_backend", None)
-    monkeypatch.setattr(search_backend_mod.settings, "tavily_api_key", "tvly-x")
-    backend = search_backend_mod.get_search_backend()
-    assert isinstance(backend, FallbackSearchBackend)
-    assert isinstance(backend.primary, SearXNGBackend)
-    assert isinstance(backend.fallback, TavilyBackend)
-
-
-async def test_probe_unwraps_fallback_to_probe_searxng_primary(monkeypatch):
-    # With Tavily configured the active backend is the wrapper; probe must still
-    # reach the SearXNG primary behind it (Tavily has nothing SearXNG-specific).
-    monkeypatch.setattr(search_backend_mod, "_backend", None)
-    monkeypatch.setattr(search_backend_mod.settings, "tavily_api_key", "tvly-x")
-    req = httpx.Request("GET", "http://localhost:18888/healthz")
-
-    class _OkClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-        async def get(self, *args, **kwargs):
-            return httpx.Response(200, text="OK", request=req)
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _OkClient())
-    assert await search_backend_mod.probe_search_backend() == (True, "http://localhost:18888")
 
 
 async def test_aclose_search_backend_closes_and_resets(monkeypatch):
@@ -2999,21 +2743,6 @@ async def test_searxng_mixed_query_sends_language_zh(monkeypatch):
     await backend.search(q, max_results=3, language=lang)
     assert captured["params"]["language"] == "zh"
     assert "default_lang" not in captured["params"]
-
-
-async def test_tavily_latin_query_country_united_states(monkeypatch):
-    captured: dict = {}
-    req = httpx.Request("POST", "https://api.tavily.com/search")
-
-    class _Client:
-        async def post(self, url, *, json=None, headers=None):
-            captured["json"] = dict(json or {})
-            return httpx.Response(200, json={"results": []}, request=req)
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
-    backend = TavilyBackend(api_key="tvly-test", base_url="https://api.tavily.com")
-    await backend.search("Anthropic funding", language="en")
-    assert captured["json"]["country"] == "united states"
 
 
 # --- A6: structured phase-duration logging via on_phase ---

@@ -4,7 +4,7 @@
  * 可见面不画「需要你拍板」和图标；套话仅 sr-only。
  *
  * 相对旧开场仪式刻意砍掉的三处硬分区：头部不再铺 `bg-muted/10`、不再压 `border-b`（标题与
- * 首行之间靠留白分段），底栏不再 `backdrop-blur`。卡内不出现品牌色，唯一的彩色出口是底栏主 CTA。
+ * 首行之间靠留白分段），底栏不再 `backdrop-blur`。卡内保持中性，蓝只给底栏主 CTA。
  *
  * 排版契约：头/底 `px-4`，体 `px-2`——{@link AskRowGroup} 的行自带 `px-2`，两者相加后行内文字
  * 与标题左对齐，而行的 hover 灰底比文字宽出 8px（参考卡的观感）。体里**非行式**的块（小节标题、
@@ -104,6 +104,7 @@ export function AskCardFooter({
       <Button
         size="md"
         variant="outline"
+        className="touch-target"
         disabled={busy}
         onClick={onStop}
         icon={
@@ -117,6 +118,7 @@ export function AskCardFooter({
       <Button
         size="md"
         variant="primary"
+        className="touch-target"
         disabled={busy || ctaDisabled}
         onClick={onContinue}
         icon={

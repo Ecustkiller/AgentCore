@@ -109,7 +109,7 @@ class Document(Base):
             name="ck_documents_role",
         ),
         CheckConstraint(
-            "apply_mode in ('always', 'on_demand')",
+            "apply_mode in ('always', 'on_demand', 'paths')",
             name="ck_documents_apply_mode",
         ),
         # Tree navigation ("children of a folder") + the memory store's per-scope note

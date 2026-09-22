@@ -1,5 +1,6 @@
 import { useConversationStore } from "@/stores/conversation";
 import { QueuedTurnsBar } from "./QueuedTurnsBar";
+import { SteerWaitingBar } from "./SteerWaitingBar";
 import {
   TurnComposer,
   type TurnComposerVariant,
@@ -30,6 +31,7 @@ export function MessageInput({
   const conversationId = useConversationStore((s) => s.currentConversationId);
   return (
     <div className={className ?? "px-4 pb-4 pt-2"}>
+      <SteerWaitingBar conversationId={conversationId} />
       <QueuedTurnsBar conversationId={conversationId} />
       <TurnComposer
         variant={variant}

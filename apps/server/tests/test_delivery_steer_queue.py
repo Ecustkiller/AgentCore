@@ -100,6 +100,7 @@ def test_turn_queue_started_payload():
     assert ev.type is EventType.TURN_QUEUE_STARTED
     assert ev.payload["remaining_depth"] == 2
     assert ev.payload["content"] == "next"
+    assert "user_message_id" not in ev.payload
     assert "attachments" not in ev.payload
     assert "agent_mentions" not in ev.payload
     TurnQueueStartedPayload.model_validate(ev.payload)
@@ -130,9 +131,11 @@ def test_turn_queue_started_payload():
         conversation_id="c1",
         remaining_depth=0,
         content="with file",
+        user_message_id="11111111-1111-4111-8111-111111111111",
         attachments=[att],
         agent_mentions=[{"agent_id": "a1", "role": "研究员"}],
     )
+    assert full.payload["user_message_id"] == "11111111-1111-4111-8111-111111111111"
     assert full.payload["attachments"] == [att]
     assert full.payload["agent_mentions"] == [{"agent_id": "a1", "role": "研究员"}]
     TurnQueueStartedPayload.model_validate(full.payload)
@@ -347,7 +350,7 @@ async def test_classic_steer_parks_on_live_turn(monkeypatch):
 
 
 async def test_classic_steer_degrades_to_queue_without_accepting(monkeypatch):
-    """经典 in-flight + delivery=steer 但无 accepting 窗口 → 回落 queue + degraded_from=steer。"""
+    """经典 in-flight + delivery=steer 但无 accepting 窗口 → 普通 FIFO，不标 degraded_from。"""
     from agentcore.api.routes.conversations import messages as messages_mod
     from agentcore.runtime.turn import steer as turn_steer_mod
 
@@ -386,7 +389,7 @@ async def test_classic_steer_degrades_to_queue_without_accepting(monkeypatch):
         gen = resp.body_iterator
         first = await gen.__anext__()
         assert "turn_queued" in first
-        assert '"degraded_from": "steer"' in first or '"degraded_from":"steer"' in first
+        assert "degraded_from" not in first
         await gen.aclose()
     finally:
         blocker.cancel()
@@ -463,7 +466,11 @@ async def test_list_queued_turns_route_empty_interjection_and_isolation(monkeypa
     )
     assert empty.items == []
 
-    plain = new_queued_turn(content="普通排队", user_id="u")
+    plain = new_queued_turn(
+        content="普通排队",
+        user_id="u",
+        user_message_id="11111111-1111-4111-8111-111111111111",
+    )
     from_inj = new_queued_turn(
         content="插话升队",
         user_id="u",
@@ -487,6 +494,8 @@ async def test_list_queued_turns_route_empty_interjection_and_isolation(monkeypa
         assert resp_a.items[0].content == "普通排队"
         assert resp_a.items[0].position == 1
         assert resp_a.items[0].interjection_id is None
+        assert resp_a.items[0].user_message_id == "11111111-1111-4111-8111-111111111111"
+        assert resp_a.items[1].user_message_id is None
         assert resp_a.items[1].queue_id == from_inj.queue_id
         assert resp_a.items[1].content == "插话升队"
         assert resp_a.items[1].position == 2

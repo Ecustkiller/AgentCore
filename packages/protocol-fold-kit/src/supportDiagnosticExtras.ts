@@ -176,7 +176,8 @@ function extraLinesFromIds(ids: SupportDiagnosticIds): string[] {
 
 /**
  * Format a paste-ready「排查包」for support / Cursor AI log lookup.
- * Lead line triggers conversation-logs workflow; trailing line is log_timeline.py.
+ * Lead line triggers conversation-logs workflow; the log_timeline.py line is the
+ * only command. The closing line tells Cursor to run that line as written.
  * Requires at least one id; extras append after ids when present — extras alone
  * never produce a pack.
  */
@@ -204,8 +205,10 @@ export function formatSupportDiagnosticText(ids: SupportDiagnosticIds): string {
   const lines = ["阅读这段产品AI日志：", ...idLines, ...extraLinesFromIds(ids)];
   if (traceId) {
     lines.push(`uv run python scripts/log_timeline.py --trace ${traceId}`);
+    lines.push("只执行上面这一条。");
   } else if (conversationId) {
     lines.push(`uv run python scripts/log_timeline.py ${conversationId}`);
+    lines.push("只执行上面这一条。");
   }
 
   return lines.join("\n");

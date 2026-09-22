@@ -109,7 +109,7 @@ def _memory_note_body_for_write(
     prior note does, keep that block and replace only the body. Incoming text that already
     carries frontmatter is authoritative (consolidation / full-doc writers).
     """
-    mode = apply_mode if apply_mode in ("always", "on_demand") else "on_demand"
+    mode = apply_mode if apply_mode in ("always", "on_demand", "paths") else "on_demand"
     incoming = parse_entry_frontmatter(content)
     if isinstance(incoming, FrontmatterError):
         raise FrontmatterEditError(incoming.message)
@@ -583,6 +583,30 @@ class DocumentRepository:
         )
         return list(result.scalars().all())
 
+    async def list_path_user_rules(
+        self, user_id: str, folder_id: str | None
+    ) -> list[Document]:
+        """Path-scoped user rules of one scope. Bounded patterns stay off ``<设定>``."""
+        conditions: list[ColumnElement[bool]] = [
+            Document.user_id == user_id,
+            _scope_clause(folder_id),
+            Document.role == "rule",
+            Document.apply_mode == "paths",
+            Document.ai_maintained.is_(False),
+            Document.kind == "document",
+            Document.deleted_at.is_(None),
+            Document.disputed_at.is_(None),
+        ]
+        parent_filter = await self._injectable_parent_filter(
+            user_id, folder_id, ai_maintained=False
+        )
+        if parent_filter is not None:
+            conditions.append(parent_filter)
+        result = await self._session.execute(
+            select(Document).where(*conditions).order_by(Document.name.asc())
+        )
+        return list(result.scalars().all())
+
     # --- user rules (ai_maintained=false, role=rule; one named md per topic) ---
 
     async def get_user_rule_doc(
@@ -617,7 +641,7 @@ class DocumentRepository:
         """Create-or-replace one named user-rule markdown under ``AgentCore/rules/``."""
         rules_dir = await self.ensure_rules_dir(user_id, folder_id)
         doc = await self.get_user_rule_doc(user_id, folder_id, name)
-        mode: ApplyMode = "on_demand" if apply == "on_demand" else "always"
+        mode: ApplyMode = apply if apply in ("always", "on_demand", "paths") else "always"  # type: ignore[assignment]
         body = set_entry_frontmatter(content, apply=mode, description=description)
         if doc is None:
             doc = Document(
@@ -647,7 +671,8 @@ class DocumentRepository:
         """Live user-rule docs in the scope (always + on_demand), name-sorted."""
         always = await self.list_injectable_rules(user_id, folder_id, ai_maintained=False)
         on_demand = await self.list_on_demand_user_rules(user_id, folder_id)
-        by_id = {doc.id: doc for doc in (*always, *on_demand)}
+        path = await self.list_path_user_rules(user_id, folder_id)
+        by_id = {doc.id: doc for doc in (*always, *on_demand, *path)}
         return sorted(by_id.values(), key=lambda doc: doc.name)
 
     async def delete_user_rule_doc(
@@ -708,7 +733,7 @@ class DocumentRepository:
         )
         self._session.add(doc)
         if kind == "document":
-            mode = apply_mode if apply_mode in ("always", "on_demand") else "on_demand"
+            mode = apply_mode if apply_mode in ("always", "on_demand", "paths") else "on_demand"
             try:
                 body = set_entry_frontmatter(content, apply=mode)  # type: ignore[arg-type]
             except FrontmatterEditError as exc:
@@ -793,10 +818,13 @@ class DocumentRepository:
         doc = await self.get(document_id, user_id=user_id)
         if doc is None:
             return None
-        if apply_mode not in ("always", "on_demand"):
+        if apply_mode not in ("always", "on_demand", "paths"):
             raise ValueError(f"invalid apply_mode: {apply_mode!r}")
         try:
             body = set_entry_frontmatter(doc.content, apply=apply_mode)  # type: ignore[arg-type]
+            parsed = parse_entry_frontmatter(body)
+            if isinstance(parsed, FrontmatterError):
+                raise FrontmatterEditError(parsed.message)
         except FrontmatterEditError:
             raise
         self._set_content_and_derive(doc, body)

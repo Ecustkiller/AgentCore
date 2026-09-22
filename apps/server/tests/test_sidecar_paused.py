@@ -534,10 +534,7 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
                         "conversationId": "c1",
                         "decision": "adjust",
                         "note": "换个方向",
-                        "permissionAxes": {
-                            "file_write": "ask",
-                            "command": "ask",
-                        },
+                        "permissionAxes": {"boundary": "read"},
                     },
                 }
             )
@@ -553,19 +550,9 @@ def test_resume_claims_frame_and_drives_resume_pipeline(tmp_path, monkeypatch):
     assert captured["decision"] == "adjust"
     assert captured["note"] == "换个方向"
     assert captured["saver"] is not None
-    # Partial axes (no host) reach the pipeline; missing host defaults to SESSION.
-    from agentcore.core.types import (
-        CommandAxis,
-        FileWriteAxis,
-        HostAxis,
-        PermissionAxes,
-    )
+    from agentcore.core.types import WorkspaceBoundary
 
-    assert captured["autonomy"] == PermissionAxes(
-        FileWriteAxis.ASK,
-        CommandAxis.ASK,
-        HostAxis.SESSION,
-    )
+    assert captured["autonomy"] is WorkspaceBoundary.READ
     # the reloaded history (from the local frame) is threaded into the resume pipeline so
     # window_from_journal can splice it ahead of the folded rounds (Phase 2 ⑤).
     assert captured["history"] == history

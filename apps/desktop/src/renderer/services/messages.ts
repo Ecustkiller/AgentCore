@@ -98,10 +98,6 @@ export interface BackendMessage {
     registrant?: string;
     citable?: boolean;
   }[];
-  /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's rating on this assistant reply
-   * (messages.feedback column) — "up" | "down" | null(未评价). Replayed onto
-   * `message.feedback` so a reloaded bubble shows the rating the user gave. */
-  feedback?: "up" | "down" | null;
   /** Persisted turn replay payload. `events` is a multi-agent turn's ordered
    * run/tool SSE events (replayed through the same fold as the live stream to
    * rebuild the team graph on reload, §9.3); `process` is a single-agent turn's
@@ -154,7 +150,7 @@ export interface BackendMessage {
   /** 曾中断恢复（``usage.recovered``）：本回合崩过、由租约清扫重驱原地跑完. */
   recovered?: boolean | null;
   /** 回合轮次 (Tier 2 重载持久化): ReAct rounds the turn ran, projected from the same column.
-   * Replayed onto `message.rounds`; 「更多」用量详情在 > 1 时展示。null for
+   * Replayed onto `message.rounds`; 底栏「用量」在 > 1 时展示。null for
    * user / pre-feature rows. */
   rounds?: number | null;
   /** 回合墙钟用时 (ms)：与 message_end.duration_ms 同锚；重载自 usage JSON 投影。 */
@@ -354,7 +350,7 @@ export function toMessage(m: BackendMessage): Message {
     error: m.runs?.error ?? m.usage?.error ?? undefined,
     // 回合 token 用量 + 轮次 (Tier 2 重载): replay the persisted turn snapshot,
     // mirroring the live `attachTurnMetaToLastMessage` stamp — usage is already
-    // the ledger short-key shape (normalized server-side); rounds > 1 只进「更多」。
+    // the ledger short-key shape (normalized server-side); rounds > 1 只进「用量」。
     // Both undefined for user / no-spend turns → no meta row (live parity).
     usage: m.usage ?? undefined,
     rounds: m.rounds ?? undefined,
@@ -362,9 +358,6 @@ export function toMessage(m: BackendMessage): Message {
     generationMs: m.generation_ms ?? undefined,
     collab: m.collab ?? undefined,
     teamBatch: m.team_batch ?? undefined,
-    // 回复反馈 (点赞/点踩): replay the persisted rating so a reloaded bubble shows the
-    // user's thumbs; null server-side → null (未评价).
-    feedback: m.feedback ?? null,
     // 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用（hover 明细仍走 GET …/cost）。
     cost: m.cost ?? undefined,
     // 预检警告（P2）：runs 投影抬升的 turn_warning → 消息横幅。
@@ -663,7 +656,7 @@ export type LoadLatestWindowOpts = {
  * Warm open write policy (消息窗写入契约 step 3):
  * - local stream pumping → keep live slice (no network window replace)
  * - unconfirmed local tail (optimistic send) → keep; REST is not the live end
- * - destination (pendingFocus / ?msg=) → keep current slice for jump/load-around
+ * - destination (pendingFocus) → keep current slice for jump/load-around
  * - else (sidebar reopen / A→B→A) → explicit latest snap (not softRefresh)
  */
 export type WarmOpenAction = "skip_generating" | "keep_anchor" | "snap_latest";
@@ -888,34 +881,5 @@ export async function jumpToMessage(
     });
   } catch {
     /* message gone / not owned — leave the conversation as-is */
-  }
-}
-
-/**
- * Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈). Optimistic: the
- * bubble flips immediately, then persists; a failed PATCH reverts to the prior rating
- * and rethrows so the caller can toast. `feedback` is "up" / "down" to rate, or null to
- * clear (clicking the active side again toggles it off).
- */
-export async function setMessageFeedback(
-  conversationId: string,
-  messageId: string,
-  feedback: "up" | "down" | null,
-): Promise<void> {
-  const store = useConversationStore.getState();
-  const prev =
-    store.byId[conversationId]?.messages.find((m) => m.id === messageId)
-      ?.feedback ?? null;
-  store.updateMessage(messageId, { feedback }, conversationId);
-  try {
-    await api.patch(
-      `/v1/conversations/${conversationId}/messages/${messageId}/feedback`,
-      { feedback },
-    );
-  } catch (err) {
-    useConversationStore
-      .getState()
-      .updateMessage(messageId, { feedback: prev }, conversationId);
-    throw err;
   }
 }

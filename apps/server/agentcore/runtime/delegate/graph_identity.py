@@ -10,7 +10,7 @@
   → 本回合新图 + ``prev_execution_id``
 - 跨回合已收口且无续派 / 补缺口 → 新图、不链
 
-图归属由回合边界机械决定。观测领养（wait / cancel / 插话）走
+图归属由回合边界机械决定。观测领养（cancel / 插话）走
 ``current_execution_id``，派单落图走本回合 mint 的 ``context_execution_id``。
 
 模块内经 ``coordination_session.`` / ``graph_append.`` 属性调用（而非 from-import 绑名），

@@ -17,7 +17,12 @@ Design (mirrors the offline memory consolidation pattern):
   tokens. Failure leaves the watermark untouched and arms a short in-process cooldown
   (``compaction_failure_cooldown_seconds``, or the failure's own ``retry_after`` when
   it is longer) so neither trigger re-schedules until it expires (``_inflight_tasks``
-  still dedupes in-flight).
+  still dedupes in-flight). Recency retain is ``compaction_recency_token_budget``
+  packed from the newest user-led turn (count 12 is not the retain rule).
+- **Dull-line (pre-turn)** — last-hop **single-request** ``prompt_tokens ≥ 32_000``
+  and the token budget still leaves a fold that meets the internal empty-run gate
+  → ``compact_before_turn`` awaits **one** pass. Failure does not refuse the send
+  and does not push the watermark. Does not wait when nothing is foldable.
 - **Near-ceiling (pre-turn, 定案⑦A)** — when last-turn **single-request**
   ``prompt_tokens`` are near **this turn's** model window (``compaction_near_context_ratio``
   of ``context_length``, or absolute ``compaction_near_context_tokens`` when length
@@ -73,9 +78,18 @@ from agentcore.billing.allowance import allowance_epoch
 from agentcore.billing.gate import BackgroundLlmSkip, run_compaction_llm
 from agentcore.config import settings
 from agentcore.conversation.compact_prompt import (
+    IDENTITY_LEDGER_FENCE,  # noqa: F401 — tests import this name from compaction
     _COMPACT_SYSTEM_PROMPT,  # noqa: F401 — tests import this name from compaction
+    attach_identity_ledger,
     compact_system_prompt,
+    estimate_message_tokens,  # noqa: F401 — tests
+    merge_identity_items,
+    parse_identity_ledger,
+    recency_keep_index,
     render_conversation_fold,
+    render_identity_ledger,
+    render_tool_traces,  # noqa: F401 — tests
+    strip_identity_ledger,
 )
 from agentcore.core.errors import recovery_at_iso
 from agentcore.core.logging import get_logger
@@ -115,48 +129,55 @@ _COMPACT_TIMEOUT_SECONDS = 45.0
 _render_fold = render_conversation_fold
 
 
-def _select_fold(batch: Sequence[Message], *, recency: int, min_fold: int) -> list[Message]:
-    """The oldest messages to fold this pass: all but the most recent ``recency``.
+def _select_fold(
+    batch: Sequence[Message],
+    *,
+    token_budget: int | None = None,
+    min_fold: int,
+    recency: int | None = None,
+) -> list[Message]:
+    """Oldest messages to fold this pass: everything before the token-budget keep window.
 
-    Returns ``[]`` (a no-op signal — fold nothing, spend no LLM call) unless at least
-    ``min_fold`` messages qualify. ``batch`` is the un-folded tail, oldest-first; the
-    last folded message's created_at becomes the new watermark, so folding advances
-    sequentially and a long backlog catches up incrementally across passes.
+    Packs newest user-led turns up to ``token_budget`` (default
+    ``compaction_recency_token_budget``), always keeping the latest user-led turn.
+    ``recency`` is ignored — message count is not the retain rule. Returns ``[]``
+    unless at least ``min_fold`` messages sit outside that window. ``batch`` is the
+    un-folded tail, oldest-first; the last folded created_at becomes the watermark.
 
-    Fold count is floored to a complete turn boundary so the verbatim tail (when
-    non-empty) starts on a ``user`` message. A naive message-count cut can land
-    just before an assistant reply; the loader then prefixes an assistant-role
-    summary block and the provider sees two consecutive assistant messages
-    (strict OpenAI-compatible backends may 400). Walking the cut back to the
-    nearest user-led boundary keeps watermark idempotency and only folds one
-    fewer message when needed — the leftover is picked up on a later pass.
+    The keep cut is already a user-led start, so the verbatim tail (when non-empty)
+    starts on ``user`` and the loader can prefix an assistant-role summary without
+    consecutive assistant roles.
     """
-    fold_count = len(batch) - recency
-    if fold_count < min_fold:
+    del recency  # leftover kwarg so older call sites / tests can still pass it
+    budget = (
+        settings.compaction_recency_token_budget if token_budget is None else token_budget
+    )
+    keep_from = recency_keep_index(batch, token_budget=budget)
+    fold = list(batch[:keep_from])
+    while fold and getattr(fold[-1], "role", None) == "user":
+        fold.pop()
+    if len(fold) < min_fold:
         return []
-    # Floor to a user-turn boundary: tail[0] must be user (or there is no tail).
-    while fold_count > 0 and fold_count < len(batch) and batch[fold_count].role != "user":
-        fold_count -= 1
-    if fold_count < min_fold:
-        return []
-    return list(batch[:fold_count])
+    return fold
 
 
 def compaction_message_due(
     batch: Sequence[Message],
     *,
-    recency: int | None = None,
+    token_budget: int | None = None,
     min_fold: int | None = None,
+    recency: int | None = None,
 ) -> bool:
     """Pure message-side due check: isomorphic to ``_select_fold`` non-empty.
 
     Uses ``compaction_message_trigger_min_fold`` by default (schedule gate), not the
     internal ``compaction_min_fold_messages`` (empty-run LLM guard inside compact).
     """
+    del recency
     return bool(
         _select_fold(
             batch,
-            recency=settings.compaction_recency_messages if recency is None else recency,
+            token_budget=token_budget,
             min_fold=(
                 settings.compaction_message_trigger_min_fold if min_fold is None else min_fold
             ),
@@ -185,6 +206,7 @@ async def _summarize(
     conversation_id: str,
     user_waiting: bool = False,
     file_ledger: str = "",
+    tool_traces: str = "",
 ) -> str:
     """One flash, non-thinking call → the updated rolling summary ("" on failure).
 
@@ -215,16 +237,18 @@ async def _summarize(
                     history_msgs.append(
                         LLMMessage(role="assistant", content=f"（失败）{fail}")
                     )
-        prior = old_summary.strip() or "（无，这是本对话的首次压缩）"
+        prior = strip_identity_ledger(old_summary).strip() or "（无，这是本对话的首次压缩）"
+        extras: list[str] = []
         ledger = file_ledger.strip()
-        files = (
-            f"\n\n# 本批涉及的文件（journal 权威路径，必须并入「涉及的文件与标识符」）\n{ledger}"
-            if ledger
-            else ""
-        )
+        if ledger:
+            extras.append(f"# 本批涉及的文件\n{ledger}")
+        traces = tool_traces.strip()
+        if traces:
+            extras.append(f"# 被折轮的工具轨迹\n{traces}")
+        extra = ("\n\n" + "\n\n".join(extras)) if extras else ""
         tail = (
             f"{TURN_ENVELOPE_FENCE}\n{compact_system_prompt()}\n\n"
-            f"# 已有滚动摘要\n{prior}{files}\n\n"
+            f"# 已有滚动摘要\n{prior}{extra}\n\n"
             "较早对话已在上面。只输出更新后的滚动摘要正文。"
         )
         req_messages = [
@@ -246,7 +270,12 @@ async def _summarize(
                 LLMMessage(role="system", content=compact_system_prompt()),
                 LLMMessage(
                     role="user",
-                    content=_render_fold(old_summary, messages, file_ledger=file_ledger),
+                    content=_render_fold(
+                        old_summary,
+                        messages,
+                        file_ledger=file_ledger,
+                        tool_traces=tool_traces,
+                    ),
                 ),
             ],
             stream=False,
@@ -272,22 +301,99 @@ async def _load_unfolded_batch(conversation_id: str) -> list[Message]:
         conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
         if conv is None:
             return []
-        recency = settings.compaction_recency_messages
-        batch_cap = settings.compaction_max_fold_messages + recency
+        scan = settings.compaction_context_max_messages
         msg_repo = MessageRepository(session)
         if conv.compacted_through is None:
-            rows, _total = await msg_repo.list_by_conversation(conversation_id, limit=batch_cap)
-            return list(rows)
-        rows, _more = await msg_repo.list_after(
-            conversation_id, after=conv.compacted_through, limit=batch_cap
+            return list(await msg_repo.list_recent(conversation_id, limit=scan))
+        return list(
+            await msg_repo.list_recent_after(
+                conversation_id, after=conv.compacted_through, limit=scan
+            )
         )
-        return list(rows)
+
+
+def _fold_before_keep(
+    newest: Sequence[Message],
+    oldest: Sequence[Message],
+    *,
+    token_budget: int,
+    min_fold: int,
+) -> list[Message]:
+    """Oldest rows strictly before the newest-side keep window, if ≥ ``min_fold``.
+
+    ``newest`` is a recent-biased scan (true near end). ``oldest`` is an oldest-first
+    cap after the watermark (incremental catch-up). When they are the same full tail,
+    this matches ``_select_fold``.
+    """
+    if not newest:
+        return []
+    keep_from = recency_keep_index(newest, token_budget=token_budget)
+    if keep_from >= len(newest):
+        return []
+    cutoff = newest[keep_from].created_at
+    fold = [m for m in oldest if getattr(m, "created_at", None) is not None and m.created_at < cutoff]
+    while fold and getattr(fold[-1], "role", None) == "user":
+        fold.pop()
+    if len(fold) < min_fold:
+        return []
+    return fold
+
+
+async def _load_fold_windows(conversation_id: str) -> tuple[list[Message], list[Message], str]:
+    """Newest keep-scan, oldest fold-cap, and stored summary prose+ledger."""
+    scan = settings.compaction_context_max_messages
+    max_fold = settings.compaction_max_fold_messages
+    async with async_session_factory() as session:
+        conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+        if conv is None:
+            return [], [], ""
+        msg_repo = MessageRepository(session)
+        after = conv.compacted_through
+        if after is None:
+            newest = list(await msg_repo.list_recent(conversation_id, limit=scan))
+            oldest, _total = await msg_repo.list_by_conversation(
+                conversation_id, limit=max_fold
+            )
+            oldest = list(oldest)
+        else:
+            newest = list(
+                await msg_repo.list_recent_after(conversation_id, after=after, limit=scan)
+            )
+            oldest, _more = await msg_repo.list_after(
+                conversation_id, after=after, limit=max_fold
+            )
+            oldest = list(oldest)
+        return newest, oldest, conv.compaction_summary or ""
+
+
+async def _plan_fold(
+    conversation_id: str,
+    *,
+    min_fold: int,
+    token_budget: int | None = None,
+) -> list[Message]:
+    """Fold candidates for due / compact / dull-line (empty = nothing to fold)."""
+    newest, oldest, _summary = await _load_fold_windows(conversation_id)
+    budget = (
+        settings.compaction_recency_token_budget if token_budget is None else token_budget
+    )
+    return _fold_before_keep(newest, oldest, token_budget=budget, min_fold=min_fold)
 
 
 async def _is_message_due(conversation_id: str) -> bool:
-    """DB message trigger: ``_select_fold`` on watermark-after batch (min_fold)."""
-    batch = await _load_unfolded_batch(conversation_id)
-    return compaction_message_due(batch)
+    """DB message trigger: fold plan non-empty with message_trigger_min_fold."""
+    fold = await _plan_fold(
+        conversation_id, min_fold=settings.compaction_message_trigger_min_fold
+    )
+    return bool(fold)
+
+
+async def _has_foldable_beyond_recency(conversation_id: str) -> bool:
+    """Internal empty-run gate: token-budget foldable ≥ ``compaction_min_fold_messages``."""
+    fold = await _plan_fold(
+        conversation_id, min_fold=settings.compaction_min_fold_messages
+    )
+    return bool(fold)
 
 
 async def compact_conversation(
@@ -298,9 +404,9 @@ async def compact_conversation(
 ) -> bool:
     """Fold this conversation's older turns into its rolling summary. Never raises.
 
-    Watermark-gated and self-limiting: loads the un-folded tail (oldest-first from
-    ``compacted_through``), keeps the most recent ``compaction_recency_messages``
-    verbatim, and folds the rest — but only when there is enough old material to be
+    Watermark-gated and self-limiting: packs a newest-side keep window by
+    ``compaction_recency_token_budget``, then folds the oldest un-folded prefix
+    outside that window — but only when there is enough old material to be
     worth an LLM call (``compaction_min_fold_messages``); otherwise it no-ops without
     spending a call. Returns whether a new summary was written.
 
@@ -318,39 +424,62 @@ async def compact_conversation(
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
             if conv is None:
                 return False
-            recency = settings.compaction_recency_messages
-            batch_cap = settings.compaction_max_fold_messages + recency
+            user_id = conv.user_id
+            old_summary = conv.compaction_summary or ""
+            scan = settings.compaction_context_max_messages
+            max_fold = settings.compaction_max_fold_messages
             msg_repo = MessageRepository(session)
-            if conv.compacted_through is None:
-                rows, _total = await msg_repo.list_by_conversation(conversation_id, limit=batch_cap)
-                batch = list(rows)
-            else:
-                rows, _more = await msg_repo.list_after(
-                    conversation_id, after=conv.compacted_through, limit=batch_cap
+            after = conv.compacted_through
+            if after is None:
+                newest = list(await msg_repo.list_recent(conversation_id, limit=scan))
+                oldest, _total = await msg_repo.list_by_conversation(
+                    conversation_id, limit=max_fold
                 )
-                batch = list(rows)
+                oldest = list(oldest)
+            else:
+                newest = list(
+                    await msg_repo.list_recent_after(
+                        conversation_id, after=after, limit=scan
+                    )
+                )
+                oldest, _more = await msg_repo.list_after(
+                    conversation_id, after=after, limit=max_fold
+                )
+                oldest = list(oldest)
 
-            # Gate BEFORE any LLM spend: fold only when enough old material remains
-            # beyond the verbatim recency window.
-            fold_msgs = _select_fold(
-                batch,
-                recency=recency,
+            fold_msgs = _fold_before_keep(
+                newest,
+                oldest,
+                token_budget=settings.compaction_recency_token_budget,
                 min_fold=settings.compaction_min_fold_messages,
             )
             if not fold_msgs:
                 return False
             new_watermark = fold_msgs[-1].created_at
-            old_summary = conv.compaction_summary or ""
-            user_id = conv.user_id
             fold_turn_ids = [
                 m.id
                 for m in fold_msgs
                 if getattr(m, "role", None) == "assistant" and getattr(m, "id", None)
             ]
 
-        from agentcore.runtime.context.working_set import build_fold_file_ledger
+        from agentcore.runtime.context.working_set import (
+            build_fold_file_ledger,
+            identity_items_from_traces,
+            load_fold_tool_traces,
+        )
 
         file_ledger = await build_fold_file_ledger(fold_turn_ids)
+        trace_rows = await load_fold_tool_traces(fold_turn_ids)
+        tool_traces = render_tool_traces(trace_rows)
+        prior_ledger = ""
+        if IDENTITY_LEDGER_FENCE in (old_summary or ""):
+            prior_ledger = old_summary.split(IDENTITY_LEDGER_FENCE, 1)[1]
+        prior_paths, prior_cmds = parse_identity_ledger(prior_ledger)
+        new_paths, new_cmds = identity_items_from_traces(trace_rows)
+        ledger_paths, ledger_cmds = merge_identity_items(
+            prior_paths, prior_cmds, new_paths, new_cmds
+        )
+        identity_ledger = render_identity_ledger(paths=ledger_paths, commands=ledger_cmds)
 
         async def _runner(credentials: LLMCredentials) -> str:
             model = resolve_user_model(credentials)
@@ -364,6 +493,7 @@ async def compact_conversation(
                     conversation_id=conversation_id,
                     user_waiting=user_waiting,
                     file_ledger=file_ledger,
+                    tool_traces=tool_traces,
                 )
             finally:
                 close = getattr(provider, "close", None)
@@ -390,10 +520,11 @@ async def compact_conversation(
             _mark_failure_cooldown(conversation_id, user_id=user_id)
             return False
 
+        stored = attach_identity_ledger(summary, identity_ledger)
         async with async_session_factory() as session:
             await ConversationRepository(session).set_compaction(
                 conversation_id,
-                summary=summary,
+                summary=stored,
                 compacted_through=new_watermark,
                 input_tokens=trigger_input_tokens,
             )
@@ -402,8 +533,10 @@ async def compact_conversation(
             "compaction.done",
             conversation_id=conversation_id,
             folded=len(fold_msgs),
-            kept=len(batch) - len(fold_msgs),
-            summary_chars=len(summary),
+            kept=max(0, len(newest) - recency_keep_index(
+                newest, token_budget=settings.compaction_recency_token_budget
+            )),
+            summary_chars=len(stored),
             trigger_input_tokens=trigger_input_tokens,
         )
         return True
@@ -800,27 +933,99 @@ async def maybe_compact_near_ceiling(
         return False
 
 
+async def ensure_dull_compaction_before_turn(
+    conversation_id: str,
+    *,
+    input_tokens: int,
+) -> bool:
+    """Await one fold at the 32k dull line. Failure does not refuse the send.
+
+    Skips when nothing outside the recency budget meets the internal empty-run
+    gate, when compaction is off, or when an upstream-dated cooldown is active.
+    Guessed failure cooldown is respected here (unlike near-ceiling).
+    """
+    if not settings.compaction_enabled:
+        return False
+    if input_tokens < settings.compaction_trigger_input_tokens:
+        return False
+    if _in_failure_cooldown(conversation_id):
+        logger.debug("compaction.cooldown_skip", conversation_id=conversation_id, path="dull")
+        return False
+    declared_remaining = _in_declared_cooldown(conversation_id)
+    if declared_remaining is not None:
+        logger.debug(
+            "compaction.cooldown_skip",
+            conversation_id=conversation_id,
+            path="dull",
+            declared_remaining_sec=round(declared_remaining, 1),
+        )
+        return False
+    try:
+        if not await _has_foldable_beyond_recency(conversation_id):
+            return False
+
+        existing = _inflight_tasks.get(conversation_id)
+        if existing is not None:
+            try:
+                return bool(await existing)
+            except Exception:
+                return False
+        task = _spawn_compact(conversation_id, input_tokens, user_waiting=True)
+        if task is None:
+            existing = _inflight_tasks.get(conversation_id)
+            if existing is None:
+                return False
+            try:
+                return bool(await existing)
+            except Exception:
+                return False
+        try:
+            ok = bool(await task)
+        except Exception:
+            return False
+        logger.info(
+            "compaction.dull_line",
+            conversation_id=conversation_id,
+            input_tokens=input_tokens,
+            wrote=ok,
+        )
+        return ok
+    except Exception as e:
+        logger.warning(
+            "compaction.dull_line_failed",
+            conversation_id=conversation_id,
+            error=str(e),
+        )
+        return False
+
+
 async def compact_before_turn(
     conversation_id: str,
     *,
     model_id: str | None = None,
 ) -> None:
-    """Fold if near this model's window; refuse the send when near and nothing wrote.
+    """Near-ceiling: await and refuse if nothing wrote. Dull line 32k: await once, still send.
 
-    A successful fold proceeds even if the stored watermark still looks near.
-    Post-turn ``schedule_compaction_if_due`` stays best-effort skip.
+    A successful near-ceiling fold proceeds even if the stored watermark still looks
+    near. Post-turn ``schedule_compaction_if_due`` stays best-effort skip.
     """
     tokens, context_length = await _load_fit_watermark(conversation_id, model_id)
     near = near_context_ceiling(tokens, context_length)
-    wrote = False
-    if near and settings.compaction_enabled:
-        wrote = await ensure_compaction_before_turn(
-            conversation_id,
-            input_tokens=tokens,
-            context_length=context_length,
+    if near:
+        wrote = False
+        if settings.compaction_enabled:
+            wrote = await ensure_compaction_before_turn(
+                conversation_id,
+                input_tokens=tokens,
+                context_length=context_length,
+            )
+        if not wrote:
+            raise _overflow_error()
+        return
+    if settings.compaction_enabled and tokens >= settings.compaction_trigger_input_tokens:
+        await ensure_dull_compaction_before_turn(
+            conversation_id, input_tokens=tokens
         )
-    if near and not wrote:
-        raise _overflow_error()
 
 
 async def _run(

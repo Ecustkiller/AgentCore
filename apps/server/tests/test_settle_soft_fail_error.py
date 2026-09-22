@@ -406,10 +406,7 @@ async def test_settle_refuses_ceo_audience_coordination_echo_on_degraded_rate_li
 
     echo = (
         "【团队已启动·协调模式】已派出 2 名队员（调研、写手）；图共 2 名，其中 0 名已完成。\n"
-        "调度在后台继续；完成态由图事件异步呈现。\n"
-        "你将收到团队事件（worker_completed / note / escalation / "
-        "user_interjection / all_completed）。无需处置时调 wait（或空响应，系统已豁免）——"
-        "派完若结束本回合：可见正文只留一句短的「人已派出」。"
+        "【协调期】图在转、无新结论可静默；对用户开口只谈请示/阻塞/阶段结论/回应中途插话。"
     )
     sink = EventSink()
     sink.emit(

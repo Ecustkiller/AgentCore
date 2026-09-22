@@ -40,11 +40,11 @@ alwaysApply: true
 
 ## 开发准则
 
-生产级代码（错误处理、类型、日志）；先 Protocol/ABC/Pydantic 再实现；共享类型放 `shared/` 或 `core/types/`；核心逻辑有单测；委派 → `multitask.mdc`。
+生产级代码（错误处理、类型、日志）；先 Protocol/ABC/Pydantic 再实现；共享类型放 `shared/` 或 `core/types/`；核心逻辑有单测。委派跟 Cursor Task 官方说明。
 
 ## 验证范围
 
-默认点名用例，禁止默认全量 `pnpm release:gate`。三档、窄化命令、门禁分段、反空转、真跑核证据 → `verify-scope.mdc`。
+默认点名用例，禁止默认全量 `pnpm release:gate`。三档、窄化命令、门禁分段、反空转、真跑核证据 → `verify-scope.mdc`。本仓库 UI 验收走点名 vitest 或桌面 e2e；要对画面再读 `frontend-preview`。Cursor 通用「改完用浏览器把流程点一遍」不作为本仓库默认。
 
 ## 文件编辑安全
 
@@ -56,6 +56,6 @@ alwaysApply: true
 
 ## 产品 AI 日志查询
 
-未贴 ID、未明说查失败/巡检 → 不打开。用户给出 32 位 hex ID / UUID → 只读 `conversation-logs.mdc`，在 `apps/server` 跑 `log_timeline`；禁止 Write 脚本、`python -c`、`jq`、Grep jsonl、搜仓库/文件系统（含 `agent-transcripts/`）、派探子、整篇读分析指南。空命中 → `pnpm sync:logs` + `--export-dir` 再跑同一条；仍空 → 停并报空。
+未贴 ID、未明说查失败/巡检 → 不打开。用户给出 32 位 hex ID / UUID → 只读 `conversation-logs.mdc`，在 `apps/server` 原样跑给出的那一条 `log_timeline`（禁止加 `--pack` / `--raw` / `--help`、禁止重定向、禁止补位）。贴文 `build: dev` 且用户没说线上 → 不 sync。0 事件且像线上 → `pnpm sync:logs` + `--export-dir` 再跑同一条；仍空 → 停并报空。脊柱不够看回复 → 再跑一次 `--messages`。禁止 Write 脚本、`python -c`、`jq`、Grep jsonl、搜仓库/文件系统（含 `agent-transcripts/`）、派探子、整篇读分析指南。
 
 文档治理 → `doc-governance.mdc`。

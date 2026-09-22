@@ -166,6 +166,48 @@ async def _load_full_messages(
     return _preview_messages(previews)
 
 
+_MESSAGE_STDOUT_NOTE = (
+    "message text only — no reasoning body, no LLM bodies, no journal"
+)
+
+
+async def message_text_document(
+    store: ConversationStore,
+    *,
+    conversation_id: str,
+    trace_id: str | None = None,
+) -> dict[str, Any]:
+    """Stdout twin of pack ``messages.json`` (``--full``).
+
+    Message text for one trace (or the conversation when ``trace_id`` is
+    omitted). Same trace filter as the pack. No reasoning body, no tool_calls
+    dump, no LLM request/response, no journal. Does not write a file.
+    """
+    rows = await _load_full_messages(store, conversation_id)
+    if trace_id:
+        rows = _filter_messages_for_trace(rows, trace_id)
+    messages: list[dict[str, Any]] = []
+    for row in rows:
+        messages.append(
+            {
+                "id": row.get("id"),
+                "role": row.get("role"),
+                "timestamp": row.get("timestamp"),
+                "trace_id": row.get("trace_id"),
+                "content": row.get("content") or row.get("content_preview") or "",
+                "content_len": row.get("content_len"),
+                "has_reasoning": row.get("has_reasoning"),
+                "finish_reason": row.get("finish_reason"),
+            }
+        )
+    return {
+        "conversation_id": conversation_id,
+        "trace_id": trace_id,
+        "note": _MESSAGE_STDOUT_NOTE,
+        "messages": messages,
+    }
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",

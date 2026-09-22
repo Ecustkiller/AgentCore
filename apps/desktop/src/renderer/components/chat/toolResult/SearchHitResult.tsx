@@ -9,9 +9,9 @@ import {
 } from "./parseSearchHits";
 
 /**
- * Clickable grep / code_search hit list: workspace-relative paths open the
- * conversation side-panel file preview via {@link useSidePanelStore.showFile}
- * (same File tab as 终稿路径点击). Line numbers are shown on the link;
+ * Clickable grep / code_search hit list: paths come from tool output and open
+ * the conversation side-panel file preview via {@link useSidePanelStore.showFile}.
+ * Prose in the answer does not do this. Line numbers are shown on the link;
  * scroll-to-line is deferred (pendingFilePreview seam not extended this batch).
  */
 export function SearchHitResult({

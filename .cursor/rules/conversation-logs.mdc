@@ -22,22 +22,28 @@ alwaysApply: false
 
 ```bash
 uv run python scripts/log_timeline.py --trace <trace_id>          # 默认 decision_spine
-uv run python scripts/log_timeline.py --pack <dir> --trace <tid>  # 排查包
-uv run python scripts/log_timeline.py --pack <dir> --full --trace <tid>
-uv run python scripts/log_timeline.py --raw --trace <trace_id>    # 全量仅需要时
+uv run python scripts/log_timeline.py --messages --trace <tid>    # 回复正文，stdout，不写文件
 uv run python scripts/log_timeline.py <conversation_id>
+uv run python scripts/log_timeline.py --pack <dir> --trace <tid>  # 仅把目录交给另一会话
+uv run python scripts/log_timeline.py --raw --trace <trace_id>    # 全量仅深挖
 uv run python scripts/log_timeline.py --recent
 uv run python scripts/log_stats.py --json  # Prefix Cache samples_by_breach → --trace
 uv run python scripts/log_patrol.py --export-dir ../../logs/prod-export --since 2d  # 巡检①
 ```
 
-有 ID → 优先 spine / `--pack`；`--raw` 仅深挖。包契约与 journal-only 自动存档 → [分析指南](/docs/05-平台与运维/对话日志分析指南.md)。`spine_events` = **turn_spine**，勿与产品面混称。
+有 ID → 先 spine。回复正文不够再 `--messages`（与排查包 `messages.json` 同一份：消息文本，无推理正文、无 LLM body、无 journal）。`--pack` 不用于查正文。包契约与 journal-only 自动存档 → [分析指南](/docs/05-平台与运维/对话日志分析指南.md)。`spine_events` = **turn_spine**，勿与产品面混称。
 
 ## 最短路径（已打开时）
 
-**禁即兴**：禁止 Write 脚本、`python -c`、`jq`、Grep/rg jsonl、在仓库搜 ID、Glob 定位 CLI、派探子、整篇读分析指南。CLI 不够 → `--pack` / `--raw`；仍不够 → 停、问人。
+用户已经给出 `log_timeline` 那一行 → **原样执行这一条**，cwd=`apps/server`。禁止追加 `--pack` / `--raw` / `--help`，禁止重定向到 `logs/` 或临时目录。trace 不是 32 位 hex → 停、问人，禁止补位。一轮只开这一条终端。
 
-单条 ID（即便夹讨论根因）→ 主自跑上表，cwd=`apps/server`，不套分相。缺正文再 `--pack`（必要时 `--full`）。本地 0 事件且像线上 → `pnpm sync:logs` 后同一条加 `--export-dir ../../logs/prod-export`（events = 当前 json-file 环，`--days` 只管 DB；环空时 sync 非 0 退出）。export 仍无该 trace → 查同目录 journal / messages / cost；仍空 → 停并报空，勿换工具。勿再用 `AGENTCORE_SSH` / `$AGENTCORE_HOME/logs`。
+`--- desktop.jsonl ---` 就是本机证据，禁止再读 userData 里的原文件。
+
+贴文含 `build: dev` → 不 `sync:logs`。这一条 0 事件，且用户说了是线上 → 才 `pnpm sync:logs` 后同一条加 `--export-dir ../../logs/prod-export`（events = 当前 json-file 环，`--days` 只管 DB；环空时 sync 非 0 退出）。export 仍无该 trace → 查同目录 journal / messages / cost；仍空 → 停并报空，勿换工具。勿再用 `AGENTCORE_SSH` / `$AGENTCORE_HOME/logs`。
+
+脊柱不够看回复 → 再单独一次 `--messages`（同一 ID，仍不写文件）。`--pack` 只在要把目录交给另一会话时用。
+
+**禁即兴**：禁止 Write 脚本、`python -c`、`jq`、Grep/rg jsonl、在仓库搜 ID、Glob 定位 CLI、派探子、整篇读分析指南。仍不够 → 停、问人。
 
 巡检 / reviews（仅用户明说）→ [`logs/reviews/README.md`](/logs/reviews/README.md)：① `log_patrol.py`（禁复制扫描脚本）② 按密度拆只读桶。写成「建议改」前须码核 HEAD。
 
@@ -48,4 +54,4 @@ uv run python scripts/log_patrol.py --export-dir ../../logs/prod-export --since 
 - **无连字符 32-hex** → `--trace`（勿先当 conversation_id）
 - **带连字符 UUID** → conversation_id；全貌用位置参数，单轮再 `--trace`
 - **无 ID** → 未明说查日志则不打开；仅当用户明说「查最新」才 `--recent`，须用文案/`preview` 确认匹配
-- **ID 已齐** → 直接 `log_timeline --json` 或 `--pack`
+- **ID 已齐** → 直接用户给出的那一条；要回复正文再 `--messages`

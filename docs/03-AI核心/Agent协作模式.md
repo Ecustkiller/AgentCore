@@ -82,7 +82,7 @@ worker 唯一向上通道。`reason` 三选一（缺省 / 无法识别 = `wait`�
 
 ### 自主度三档
 
-琐碎自修 → 执行层试一轮再 escalate → 方案层立刻 escalate。与用户会话 **PermissionAxes** / 权限配方正交。
+琐碎自修 → 执行层试一轮再 escalate → 方案层立刻 escalate。与对话边界正交。
 
 Worker 工具后还有确定性 **Escalation Gate**：只把工具失败当执行层自愈，**不**扫工具输出自由文猜方案层。方案层 /「职责偏离」只走结构化 `escalate(reason=scope|dep)`（真写越界由写工具层硬拒）。同 run 同 question 只 live 上报一次。若仍产出内部 `gate_kind=contract|contradiction`，**不得**占用户面 `scope` 职责偏离——仅结构化 `scope`/`dep` 占对应 wire `kind`。→ 见代码: `runtime/routing/models.py` · `runtime/routing/gate.py`
 

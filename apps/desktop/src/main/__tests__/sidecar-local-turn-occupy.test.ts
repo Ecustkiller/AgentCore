@@ -30,6 +30,7 @@ vi.mock("../auth-client", () => ({
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SIDECAR_CHANNELS } from "@shared/sidecar-contract";
 import {
   outboxDir,
   resetOccupiedConversationIdsProviderForTests,
@@ -471,7 +472,7 @@ describe("SidecarManager local-turn occupy", () => {
     expect(convPaths).not.toContain("/v1/conversations/c-live/local-turns");
   });
 
-  it("queue/needStart occupies then startTurn with queueId", async () => {
+  it("queue/needStart 交给渲染进程开跑，主进程不自己 startTurn", async () => {
     const t = capturingTransport();
     const manager = new SidecarManager(() => t.transport);
     const wc = { isDestroyed: () => false, send: vi.fn() };
@@ -493,16 +494,12 @@ describe("SidecarManager local-turn occupy", () => {
       userMessage: "下一句",
     };
     t.notify("queue/needStart", fifo);
-    await vi.waitFor(() =>
-      expect(t.sent.some((m) => m.method === "startTurn")).toBe(true),
-    );
-    expect(String(h.bearerPostJson.mock.calls[0]?.[0])).toBe(
-      "/v1/conversations/c-occupy/local-turns/begin",
-    );
-    const start = t.sent.find((m) => m.method === "startTurn");
-    expect(start?.params).toEqual(
+    expect(wc.send).toHaveBeenCalledWith(
+      SIDECAR_CHANNELS.queueNeedStart,
       expect.objectContaining({
         conversationId: fifo.conversationId,
+        rootId: START_REQ.rootId,
+        subpath: "",
         queueId: "q-fifo",
         userMessageId: fifo.userMessageId,
         messageId: fifo.messageId,
@@ -510,8 +507,7 @@ describe("SidecarManager local-turn occupy", () => {
         userMessage: "下一句",
       }),
     );
-    const beginIdx = t.sent.findIndex((m) => m.method === "startTurn");
-    expect(h.bearerPostJson).toHaveBeenCalled();
-    expect(beginIdx).toBeGreaterThanOrEqual(0);
+    expect(t.sent.some((m) => m.method === "startTurn")).toBe(false);
+    expect(h.bearerPostJson).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,7 @@ import json
 import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.logging import get_logger
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, ToolEffect, new_id
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary, ToolEffect, new_id
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import turn_profiles_for_turn
@@ -78,7 +78,7 @@ async def resume_chat_pipeline(
     suspension_saver: SuspensionSaver | None = None,
     suspension_deleter: SuspensionDeleter | None = None,
     llm_supports_tools: bool | None = None,
-    permission_axes: PermissionAxes | None = None,
+    permission_axes: WorkspaceBoundary | None = None,
     x_client_platform: str | None = None,
 ) -> dict:
     """Continue a turn paused at a leftover plan_review / live ask_user checkpoint (结构化挂起 2b resume).

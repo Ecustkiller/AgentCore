@@ -287,6 +287,7 @@ _CURATED_BY_CODE: dict[str, str] = {
     ),
     "access_denied": "这个文件正被其他程序占用，没能写入。关掉占用它的程序后我可以再试。",
     "outside_workspace": "这个路径不在当前工作区里，没能读写。",
+    "boundary": "这一步超出了这个对话的边界，没有执行。",
 }
 
 

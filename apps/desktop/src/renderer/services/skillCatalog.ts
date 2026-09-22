@@ -83,15 +83,32 @@ export function getSkillCatalog(
 }
 
 export function composeSkillContent(
-  applyMode: "always" | "on_demand",
+  applyMode: "always" | "on_demand" | "paths",
   description: string,
   body: string,
+  paths = "",
 ): string {
   const desc = description.replace(/\s+/g, " ").trim();
-  const apply = applyMode === "always" ? "always" : "on_demand";
-  const lines = [`apply: ${apply}`];
+  const lines = [`apply: ${applyMode}`];
   if (desc) lines.push(`description: ${desc}`);
+  if (applyMode === "paths") {
+    const pattern = paths.replace(/\s+/g, " ").trim();
+    if (pattern) lines.push(`paths: ${pattern}`);
+  }
   return `---\n${lines.join("\n")}\n---\n${body.replace(/^\r?\n/, "")}`;
+}
+
+export function parsePathPatterns(content: string): string {
+  const split = splitFrontmatter(content);
+  if (!split) return "";
+  const line = split.fm
+    .split(/\r?\n/)
+    .find((row) => /^\s*paths\s*:/i.test(row));
+  if (!line) return "";
+  return line
+    .replace(/^\s*paths\s*:\s*/i, "")
+    .replace(/\s+#.*$/, "")
+    .trim();
 }
 
 export function composeOnDemandSkillContent(

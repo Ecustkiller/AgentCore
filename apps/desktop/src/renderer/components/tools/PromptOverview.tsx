@@ -112,6 +112,11 @@ export function PromptOverview({
     const copy = promptItemShelfCopy(row.item, { alwaysChars: row.chars });
     return matchQuery(q, copy.title, copy.description, row.label);
   });
+  const pathItems = (rail.pathMine ?? []).filter((item) => {
+    const copy = promptItemShelfCopy(item);
+    return matchQuery(q, copy.title, copy.description, item.label);
+  });
+  const showPaths = pane === "mine" && pathItems.length > 0;
   const folders = rail.folders
     .map((folder) => ({
       ...folder,
@@ -166,6 +171,7 @@ export function PromptOverview({
   const emptySearch =
     Boolean(q) &&
     (pane === "mine" ? visibleAlways.length === 0 : promptItems.length === 0) &&
+    !showPaths &&
     !showDemand &&
     !showTools;
 
@@ -206,6 +212,30 @@ export function PromptOverview({
               ))}
             </div>
           )}
+        </section>
+      ) : null}
+
+      {showPaths ? (
+        <section
+          data-testid="prompt-rail-paths"
+          className="min-w-0"
+          onDragOver={onRejectDrag}
+        >
+          <RailHeading meta={`${pathItems.length} 条`}>碰到文件</RailHeading>
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            {pathItems.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                selected={selectedId === item.id}
+                picked={picked.has(item.id)}
+                listings={listings}
+                installedListings={installedListings}
+                onOpen={(event) => onOpenItem(item.id, event)}
+                renderMineTile={renderMineTile}
+              />
+            ))}
+          </div>
         </section>
       ) : null}
 

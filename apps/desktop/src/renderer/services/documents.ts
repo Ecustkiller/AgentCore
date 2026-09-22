@@ -25,15 +25,13 @@ export const AGENTCORE_ROOT_NAME = "AgentCore";
 /** User-owned rules directory under the convention root (server parents new rules here). */
 export const RULES_DIR_NAME = "rules";
 
-/**
- * User-facing injection mode (§5.4 / 目标形态). API may still store other values;
- * the desktop surface only offers these two.
- */
-export type DocumentApplyMode = "always" | "on_demand";
+/** 每次都带上 / 自己判断何时翻开 / 碰到这类文件就带上. */
+export type DocumentApplyMode = "always" | "on_demand" | "paths";
 
-/** Map wire `apply_mode` onto the two-state UI (unknown → on_demand per frontmatter default). */
+/** Map wire `apply_mode`. Unknown values stay 按需 (frontmatter's missing-key default). */
 export function toApplyMode(raw: string): DocumentApplyMode {
-  return raw === "always" ? "always" : "on_demand";
+  if (raw === "always" || raw === "paths") return raw;
+  return "on_demand";
 }
 
 /** A tree node's metadata (list rows — body omitted so a listing stays light). */

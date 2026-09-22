@@ -15,7 +15,6 @@ import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import { useQueuedTurns } from "@/stores/queuedTurns";
 import { Check, Copy, Pencil, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { MessageTime } from "./MessageActions";
@@ -41,9 +40,6 @@ export function UserMessage({ message }: MessageBubbleProps) {
     renderInlineLabels(message.content, attachments, agentMentions),
   );
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const queuedHere = useQueuedTurns(conversationId).some(
-    (entry) => entry.messageId === message.id,
-  );
   const marked = hasInlineMarkers(message.content) || hasInlineMarkers(draft);
 
   const startEdit = () => {
@@ -167,14 +163,6 @@ export function UserMessage({ message }: MessageBubbleProps) {
     >
       {!hasInlineMarkers(message.content) && (
         <UserChipTray attachments={attachments} mentions={agentMentions} />
-      )}
-      {queuedHere && (
-        <p
-          className="text-xs text-muted-foreground"
-          data-testid="user-message-queued"
-        >
-          排队中
-        </p>
       )}
       <div className="relative flex max-w-[80%] flex-col items-end gap-1.5">
         <div className="rounded-xl rounded-br-none bg-muted px-4 py-3 text-sm text-foreground">

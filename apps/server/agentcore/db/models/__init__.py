@@ -58,6 +58,7 @@ from .skill_store import (
     SkillStoreVersion,
 )
 from .tables import Table, TableRow, TableView
+from .turn_queue import TurnQueueItem
 from .users import (
     FriendRequest,
     Friendship,
@@ -114,6 +115,7 @@ __all__ = [
     "SkillStoreVersion",
     "TurnJournalRow",
     "TurnLeaseRow",
+    "TurnQueueItem",
     "TurnMetricsRow",
     "TurnStreamStateRow",
     "User",

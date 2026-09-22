@@ -48,6 +48,12 @@ export interface ConversationState {
     conversationId?: string | null,
   ) => void;
   addMessage: (message: Message, conversationId?: string | null) => void;
+  /** 插到指定消息之前，使尾部助手泡仍是最后一条。锚点不在则插到最后一条助手之前。 */
+  insertMessageBefore: (
+    message: Message,
+    beforeId: string,
+    conversationId?: string | null,
+  ) => void;
   /** `replace`（attach 增量重放）：`chunk` 是末尾未闭合正文块的全文，换块而非追加。 */
   appendToLastMessage: (
     chunk: string,

@@ -547,6 +547,7 @@ async def test_continue_ceo_rebuilds_worker_base_not_chat_prompt(monkeypatch):
         assemble_system_prompt,
         compose_ceo_chat_prompt,
     )
+    from agentcore.memory.rules_injection import TurnRuleView
     from agentcore.runtime.resolve.prompt import rebuild as rebuild_mod
     from agentcore.runtime.runs.types import RunPhase, RunState
 
@@ -582,7 +583,7 @@ async def test_continue_ceo_rebuilds_worker_base_not_chat_prompt(monkeypatch):
 
     backend = SimpleNamespace(location="server")
     monkeypatch.setattr(
-        rebuild_mod, "assemble_turn_rules", AsyncMock(return_value="")
+        rebuild_mod, "load_turn_rule_view", AsyncMock(return_value=TurnRuleView())
     )
     monkeypatch.setattr(
         rebuild_mod, "resolve_exec_languages", AsyncMock(return_value=())

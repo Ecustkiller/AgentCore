@@ -24,7 +24,7 @@ export type ProjectedTurnVerdict = {
 
 /**
  * Hand-filled golden can invent combos the arbitrator never emits.
- * `more` needs a bubble that is still on screen.
+ * `more` (bubble-footer「复制排查包」) needs a bubble that is still on screen.
  */
 export function turnVerdictHostContradiction(
   verdict: Pick<
@@ -33,7 +33,7 @@ export function turnVerdictHostContradiction(
   >,
 ): string | null {
   if (verdict.hideEmptyBubble === true && verdict.supportPackHost === "more") {
-    return 'hideEmptyBubble 与 supportPackHost="more" 互斥（空壳没有「更多」）';
+    return 'hideEmptyBubble 与 supportPackHost="more" 互斥（空壳没有排查包）';
   }
   return null;
 }

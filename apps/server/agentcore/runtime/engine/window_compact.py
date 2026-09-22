@@ -110,21 +110,94 @@ def assistant_round_spans(
     return spans
 
 
+def estimate_text_tokens(text: str) -> int:
+    """Fold-cut estimate only: ~1 token per CJK char, ~4 chars per other token.
+
+    Not a measured tokenizer. Do not call from ``build_request_window``.
+    """
+    if not text:
+        return 0
+    cjk = 0
+    for char in text:
+        code = ord(char)
+        if (
+            0x3000 <= code <= 0x9FFF
+            or 0xF900 <= code <= 0xFAFF
+            or 0xFF00 <= code <= 0xFFEF
+        ):
+            cjk += 1
+    other = len(text) - cjk
+    return cjk + (other + 3) // 4
+
+
+def estimate_message_tokens(message: LLMMessage) -> int:
+    """Estimated tokens of one window message (content, reasoning, tool args)."""
+    n = estimate_text_tokens(llm_content_text(message.content))
+    n += estimate_text_tokens(message.reasoning_content or "")
+    for block in message.thinking_blocks or ():
+        if isinstance(block, dict):
+            n += estimate_text_tokens(str(block.get("thinking") or ""))
+            n += estimate_text_tokens(str(block.get("data") or ""))
+    for call in message.tool_calls or ():
+        n += estimate_text_tokens(call.function.name or "")
+        n += estimate_text_tokens(call.function.arguments or "")
+    return n
+
+
+def estimate_span_tokens(
+    messages: Sequence[LLMMessage], span: tuple[int, int]
+) -> int:
+    lo, hi = span
+    return sum(estimate_message_tokens(m) for m in messages[lo:hi])
+
+
+def recency_keep_rounds(
+    messages: Sequence[LLMMessage],
+    spans: Sequence[tuple[int, int]],
+    *,
+    token_budget: int,
+) -> int:
+    """Newest rounds to keep verbatim at this fold cut.
+
+    Always keeps the latest round, even when it alone exceeds ``token_budget``.
+    Keeps two when both fit. Round count 2 is not a hard floor.
+    """
+    if not spans:
+        return 0
+    if len(spans) == 1:
+        return 1
+    newest = estimate_span_tokens(messages, spans[-1])
+    previous = estimate_span_tokens(messages, spans[-2])
+    if newest + previous <= max(0, token_budget):
+        return 2
+    return 1
+
+
 def select_new_fold_spans(
     messages: Sequence[LLMMessage],
     *,
-    recency_rounds: int,
     already_folded: int,
     min_fold_rounds: int,
+    recency_rounds: int | None = None,
+    recency_token_budget: int | None = None,
 ) -> list[tuple[int, int]]:
     """Newly foldable assistant-round spans, or ``[]`` when a pass is not worth an LLM.
 
-    Keeps the last ``recency_rounds`` spans verbatim. Incremental: skips the first
+    Recency is a token budget at the fold cut (newest round always; two when they
+    fit). ``recency_rounds`` is a test override. Incremental: skips the first
     ``already_folded`` foldable spans (already inside the rolling summary).
     """
     pre = preamble_end(messages, head_end(messages))
     spans = assistant_round_spans(messages, start=pre)
-    recency = max(0, recency_rounds)
+    if recency_rounds is None:
+        budget = (
+            settings.engine_window_compact_recency_token_budget
+            if recency_token_budget is None
+            else recency_token_budget
+        )
+        recency = recency_keep_rounds(messages, spans, token_budget=budget)
+    else:
+        recency = max(0, recency_rounds)
     if len(spans) <= recency:
         return []
     foldable = spans[:-recency] if recency else spans
@@ -144,19 +217,17 @@ def project_compacted_window(
     """Replace folded assistant rounds with an assistant summary + user bridge.
 
     Never mutates ``messages``. No-op (same object) when there is nothing to fold.
-    Never eats the recency tail, even if ``folded_rounds`` is stale-high after resume.
+    Uses the stored ``folded_rounds`` watermark; does not re-estimate tokens.
+    Never eats the newest assistant round, even if ``folded_rounds`` is stale-high
+    after resume (``recency_rounds`` override for tests).
     """
     text = (summary or "").strip()
     if not text or folded_rounds <= 0:
         return messages
-    recency = (
-        settings.engine_window_compact_recency_rounds
-        if recency_rounds is None
-        else recency_rounds
-    )
+    recency = 1 if recency_rounds is None else max(0, recency_rounds)
     pre = preamble_end(messages, head_end(messages))
     spans = assistant_round_spans(messages, start=pre)
-    max_fold = max(0, len(spans) - max(0, recency))
+    max_fold = max(0, len(spans) - recency)
     n = min(folded_rounds, max_fold)
     if n <= 0:
         return messages
@@ -353,8 +424,14 @@ async def maybe_compact_worker_window(
         return False
 
     already = int((latest_window_compact(run_id) or {}).get("folded_rounds") or 0)
-    recency = settings.engine_window_compact_recency_rounds
     min_fold = settings.engine_window_compact_min_fold_rounds
+    pre = preamble_end(messages, head_end(messages))
+    spans = assistant_round_spans(messages, start=pre)
+    recency = recency_keep_rounds(
+        messages,
+        spans,
+        token_budget=settings.engine_window_compact_recency_token_budget,
+    )
     new_spans = select_new_fold_spans(
         messages,
         recency_rounds=recency,

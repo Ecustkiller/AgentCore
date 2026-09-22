@@ -5,8 +5,6 @@ from pydantic import BaseModel
 
 class SearchSettings(BaseModel):
     searxng_url: str = "http://localhost:18888"
-    tavily_api_key: str = ""
-    tavily_base_url: str = "https://api.tavily.com"
 
     # PI-002 出网外泄硬守卫（默认关，仅观测）：开启后，web_fetch 对「本会话 web_search 未
     # surfaced 的新域名 + 携带较长查询参数」的请求直接拒绝（视为外泄信标），而非仅记

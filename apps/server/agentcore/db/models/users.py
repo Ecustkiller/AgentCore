@@ -33,7 +33,7 @@ class User(Base):
         CheckConstraint("role in ('user', 'admin')", name="ck_users_role"),
         CheckConstraint("status in ('active', 'disabled')", name="ck_users_status"),
         CheckConstraint(
-            "autonomy_policy in ('cautious', 'less_interrupt', 'managed')",
+            "autonomy_policy in ('read', 'folder', 'computer')",
             name="ck_users_autonomy_policy",
         ),
     )
@@ -77,11 +77,10 @@ class User(Base):
     # CNY like quota_monthly_cost_cny (→ nano at check time).
     quota_daily_cost_cny: Mapped[float | None] = mapped_column(Float, nullable=True)
     quota_daily_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Default permission recipe for new conversations (安全权限与治理 · AutonomyPolicy).
-    # cautious | less_interrupt (default) | managed — seeds conversation.permission_axes;
-    # plan_review / checkpoint confirmation unchanged.
+    # Default boundary for new conversations (安全权限与治理).
+    # read | folder (default) | computer — seeds conversation.permission_axes.
     autonomy_policy: Mapped[str] = mapped_column(
-        String(32), default="less_interrupt", server_default=text("'less_interrupt'")
+        String(32), default="folder", server_default=text("'folder'")
     )
     # --- 账号默认模型组合 (模型组合配置 · llm_model_profiles) ---
     # 指向用户组合或系统预置虚拟 id（glm-5.2）。NULL = 解析时回落系统「glm-5.2」预置。

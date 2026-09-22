@@ -10,6 +10,7 @@ import pytest
 from agentcore.observability.query.decision_spine import SCHEMA_VERSION as SPINE_SCHEMA
 from agentcore.observability.query.pack import (
     PACK_SCHEMA_VERSION,
+    message_text_document,
     required_pack_files,
     sanitize_timeline_event,
     write_investigation_pack,
@@ -313,3 +314,65 @@ def test_sanitize_drops_llm_body() -> None:
     assert "prompt" not in cleaned
     assert "completion" not in cleaned
     assert cleaned["model"] == "x"
+
+
+@pytest.mark.asyncio
+async def test_message_text_document_is_stdout_twin_of_full_messages(
+    tmp_path: Path,
+) -> None:
+    tid = "e" * 32
+    other = "f" * 32
+    body = "图" * 240
+    export = tmp_path / "export"
+    export.mkdir()
+    rows = [
+        {
+            "id": "u1",
+            "conversation_id": "conv-pack",
+            "role": "user",
+            "content": "输出 mermaid",
+            "created_at": "2026-07-31T10:00:00Z",
+            "trace_id": tid,
+        },
+        {
+            "id": "a1",
+            "conversation_id": "conv-pack",
+            "role": "assistant",
+            "content": body,
+            "reasoning_content": "SECRET_REASONING",
+            "tool_calls": [{"name": "consult"}],
+            "created_at": "2026-07-31T10:00:01Z",
+            "trace_id": tid,
+            "finish_reason": "stop",
+        },
+        {
+            "id": "other",
+            "conversation_id": "conv-pack",
+            "role": "assistant",
+            "content": "other turn",
+            "created_at": "2026-07-31T09:00:00Z",
+            "trace_id": other,
+        },
+    ]
+    (export / "messages.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    before = {p.name for p in export.iterdir()}
+    doc = await message_text_document(
+        ExportConversationStore(export),
+        conversation_id="conv-pack",
+        trace_id=tid,
+    )
+    assert {p.name for p in export.iterdir()} == before
+    dumped = json.dumps(doc, ensure_ascii=False)
+    assert "SECRET_REASONING" not in dumped
+    assert "consult" not in dumped
+    assert "other turn" not in dumped
+    assert doc["note"]
+    assert [m["id"] for m in doc["messages"]] == ["u1", "a1"]
+    assistant = doc["messages"][1]
+    assert assistant["content"] == body
+    assert assistant["content_len"] == len(body)
+    assert assistant["has_reasoning"] is True
+    assert "reasoning" not in assistant

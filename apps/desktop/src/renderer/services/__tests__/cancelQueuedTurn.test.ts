@@ -11,9 +11,8 @@ import {
 import {
   cancelQueuedTurn,
   clearQueuedTurnLocally,
-  steerQueuedTurn,
+  editQueuedTurn,
 } from "@/services/turns/cancelQueuedTurn";
-import { sendMidFlightMessage } from "@/services/turns/midFlight";
 import { useConversationStore } from "@/stores/conversation";
 import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
@@ -27,23 +26,7 @@ vi.mock("@/services/api", async (importOriginal) => {
   };
 });
 
-vi.mock("@/services/turns/midFlight", () => ({
-  sendMidFlightMessage: vi.fn(),
-}));
-
-let cloudCb: ((frame: unknown) => void) | null = null;
-
-vi.mock("@/services/fulfillStream", () => ({
-  onFulfillFrame: (cb: (frame: unknown) => void) => {
-    cloudCb = cb;
-    return () => {
-      cloudCb = null;
-    };
-  },
-}));
-
 const post = vi.mocked(api.post);
-const sendMidFlight = vi.mocked(sendMidFlightMessage);
 const CID = "conv-cancel-q";
 
 /** 仅条、尚无 messageId（快照项 / 他端）。 */
@@ -82,26 +65,12 @@ function seedQueuedWithBubble() {
   });
 }
 
-const SNAPSHOT_ATTACHMENTS = [
-  {
-    name: "brief.txt",
-    path: "attachments/brief.txt",
-    text: "brief body",
-    truncated: false,
-    kind: "file" as const,
-    workspace_path: "attachments/brief.txt",
-  },
-];
-const SNAPSHOT_MENTIONS = [{ agent_id: "agent-research", role: "研究员" }];
-
 beforeEach(() => {
   post.mockReset();
-  sendMidFlight.mockReset();
   resetSidecarRoutingForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useQueuedTurnsStore.setState({ byConversation: {} });
   resetAccountStateIngressForTests();
-  cloudCb = null;
   installAccountStateIngress();
 });
 
@@ -149,6 +118,29 @@ describe("cancelQueuedTurn", () => {
     post.mockRejectedValueOnce(new ApiError(404, "{}"));
     await expect(cancelQueuedTurn(CID, "q1")).resolves.toBe("already_gone");
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+
+  it("404（已开跑）只清条，不删正在跑的用户泡", async () => {
+    seedQueuedWithBubble();
+    post.mockRejectedValueOnce(new ApiError(404, "{}"));
+    await expect(cancelQueuedTurn(CID, "q1")).resolves.toBe("already_gone");
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+    expect(
+      useConversationStore
+        .getState()
+        .byId[CID]?.messages.find((m) => m.id === "user-q"),
+    ).toBeTruthy();
+  });
+
+  it("确认取消删掉对上的用户泡", async () => {
+    seedQueuedWithBubble();
+    post.mockResolvedValueOnce({});
+    await expect(cancelQueuedTurn(CID, "q1")).resolves.toBe("cancelled");
+    expect(
+      useConversationStore
+        .getState()
+        .byId[CID]?.messages.find((m) => m.id === "user-q"),
+    ).toBeUndefined();
   });
 
   it("其它错误 → 抛出且不清 UI", async () => {
@@ -237,143 +229,34 @@ describe("cancelQueuedTurn", () => {
   });
 });
 
-describe("steerQueuedTurn", () => {
-  it("取消成功后以 delivery=steer 重发同内容", async () => {
-    seedQueuedBarOnly("please jump");
+describe("editQueuedTurn", () => {
+  it("HTTP 成功留下新正文", async () => {
+    seedQueuedBarOnly();
     post.mockResolvedValueOnce({});
-    sendMidFlight.mockResolvedValueOnce({
-      kind: "received",
-      interjectionId: "ij1",
-    });
-
-    await steerQueuedTurn(CID, "q1");
-
+    await expect(
+      editQueuedTurn(CID, "q1", {
+        content: "改过",
+        attachments: [],
+        agentMentions: [],
+      }),
+    ).resolves.toBe("saved");
     expect(post).toHaveBeenCalledWith(
-      `/v1/conversations/${CID}/queued-turns/q1/cancel`,
-      {},
+      `/v1/conversations/${CID}/queued-turns/q1/edit`,
+      { content: "改过", attachments: [], agent_mentions: [] },
     );
-    expect(sendMidFlight).toHaveBeenCalledTimes(1);
-    expect(sendMidFlight).toHaveBeenCalledWith(
-      CID,
-      "please jump",
-      undefined,
-      "steer",
-      undefined,
-    );
-    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+    expect(useQueuedTurnsStore.getState().list(CID)[0]?.content).toBe("改过");
   });
 
-  it("排队时带附件 + 点名 → 取消插队重发后两者都还在", async () => {
-    useConversationStore.getState().switchConversation(CID);
-    cloudCb?.({
-      type: "turn_queue_snapshot",
-      payload: {
-        conversation_id: CID,
-        items: [
-          {
-            queue_id: "q1",
-            content: "请按附件看",
-            position: 1,
-            attachments: SNAPSHOT_ATTACHMENTS,
-            agent_mentions: SNAPSHOT_MENTIONS,
-          },
-        ],
-      },
-    });
-    post.mockResolvedValueOnce({});
-    sendMidFlight.mockResolvedValueOnce({
-      kind: "received",
-      interjectionId: "ij1",
-    });
-
-    await steerQueuedTurn(CID, "q1");
-
-    expect(sendMidFlight).toHaveBeenCalledTimes(1);
-    expect(sendMidFlight).toHaveBeenCalledWith(
-      CID,
-      "请按附件看",
-      [
-        expect.objectContaining({
-          name: "brief.txt",
-          path: "attachments/brief.txt",
-          text: "brief body",
-          workspace_path: "attachments/brief.txt",
-        }),
-      ],
-      "steer",
-      SNAPSHOT_MENTIONS,
-    );
-    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
-  });
-
-  it("跨重启：store 为空、仅账号快照时插队重发仍带附件与点名", async () => {
-    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
-    useConversationStore.getState().switchConversation(CID);
-    cloudCb?.({
-      type: "turn_queue_account_snapshot",
-      payload: {
-        queues: [
-          {
-            conversation_id: CID,
-            items: [
-              {
-                queue_id: "q-restart",
-                content: "请按附件看",
-                position: 1,
-                attachments: SNAPSHOT_ATTACHMENTS,
-                agent_mentions: SNAPSHOT_MENTIONS,
-              },
-            ],
-          },
-        ],
-      },
-    });
-    post.mockResolvedValueOnce({});
-    sendMidFlight.mockResolvedValueOnce({
-      kind: "received",
-      interjectionId: "ij-restart",
-    });
-
-    await steerQueuedTurn(CID, "q-restart");
-
-    expect(sendMidFlight).toHaveBeenCalledTimes(1);
-    expect(sendMidFlight).toHaveBeenCalledWith(
-      CID,
-      "请按附件看",
-      [
-        expect.objectContaining({
-          name: "brief.txt",
-          path: "attachments/brief.txt",
-          workspace_path: "attachments/brief.txt",
-        }),
-      ],
-      "steer",
-      SNAPSHOT_MENTIONS,
-    );
-  });
-
-  it("404（已出队/竞态）→ 只清条、不重发", async () => {
-    seedQueuedBarOnly("already running");
+  it("404 回滚本地正文并返回 already_gone", async () => {
+    seedQueuedBarOnly();
     post.mockRejectedValueOnce(new ApiError(404, "{}"));
-
-    await steerQueuedTurn(CID, "q1");
-
-    expect(sendMidFlight).not.toHaveBeenCalled();
-    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
-  });
-
-  it("取消失败 → 抛出、不重发、条仍在", async () => {
-    seedQueuedBarOnly("keep me");
-    post.mockRejectedValueOnce(new ApiError(500, "{}"));
-
-    await expect(steerQueuedTurn(CID, "q1")).rejects.toBeInstanceOf(ApiError);
-    expect(sendMidFlight).not.toHaveBeenCalled();
-    expect(useQueuedTurnsStore.getState().list(CID)).toHaveLength(1);
-  });
-
-  it("本地已无该项 → no-op、不调 cancel/重发", async () => {
-    await steerQueuedTurn(CID, "missing");
-    expect(post).not.toHaveBeenCalled();
-    expect(sendMidFlight).not.toHaveBeenCalled();
+    await expect(
+      editQueuedTurn(CID, "q1", {
+        content: "改过",
+        attachments: [],
+        agentMentions: [],
+      }),
+    ).resolves.toBe("already_gone");
+    expect(useQueuedTurnsStore.getState().list(CID)[0]?.content).not.toBe("改过");
   });
 });

@@ -7,10 +7,13 @@ import {
   type SidecarCreateWorkspaceVersionRequest,
   type SidecarDebateSteerRequest,
   type SidecarDeliverMessageRequest,
+  type SidecarEditQueuedTurnRequest,
   type SidecarListBrowserSessionsRequest,
   type SidecarListBrowserSessionsResult,
   type SidecarListQueuedTurnsRequest,
   type SidecarListQueuedTurnsResult,
+  type SidecarReorderQueuedTurnsRequest,
+  type SidecarStopAndSendQueuedTurnRequest,
   type SidecarOccupancyRequest,
   type SidecarOccupancyResponse,
   type SidecarProbeRequest,
@@ -217,6 +220,45 @@ export function registerSidecarIpc(): void {
         ["subpath"],
       );
       return manager.listQueuedTurns(req);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.reorderQueuedTurns,
+    (_e, req: SidecarReorderQueuedTurnsRequest) => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.reorderQueuedTurns,
+        req,
+        ["rootId", "conversationId", "queueIds"],
+        ["subpath"],
+      );
+      return manager.reorderQueuedTurns(req);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.stopAndSendQueuedTurn,
+    (_e, req: SidecarStopAndSendQueuedTurnRequest) => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.stopAndSendQueuedTurn,
+        req,
+        ["rootId", "conversationId", "queueId"],
+        ["subpath"],
+      );
+      return manager.stopAndSendQueuedTurn(req);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.editQueuedTurn,
+    (_e, req: SidecarEditQueuedTurnRequest) => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.editQueuedTurn,
+        req,
+        ["rootId", "conversationId", "queueId", "content"],
+        ["subpath"],
+      );
+      return manager.editQueuedTurn(req);
     },
   );
 

@@ -23,8 +23,9 @@ class ConsultDirectoryEntry:
     into one directory line; consult still uses a member name (or the family key).
     ``face`` is ``ToolFace.value`` for builtin tools (prompt subgrouping); MCP
     rows leave it empty and render under 连接器.
-    ``group`` is the Chinese 能力指引 subtitle for system skills (编排 / 工作区 /
-    交付 / 产品 / 工具); empty groups are omitted at render.
+    ``group`` is the decision-moment sort key for system skills (编排 / 工作区 /
+    交付 / 产品 / 工具). The model directory orders by it and does not print the
+    label. Empty groups are omitted.
     """
 
     name: str

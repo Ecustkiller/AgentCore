@@ -4,7 +4,6 @@ import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { Badge } from "@/components/ui/badge";
 import { resolveTurnDisplayMoney } from "@/lib/cost";
 import { formatDisplayCost, pickCostMoney } from "@/lib/format";
-import { openWorkspaceDeliverable } from "@/lib/openWorkspaceDeliverable";
 import { completedAtIso } from "@/lib/runningElapsed";
 import { precedingUserMessageId } from "@/lib/supportDiagnostics";
 import {
@@ -26,11 +25,11 @@ import { useExecutionStore, useMessageExecution } from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
 import { RotateCcw } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import {
   AssistantMessageFooter,
   AssistantMessageMetaSummary,
-  MessageMoreMenu,
+  AssistantTurnInspect,
 } from "./AssistantMessageFooter";
 import { CloudBridgeHint } from "./CloudBridgeHint";
 import { LiveWaitLabel } from "./LiveFlow";
@@ -136,7 +135,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             message.error.code === resolvedFace.code)
         ? message.error
         : resolvedFace;
-  const packInMore = outcome.supportPackHost === "more";
+  const packPinned = outcome.supportPackHost === "more";
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const captainContext = message.captainContext ?? [];
@@ -156,12 +155,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     }
     return ids;
   }, [evidenceLedger, citations]);
-  const onOpenWorkspacePath = useCallback(
-    (path: string) => {
-      openWorkspaceDeliverable(conversationId, path);
-    },
-    [conversationId],
-  );
   // 结算存根已画问句：正文只在「就是那句问句副本」时藏，避免贴在结论文旁像还在催。
   // CEO 续聊（确认/取消后的回复）必须露出。空 content 不回落问句——问句在存根展开里。
   const rawContent = message.content ?? "";
@@ -254,7 +247,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       journal={message.runs}
       conversationId={conversationId}
       checkpoints={checkpoints}
-      onOpenWorkspacePath={onOpenWorkspacePath}
     />
   ) : (
     <>
@@ -277,7 +269,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           knownLedgerIds={knownLedgerIds}
           evidenceLedger={evidenceLedger}
           isStreaming={bubbleLive}
-          onOpenWorkspacePath={onOpenWorkspacePath}
         />
       )}
       {bubbleLive &&
@@ -342,18 +333,18 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           costText={costText}
           onRegenerate={handleRegenerate}
           displayError={displayError}
-          pinSupportPack={packInMore}
+          pinSupportPack={packPinned}
           showRegenerate={outcome.showRegenerate}
         />
-      ) : showCostMeta || packInMore ? (
+      ) : showCostMeta || packPinned ? (
         <div
           className={cn(
             "mt-1 flex items-center gap-2",
-            packInMore ? "justify-between" : "justify-end",
+            packPinned ? "justify-between" : "justify-end",
           )}
         >
-          {packInMore ? (
-            <MessageMoreMenu
+          {packPinned ? (
+            <AssistantTurnInspect
               message={message}
               captainContext={captainContext}
             />

@@ -34,11 +34,11 @@ export function SearchTrigger({
   return (
     <SurfaceRowButton
       onClick={onClick}
-      className={cn("h-8 font-normal text-sidebar-foreground/55", className)}
+      className={cn("h-8 font-normal text-sidebar-muted", className)}
     >
       <Search size={16} className="shrink-0" />
       搜索或运行命令
-      <kbd className="ml-auto shrink-0 text-xs text-sidebar-foreground/40">
+      <kbd className="ml-auto shrink-0 text-xs text-sidebar-muted">
         {chord("k")}
       </kbd>
     </SurfaceRowButton>

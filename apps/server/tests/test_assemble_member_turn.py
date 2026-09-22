@@ -10,6 +10,7 @@ import pytest
 from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline.assemble import assemble_ceo_turn
+from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.pipeline.prepare import PreparedTurn, prepare_fresh_turn
 from agentcore.runtime.pipeline.resume.wire import _wire_continuation_toolset
 from agentcore.tools.mcp.wire import McpDiscoverResult
@@ -179,13 +180,13 @@ async def _capture_prepare_registry(
     )
 
     async def _empty_rules(*_a, **_k):
-        return ""
+        return TurnRuleView()
 
     async def _no_desk_label(*_a, **_k):
         return None
 
     monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.assemble_turn_rules", _empty_rules
+        "agentcore.runtime.pipeline.prepare.load_turn_rule_view", _empty_rules
     )
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label",

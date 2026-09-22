@@ -116,17 +116,14 @@ function followLifecycle(logs: { mock: { calls: unknown[][] } }): Array<{
 }
 
 let dispatched: string[] = [];
-let dispatchedSkip: boolean[] = [];
 
 beforeEach(() => {
   dispatched = [];
-  dispatchedSkip = [];
   loadLatestWindow.mockClear();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useConversationStore.getState().switchConversation(CID);
-  vi.spyOn(dispatchMod, "dispatchSSEEvent").mockImplementation((event, ctx) => {
+  vi.spyOn(dispatchMod, "dispatchSSEEvent").mockImplementation((event) => {
     dispatched.push(event.type);
-    dispatchedSkip.push(ctx.skipQueuedTurnUserBubble === true);
   });
   vi.spyOn(dispatchMod, "flushPendingContent").mockImplementation(() => {});
   vi.spyOn(dispatchMod, "flushPendingFrames").mockImplementation(() => {});
@@ -228,9 +225,6 @@ describe("syncConversationFollow (对话级订阅)", () => {
     push(frame("content_delta", { delta: "好" }));
     push(frame("message_end", { finish_reason: "end_turn" }));
     await tick();
-
-    // 补窗成功 → 折段时标记 skipQueuedTurnUserBubble，started 只清条不插泡。
-    expect(dispatchedSkip[dispatched.indexOf("message_start")]).toBe(true);
 
     // 每帧恰好折一次，且顺序不因回补窗口而错位。
     expect(dispatched).toEqual([

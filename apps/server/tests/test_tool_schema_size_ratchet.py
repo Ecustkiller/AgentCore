@@ -1,4 +1,4 @@
-"""工具 schema 体积棘轮——CEO / worker 工具面只许瘦、不许悄悄回潮。
+"""工具 schema 体积棘轮——拦住悄悄回潮；新语义抬顶。
 
 ## 为什么有这道棘轮
 
@@ -18,7 +18,7 @@
   确实是**新增**的有效语义 → 把这里的数字调上去，并在 PR 里说清多出来的是什么。
 - **远低于上限**（比如又砍了一批）：把数字调下来，棘轮才继续咬合。
 
-数字 = 当次实测值向上取整到十位；只许降不许升。
+数字 = 当次实测值向上取整到十位。新语义同一次改动里抬顶，并写明多出来的是什么；抄写回潮删副本。远低于上限才把数字调下来。改措辞时不为保住旧数字删别的句子。
 """
 
 from __future__ import annotations
@@ -211,11 +211,25 @@ from agentcore.tools.protocol import ToolSchema
 # 2026-09-21 删 host 按需手册；description 收成「这台电脑」。实测 1093。cap 1130→1100。
 # 2026-09-21 删 browser 按需手册；description 收成「真实浏览器」。实测 710。cap 740→710。
 # 2026-09-22 模型面不再有 git 工具；host 只留 command。实测 214。cap 1100→220。
+# 2026-09-23 delegate：根首句改为交回后由你收尾；未读前可先买一次廉价信号再判；
+# 收益/成本写成可计算式；task 只写工人拿不到的三样。删「不知读哪 ≠ 自己连搜」。
+# 实测 1483。cap 1390→1490（抬顶=决策前移到廉价信号，非回潮抄写）。
+# 2026-09-23 delegate：切面 ≠ 独立块，也 ≠ 按人拆。实测 1489。cap 不抬。
+# 2026-09-23 delegate：删「有写权 ≠ 自己做完」；编制从「至少 N 人」收成
+# 拆开仍成立的对照各是一块。实测 1469。cap 1490→1470。
+# 2026-09-23 delegate：收益改「或」；第 1 问改为结论独立成立；「一块」改为不可再切。
+# 实测 1466。cap 不降（向上取整到十位仍 1470）。
+# 2026-09-23 delegate：同一写面 ≠ 拆开仍成立（只读取证须结论独立才并行；
+# 多模块/多文件夹且结论仍独立仍各是一件）。实测 1526。cap 1470→1530
+# （抬顶=编制合同新语义，非回潮抄写）。
+# 2026-09-23 delegate：编制「1 人只在整件事不可再切」并进
+# 「拆开仍成立的对象各是一件，否则整件事 1 人」。实测 1521。
+# cap 不降（向上取整到十位仍 1530）。
 _CAPS: dict[str, int] = {
     "browser": 710,
     "host": 220,
     "run": 620,
-    "delegate": 1390,
+    "delegate": 1530,
     "debate": 950,
     "ask_user": 690,
     "folders": 370,
@@ -285,7 +299,6 @@ _ASK_USER_WEB_CAP = 690
 # 2026-09-21 artifacts 取值说明收短。实测 replan 1144。cap 1160→1150。
 # 2026-09-21 「可选」前缀出取值说明。实测 replan 1122。cap 1150→1130。
 _COORD_CAPS: dict[str, int] = {
-    "wait": 200,
     "cancel_worker": 240,
     "resolve_escalation": 420,
     "queue_user_message": 340,
@@ -342,7 +355,7 @@ _WORKER_CAPS: dict[str, int] = {
 # file_delete 324 / file_batch 728。cap 360→320、290→280、570 仍 570、
 # 340→330、760→730。
 # 2026-09-21 用户规则目录英文化 `.agentcore/规则` → `.agentcore/rules`：
-# write / file_list / file_delete description +3（实测见本轮棘轮；默认只降不升）。
+# write / file_list / file_delete description +3（换字，cap 未动）。
 # 2026-09-21 file_delete / file_batch 不广告 permanent。实测 244 / 631。cap 330→250、730→640。
 # 2026-09-21 grep.glob 「可选」前缀出按钮。实测 558。cap 570→560。
 _FILE_CAPS: dict[str, int] = {
@@ -459,12 +472,10 @@ def _measured_coord() -> dict[str, int]:
         CancelWorkerTool,
         QueueUserMessageTool,
         ResolveEscalationTool,
-        WaitTool,
     )
 
     sink = EventSink()
     return {
-        "wait": measure_openai_tool_chars(WaitTool().schema),
         "cancel_worker": measure_openai_tool_chars(CancelWorkerTool().schema),
         "resolve_escalation": measure_openai_tool_chars(ResolveEscalationTool().schema),
         "queue_user_message": measure_openai_tool_chars(

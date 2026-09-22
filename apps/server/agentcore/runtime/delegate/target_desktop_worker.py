@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentcore.memory import default_memory_store
-from agentcore.memory.rules_injection import assemble_turn_rules
+from agentcore.memory.rules_injection import load_turn_rule_view
 from agentcore.runtime.context import (
     build_workspace_context,
     detect_workspace_git,
@@ -68,7 +68,7 @@ async def rebuild_worker_prompt_for_target(
     from agentcore.tools.builtin import build_worker_registry
 
     memory_store = default_memory_store()
-    rules_markdown = await assemble_turn_rules(
+    rule_view = await load_turn_rule_view(
         memory_store,
         user_id,
         folder_id=folder_id,
@@ -91,7 +91,8 @@ async def rebuild_worker_prompt_for_target(
         desk_visibly_empty=await desk_is_visibly_empty(backend),
     )
     shared_base = assemble_system_prompt(
-        rules_markdown=rules_markdown,
+        rules_markdown=rule_view.settings,
+        path_index=rule_view.path_index,
     )
     provisional = build_worker_registry(
         backend=backend,

@@ -8,7 +8,7 @@ from agentcore.core.logging import get_logger
 from agentcore.core.text import clip_preview
 from agentcore.core.types import (
     DEFAULT_PERMISSION_AXES,
-    PermissionAxes,
+    WorkspaceBoundary,
     ToolApproval,
     ToolEffect,
     ToolFace,
@@ -123,7 +123,7 @@ class DelegateTool:
         suspension_saver: SuspensionSaver | None = None,
         suspension_deleter: SuspensionDeleter | None = None,
         folder_id: str | None = None,
-        permission_axes: PermissionAxes | None = None,
+        permission_axes: WorkspaceBoundary | None = None,
         depth: int = 0,
         worker_envelope: str = "",
     ) -> None:

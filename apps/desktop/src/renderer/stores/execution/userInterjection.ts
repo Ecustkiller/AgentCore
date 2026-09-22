@@ -20,6 +20,7 @@ export function userInterjectionFromPayload(
       agent_id?: string;
       role?: string;
     }>;
+    user_message_id?: string;
   };
   const iid = (p.interjection_id || "").trim();
   if (!iid) return null;
@@ -48,12 +49,14 @@ export function userInterjectionFromPayload(
       agentId: a.agent_id.trim(),
       role: a.role.trim(),
     }));
+  const userMessageId = (p.user_message_id || "").trim();
   return {
     interjectionId: iid,
     executionId: p.execution_id || "",
     content: p.content || "",
     status: p.status || "received",
     note: typeof p.note === "string" ? p.note : null,
+    ...(userMessageId ? { userMessageId } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(agentMentions.length > 0 ? { agentMentions } : {}),
   };

@@ -579,11 +579,11 @@ def permission_allows_restricted_network(raw: str | None) -> bool:
     if not raw:
         return False
     try:
-        from agentcore.core.types import PermissionAxes
+        from agentcore.core.types import WorkspaceBoundary
 
         data = json.loads(raw) if raw.lstrip().startswith("{") else None
         if isinstance(data, dict):
-            return PermissionAxes.from_mapping(data).auto_executes
+            return WorkspaceBoundary.from_mapping(data).allows_execution
     except (ValueError, TypeError, json.JSONDecodeError):
         pass
-    return "'command': 'auto'" in raw or '"command": "auto"' in raw
+    return False

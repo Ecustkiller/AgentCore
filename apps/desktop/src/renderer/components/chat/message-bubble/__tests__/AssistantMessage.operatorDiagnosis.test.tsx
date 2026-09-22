@@ -63,7 +63,7 @@ vi.mock("@/services/turns", () => ({
 vi.mock("../AssistantMessageFooter", () => ({
   AssistantMessageFooter: () => <div data-testid="assistant-footer" />,
   AssistantMessageMetaSummary: () => null,
-  MessageMoreMenu: () => null,
+  AssistantTurnInspect: () => null,
 }));
 
 vi.mock("@/components/chat/Markdown", () => ({

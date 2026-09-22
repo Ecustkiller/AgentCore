@@ -8,23 +8,17 @@ import {
   patchConversationCache,
   useConversations,
 } from "@/hooks/useConversations";
+import { hasLocalEngine } from "@/lib/capabilities";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
-  type AutonomyRecipe,
-  COMMAND_OPTIONS,
+  BOUNDARY_LABELS,
+  BOUNDARY_ORDER,
   DEFAULT_PERMISSION_AXES,
-  FILE_WRITE_OPTIONS,
-  HOST_OPTIONS,
   type PermissionAxes,
-  RECIPE_LABELS,
-  RECIPE_ORDER,
   axesEqual,
-  axesShortLabel,
-  confirmAutoCommandIfNeeded,
-  isIllegalAxes,
-  matchRecipe,
-  recipeToAxes,
+  boundaryShortLabel,
+  confirmComputerIfNeeded,
   resolveDefaultPermissionAxes,
   setComposerDraftAxes,
   setConversationPermissionAxes,
@@ -37,10 +31,8 @@ import { useEffect, useState } from "react";
 import { ComposerPlusBackHeader, useComposerPlusRow } from "./ComposerPlusMenu";
 
 /**
- * Composer permission badge — 默认只出三配方；「改某一条」才展开轴。
- * 已是自定义时轴直接摊开，避免选不中配方还看不见自己的组合。
- * New chats: draft axes (seeded from 新会话默认配方); existing: read/write
- * ``conversation.permissionAxes``（下一回合生效）.
+ * Composer boundary badge. Three choices; 这台电脑 only when a local engine
+ * is present (or the conversation is already on that boundary).
  */
 export function PermissionAxesBadge({
   disabled,
@@ -57,16 +49,14 @@ export function PermissionAxesBadge({
   );
   const plus = useComposerPlusRow("permission");
   const [open, setOpen] = useState(false);
-  const [customOpen, setCustomOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
   const fromCache = conversationId
     ? conversations.find((c) => c.id === conversationId)?.permissionAxes
     : undefined;
   const axes = fromCache ?? draftAxes;
-  const recipe = matchRecipe(axes);
-  const label = axesShortLabel(axes);
-  const isCustom = recipe === "custom";
+  const label = boundaryShortLabel(axes.boundary);
+  const tip = BOUNDARY_LABELS[axes.boundary].description;
 
   useEffect(() => {
     if (fromCache) return;
@@ -79,21 +69,17 @@ export function PermissionAxesBadge({
     };
   }, [fromCache]);
 
-  useEffect(() => {
-    if (!open) setCustomOpen(false);
-  }, [open]);
+  const options = BOUNDARY_ORDER.filter(
+    (id) =>
+      id !== "computer" || hasLocalEngine() || axes.boundary === "computer",
+  );
 
-  const apply = async (next: PermissionAxes, opts: { close: boolean }) => {
+  const apply = async (next: PermissionAxes) => {
     if (pending || disabled) return;
-    if (isIllegalAxes(next)) return;
-    if (axesEqual(next, axes)) {
-      return;
-    }
-    if (!confirmAutoCommandIfNeeded(axes, next)) return;
-    if (opts.close) {
-      if (plus.mode === "panel" || plus.mode === "row") plus.close();
-      else setOpen(false);
-    }
+    if (axesEqual(next, axes)) return;
+    if (!confirmComputerIfNeeded(axes, next)) return;
+    if (plus.mode === "panel" || plus.mode === "row") plus.close();
+    else setOpen(false);
     if (!conversationId) {
       setDraftAxes(next);
       setComposerDraftAxes(next);
@@ -114,18 +100,12 @@ export function PermissionAxesBadge({
     }
   };
 
-  const applyRecipe = (id: AutonomyRecipe) => {
-    setCustomOpen(false);
-    void apply(recipeToAxes(id), { close: true });
-  };
-
   const setAsSessionDefault = async () => {
-    if (recipe === "custom" || pending || disabled) return;
-    // Only built-in recipes may become the user-level default.
+    if (pending || disabled) return;
     setPending(true);
     try {
-      const saved = await setUserDefaultRecipe(recipe);
-      notifySuccess(`新会话将默认「${RECIPE_LABELS[saved].short}」`);
+      const saved = await setUserDefaultRecipe(axes.boundary);
+      notifySuccess(`新会话将默认「${BOUNDARY_LABELS[saved].short}」`);
     } catch (e) {
       notifyError(e, "设置默认失败");
     } finally {
@@ -133,49 +113,25 @@ export function PermissionAxesBadge({
     }
   };
 
-  const patchAxis = <K extends keyof PermissionAxes>(
-    key: K,
-    value: PermissionAxes[K],
-  ) => {
-    const next = { ...axes, [key]: value };
-    // Selecting auto while file_write=ask → coerce file_write to session
-    // (illegal combo must not be selectable / sent).
-    if (key === "command" && value === "auto" && next.file_write === "ask") {
-      next.file_write = "session";
-    }
-    if (key === "file_write" && value === "ask" && next.command === "auto") {
-      return; // disabled in UI
-    }
-    void apply(next, { close: false });
-  };
-
   if (plus.mode === "hidden") return null;
 
-  const tip = isCustom
-    ? `自定义：${axesCustomTip(axes)}`
-    : RECIPE_LABELS[recipe].description;
   const tipWithLabel = iconOnly ? `${label} — ${tip}` : tip;
-
-  const dismiss = () => {
-    if (plus.mode === "panel" || plus.mode === "row") plus.close();
-    else setOpen(false);
-  };
 
   const panel = (
     <>
       <p className="px-1 pb-1.5 text-xs font-medium text-muted-foreground">
-        配方
+        边界
       </p>
       <div className="space-y-0.5">
-        {RECIPE_ORDER.map((id) => {
-          const selected = recipe === id;
-          const meta = RECIPE_LABELS[id];
+        {options.map((id) => {
+          const selected = axes.boundary === id;
+          const meta = BOUNDARY_LABELS[id];
           return (
             <SimpleTooltip key={id} label={meta.description}>
               <button
                 type="button"
                 aria-current={selected ? "true" : undefined}
-                onClick={() => applyRecipe(id)}
+                onClick={() => void apply({ boundary: id })}
                 className={cn(
                   "flex w-full items-baseline gap-1.5 rounded-lg px-2.5 py-1.5 text-left",
                   selected ? "bg-primary/10" : "hover:bg-accent/50",
@@ -183,7 +139,7 @@ export function PermissionAxesBadge({
               >
                 <span className="shrink-0 text-sm font-medium text-foreground">
                   {meta.short}
-                  {id === "less_interrupt" ? " · 荐" : ""}
+                  {id === "folder" ? " · 荐" : ""}
                 </span>
                 <span className="min-w-0 truncate text-xs text-muted-foreground">
                   {meta.description}
@@ -195,21 +151,15 @@ export function PermissionAxesBadge({
       </div>
 
       <div className="mt-2 border-t border-border/60 px-1 pt-2">
-        <SimpleTooltip
-          label={
-            isCustom
-              ? "仅内置配方可设为新会话默认"
-              : "写入账户默认；只影响之后新建的对话"
-          }
-        >
+        <SimpleTooltip label="写入账户默认；只影响之后新建的对话">
           <span className="block">
             <button
               type="button"
-              disabled={isCustom || pending || disabled}
+              disabled={pending || disabled}
               onClick={() => void setAsSessionDefault()}
               className={cn(
                 "w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-medium",
-                isCustom || pending || disabled
+                pending || disabled
                   ? "cursor-not-allowed text-muted-foreground/50"
                   : "text-foreground hover:bg-accent/50",
               )}
@@ -219,60 +169,6 @@ export function PermissionAxesBadge({
           </span>
         </SimpleTooltip>
       </div>
-
-      {customOpen || isCustom ? (
-        <div className="mt-2 border-t border-border/60 pt-2">
-          <p className="px-2.5 pb-1.5 text-xs font-medium text-muted-foreground">
-            改某一条
-            {isCustom ? (
-              <span className="ml-1.5 text-foreground">· 当前</span>
-            ) : null}
-          </p>
-          <div className="space-y-2 px-0.5 pb-1">
-            <AxisSegment
-              title="改文件"
-              options={FILE_WRITE_OPTIONS}
-              value={axes.file_write}
-              disabledOption={(v) => v === "ask" && axes.command === "auto"}
-              disabledReason="免审执行须同时「本会话信任」改文件"
-              onSelect={(v) => patchAxis("file_write", v)}
-            />
-            <AxisSegment
-              title="执行命令"
-              options={COMMAND_OPTIONS}
-              value={axes.command}
-              disabledOption={(v) => v === "auto" && axes.file_write === "ask"}
-              disabledReason="免审执行须同时「本会话信任」改文件"
-              onSelect={(v) => patchAxis("command", v)}
-            />
-            <AxisSegment
-              title="本机 Host"
-              options={HOST_OPTIONS}
-              value={axes.host}
-              onSelect={(v) => patchAxis("host", v)}
-            />
-            <div className="flex justify-end pt-1">
-              <button
-                type="button"
-                onClick={dismiss}
-                className="rounded-lg px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              >
-                完成
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-2 border-t border-border/60 px-1 pt-2">
-          <button
-            type="button"
-            onClick={() => setCustomOpen(true)}
-            className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-          >
-            改某一条
-          </button>
-        </div>
-      )}
     </>
   );
 
@@ -328,76 +224,6 @@ export function PermissionAxesBadge({
           {panel}
         </PopoverContent>
       </Popover>
-    </div>
-  );
-}
-
-function axesCustomTip(axes: PermissionAxes): string {
-  const file =
-    FILE_WRITE_OPTIONS.find((o) => o.value === axes.file_write)?.short ?? "";
-  const cmd =
-    COMMAND_OPTIONS.find((o) => o.value === axes.command)?.short ?? "";
-  const host = HOST_OPTIONS.find((o) => o.value === axes.host)?.short ?? "";
-  return `${file} · ${cmd} · ${host}`;
-}
-
-function AxisSegment<T extends string>({
-  title,
-  options,
-  value,
-  onSelect,
-  disabledOption,
-  disabledReason,
-}: {
-  title: string;
-  options: { value: T; short: string; description: string }[];
-  value: T;
-  onSelect: (v: T) => void;
-  disabledOption?: (v: T) => boolean;
-  disabledReason?: string;
-}) {
-  return (
-    <div>
-      <p className="px-1 pb-1 text-xs font-medium text-muted-foreground">
-        {title}
-      </p>
-      <div className="flex flex-wrap gap-1">
-        {options.map((opt) => {
-          const selected = opt.value === value;
-          const blocked = disabledOption?.(opt.value) ?? false;
-          const tip = blocked
-            ? (disabledReason ?? opt.description)
-            : opt.description;
-          return (
-            <SimpleTooltip key={opt.value} label={tip}>
-              {/* span: disabled buttons skip pointer events → tooltip still works */}
-              <span className="inline-flex">
-                <button
-                  type="button"
-                  disabled={blocked}
-                  aria-current={selected ? "true" : undefined}
-                  onClick={() => onSelect(opt.value)}
-                  className={cn(
-                    "rounded-lg px-2.5 py-1 text-xs",
-                    blocked && "cursor-not-allowed opacity-40",
-                    !blocked &&
-                      (selected
-                        ? "bg-primary/15 font-medium text-foreground"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"),
-                  )}
-                >
-                  {opt.short}
-                </button>
-              </span>
-            </SimpleTooltip>
-          );
-        })}
-      </div>
-      {disabledReason && options.some((o) => disabledOption?.(o.value)) ? (
-        <p className="mt-1 px-1 text-xs text-muted-foreground">
-          {disabledReason}
-        </p>
-      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
-"""CEO coordination tools: wait + cancel_worker
-+ resolve_escalation + queue_user_message.
+"""CEO coordination tools: cancel_worker + resolve_escalation
++ queue_user_message.
 """
 
 from __future__ import annotations
@@ -11,96 +11,19 @@ from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.runtime.coordination.session import resolve_coordination_session
 from agentcore.runtime.coordination.vacate import vacate_never_started_seat
 from agentcore.runtime.interaction import default_interaction_registry
-from agentcore.runtime.resolve.ceo_surface import COORDINATION_PERIOD_HINT
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 logger = get_logger(__name__)
 
 
 def _session_for_control(context: ToolContext):
-    """Wait / cancel look up the observation graph.
+    """Cancel looks up the observation graph.
 
     Cross-turn adopt leaves ``context.execution_id`` as this turn's mint (dispatch)
     while ``current_execution_id`` stays on the previous live graph. Fall back so
-    CEO wait still finds that graph before this turn starts its own.
+    control still finds that graph before this turn starts its own.
     """
     return resolve_coordination_session(context.execution_id)
-
-
-class WaitTool:
-    """No-op exit for coordination rounds that need no disposition.
-
-    Models often feel compelled to emit a tool call even when the brief says
-    「无需处置」; without this primitive they re-call ``delegate`` and hit the
-    isomorphic guard (``status=error`` + wasted LLM round). Calling ``wait`` is
-    an explicit, side-effect-free acknowledgement that the captain stays in
-    listen mode until the next team event.
-    """
-
-    @property
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name="wait",
-            description=(
-                "协调中无需处置时调用：确认继续等团队事件。"
-                f"{COORDINATION_PERIOD_HINT}"
-            ),
-            parameters={"type": "object", "properties": {}, "required": []},
-            face=ToolFace.ORCHESTRATION,
-            approval=ToolApproval.NEVER,
-        )
-
-    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        session = _session_for_control(context)
-        if session is None or not session.active:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error="当前不在协调模式——仅在协调模式启动团队后可用。",
-            )
-        from agentcore.runtime.interaction_orphan import (
-            format_hot_pending_hold_line,
-            has_hot_user_pending,
-        )
-
-        conversation_id = (
-            getattr(session, "conversation_id", None) or context.conversation_id or ""
-        )
-        if has_hot_user_pending(conversation_id):
-            hold = format_hot_pending_hold_line(conversation_id)
-            logger.info(
-                "coordination.wait",
-                execution_id=session.execution_id,
-                completed=len(session.completed_run_ids),
-                total=session.total_workers,
-                reason="hot_pending_listen",
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=(
-                    f"{hold}\n"
-                    "本 wait 视为听团，不是推进。请先向用户报告阻塞（等你允许）；"
-                    "队还在，勿整队收场。"
-                ),
-            )
-        reason = str(arguments.get("reason") or "").strip()
-        logger.info(
-            "coordination.wait",
-            execution_id=session.execution_id,
-            completed=len(session.completed_run_ids),
-            total=session.total_workers,
-            reason=reason[:120] if reason else "",
-        )
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output=(
-                "已确认等待团队事件（无需处置）。继续静默听团；"
-                "勿再为等待而调用 delegate。"
-            ),
-        )
 
 
 class CancelWorkerTool:
@@ -518,6 +441,9 @@ class QueueUserMessageTool:
             sink=self._sink,
             reason=reason or None,
         )
+        from agentcore.runtime.turn.durable import flush_turn_queue_durable
+
+        await flush_turn_queue_durable()
         if ok:
             pos = getattr(status, "position", 1)
             depth = getattr(status, "queue_depth", 1)

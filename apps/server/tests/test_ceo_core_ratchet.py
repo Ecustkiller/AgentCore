@@ -1,4 +1,4 @@
-"""常驻核体积棘轮 + 权威归属——CEO 提示词只许瘦、不许悄悄回潮。
+"""常驻核体积棘轮 + 权威归属——拦住悄悄回潮；新语义抬顶。
 
 ## 为什么有这道棘轮
 
@@ -25,7 +25,7 @@
 - **权威归属红了**：不要靠改字面绕过（把「无条件装配」换个说法照样是断言）。
   正解是删掉核里那份，改成指事实行 / 挂门 / 进 skill。
 
-数字 = 当次实测值向上取整到十位；只许降不许升。
+数字 = 当次实测值向上取整到十位。新语义同一次改动里抬顶，并写明多出来的是什么；抄写回潮删副本。远低于上限才把数字调下来。改措辞时不为保住旧数字删别的句子。
 量的是 **CEO 常驻总长**（``assemble_system_prompt`` + ``_CEO_CORE_HINT``），不是核单列——
 同一条纪律跨基座/核搬迁时核字数会涨、总长才是真实成本。
 """
@@ -238,7 +238,10 @@ from agentcore.runtime.resolve.prompt.compose import _on_demand_preamble
 # cap 降到 90。
 # 2026-09-21 诚实段：基座只留已做以回执为准；来源编号/工具表/按需目录出基座
 # （编号在回执尾；目录行 ≠ 已查阅在前言）。当次实测 77。cap 降到 80。
-_RESIDENT_CAP = 80
+# 2026-09-22 基座删「用与用户相同的语言回复」（内容闸两问都不成立；
+# 中文基座已把回复拉向中文，工人侧「用户」指称不稳）。当次实测 65。cap 降到 70。
+# 2026-09-22 基座删同轮并发事实（内容闸两问都不成立）。当次实测 46。cap 降到 50。
+_RESIDENT_CAP = 50
 
 
 def _ceo_resident_chars() -> int:
@@ -291,7 +294,7 @@ def test_honesty_floors_stay_resident():
     """诚实底线不跟门走：已做以回执为准只在基座；目录行对照在前言。"""
     hint = _CEO_CORE_HINT
     base = assemble_system_prompt()
-    preamble = "\n".join(_on_demand_preamble(with_summaries=True))
+    preamble = "\n".join(_on_demand_preamble())
     assert "回执为准" in base
     assert "回执为准" not in hint
     assert "目录行" in preamble

@@ -1,13 +1,15 @@
-"""Classic in-flight turn steer (同对话再发 P1).
+"""Classic in-flight turn steer (同对话再发).
 
 When a solo / non-coordination turn is mid-flight and the user sends
 ``delivery=steer``, the message is parked here (process-local) until the
 captain ``react_loop`` drains it at the next ReAct step boundary and injects
 it as a user-role LLM message — **not** a new turn, **not** a hard stop.
+A prose return does not stay open for an unread steer; leftovers promote
+onto the next turn.
 
 Acceptance window = captain ``react_loop`` lifetime for that conversation
-(``begin_accepting`` … ``end_accepting``). Outside the window the API falls
-back to FIFO ``turn_queue`` (may carry ``degraded_from=steer``).
+(``begin_accepting`` … ``end_accepting``). Outside the window the message is
+a normal FIFO item (no interjection, no ``degraded_from``).
 
 Durable ack uses the shared ``user_interjection`` contract (经典:
 ``received`` → ``injected`` | ``queued`` | ``failed``；无 ``addressed``).

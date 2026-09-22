@@ -24,16 +24,18 @@ class _FakeBackend:
         *,
         fail: bool = False,
         files: dict[str, str] | None = None,
+        truncated: bool = False,
     ) -> None:
         self._paths = paths
         self._fail = fail
         self._files = files or {}
+        self._truncated = truncated
 
     async def index_files(self, cap: int | None = None, *, order: str = "path"):
         assert order == "recent"  # the overview asks for newest-first
         if self._fail:
             raise RuntimeError("backend unavailable")
-        return list(self._paths), False
+        return list(self._paths), self._truncated
 
     async def exists(self, path: str) -> bool:
         return path in self._files
@@ -97,6 +99,7 @@ async def test_project_mode_summarizes_shared_files():
     assert "最近触达" not in out
     assert "src/f0.py" not in out
     assert "另有 12 个文件" in out
+    assert "索引到上限" not in out
     assert "file_list" not in out
 
 
@@ -110,6 +113,19 @@ async def test_project_mode_keeps_attachments_and_summarizes_rest():
     assert "最近触达" not in out
     assert "lib/0.py" not in out
     assert "file_list" not in out
+
+
+async def test_index_cap_is_not_reported_as_a_file_count():
+    """A walk that hit the index cap must not print that cap as「另有 N 个」."""
+    paths = [f"src/f{i}.py" for i in range(12)]
+    out = await build_workspace_overview(
+        _FakeBackend(paths, truncated=True), shared_workspace=True
+    )
+    assert "索引到上限，未列完" in out
+    assert "另有" not in out
+    assert "src/f0.py" not in out
+    assert "file_list" not in out
+    assert "grep" not in out
 
 
 async def test_count_cap_elides_remaining():

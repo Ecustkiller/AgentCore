@@ -461,26 +461,29 @@ resolve_profile_set = resolve_turn_profiles
 
 
 async def resolve_autonomy_policy(session: AsyncSession, user_id: str):
-    """User-global *default recipe* AutonomyPolicy (seeds new conversations only).
+    """User-global default boundary (seeds new conversations only).
 
     Runtime gates must use :func:`resolve_permission_axes` / the conversation
     column — not this. Kept for settings API and create-time seeding.
     """
-    from agentcore.core.types import AutonomyPolicy
+    from agentcore.core.types import WorkspaceBoundary
 
     user = await UserRepository(session).get_by_id(user_id)
-    raw = (user.autonomy_policy if user else None) or AutonomyPolicy.LESS_INTERRUPT.value
+    raw = (user.autonomy_policy if user else None) or WorkspaceBoundary.FOLDER.value
     try:
-        return AutonomyPolicy(raw)
+        return WorkspaceBoundary(raw)
     except ValueError:
-        return AutonomyPolicy.LESS_INTERRUPT
+        return WorkspaceBoundary.FOLDER
 
 
 def parse_permission_axes(raw: dict | None):
-    """Coerce a stored / wire permission_axes mapping; unknown → less_interrupt defaults."""
-    from agentcore.core.types import PermissionAxes
+    """Coerce stored ``{"boundary": ...}``. Missing or unknown → folder."""
+    from agentcore.core.types import WorkspaceBoundary
 
-    return PermissionAxes.from_mapping(raw)
+    try:
+        return WorkspaceBoundary.from_mapping(raw)
+    except ValueError:
+        return WorkspaceBoundary.FOLDER
 
 
 async def resolve_permission_axes(session: AsyncSession, conversation_id: str):
@@ -492,7 +495,5 @@ async def resolve_permission_axes(session: AsyncSession, conversation_id: str):
 
 
 async def default_permission_axes_for_user(session: AsyncSession, user_id: str):
-    """Map the user's autonomy recipe → PermissionAxes for a new conversation."""
-    from agentcore.core.types import recipe_to_axes
-
-    return recipe_to_axes(await resolve_autonomy_policy(session, user_id))
+    """User default boundary for a new conversation."""
+    return await resolve_autonomy_policy(session, user_id)

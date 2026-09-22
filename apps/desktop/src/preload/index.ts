@@ -55,6 +55,7 @@ import {
   type SidecarApi,
   type SidecarEventPush,
   type SidecarFulfillPush,
+  type SidecarQueueNeedStart,
   type SidecarStatusPush,
 } from "@shared/sidecar-contract";
 import { TERMINAL_CHANNELS, type TerminalApi } from "@shared/terminal-contract";
@@ -265,6 +266,12 @@ const sidecarApi: SidecarApi = {
     ipcRenderer.invoke(SIDECAR_CHANNELS.cancelQueuedTurn, req),
   listQueuedTurns: (req) =>
     ipcRenderer.invoke(SIDECAR_CHANNELS.listQueuedTurns, req),
+  reorderQueuedTurns: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.reorderQueuedTurns, req),
+  stopAndSendQueuedTurn: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.stopAndSendQueuedTurn, req),
+  editQueuedTurn: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.editQueuedTurn, req),
   occupancy: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.occupancy, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
   probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),
@@ -291,6 +298,13 @@ const sidecarApi: SidecarApi = {
     const listener = (_e: unknown, payload: SidecarEventPush) => cb(payload);
     ipcRenderer.on(SIDECAR_CHANNELS.event, listener);
     return () => ipcRenderer.removeListener(SIDECAR_CHANNELS.event, listener);
+  },
+  onQueueNeedStart: (cb) => {
+    const listener = (_e: unknown, payload: SidecarQueueNeedStart) =>
+      cb(payload);
+    ipcRenderer.on(SIDECAR_CHANNELS.queueNeedStart, listener);
+    return () =>
+      ipcRenderer.removeListener(SIDECAR_CHANNELS.queueNeedStart, listener);
   },
   onFulfillFrame: (cb) => {
     const listener = (_e: unknown, payload: SidecarFulfillPush) => cb(payload);

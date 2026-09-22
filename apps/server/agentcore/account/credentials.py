@@ -260,13 +260,13 @@ async def cloud_list_user_rules(
     *,
     folder_id: str | None,
 ) -> dict[str, Any]:
-    """POST ``…/account/rules/list`` → always + on_demand rule docs.
+    """POST ``…/account/rules/list`` → always, on_demand, and path rule docs.
 
-    Shape: ``{global_rules, project_rules, ancestor_rules, global_on_demand_rules,
-    project_on_demand_rules, ancestor_on_demand_rules, folder_chain}``. The ``ancestor_*``
+    Shape includes ``global_rules`` / ``project_rules`` / ``ancestor_rules``, the matching
+    ``*_on_demand_rules`` and ``*_path_rules`` lists, and ``folder_chain``. The ``ancestor_*``
     lists are outermost-first and ``folder_chain`` ends at ``folder_id`` (§5.4 沿树继承);
-    on_demand / ancestor / chain keys may be absent on older clouds — treat as empty, which
-    degrades to「不继承」rather than to a wrong chain.
+    on_demand / path / ancestor / chain keys may be absent on older clouds — treat as empty,
+    which degrades to「不继承」rather than to a wrong chain.
     """
     return await _post_json(
         creds,

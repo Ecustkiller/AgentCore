@@ -130,6 +130,7 @@ async def run_turn_lease_sweep() -> int:
                 message_id=row.message_id,
                 conversation_id=row.conversation_id,
             )
+            _hand_queue_slot(row.conversation_id)
             continue
         async with async_session_factory() as session:
             claimed = await TurnLeaseRepository(session).claim_expired(
@@ -150,6 +151,7 @@ async def run_turn_lease_sweep() -> int:
                     "turn_lease.sweep_skip_paused",
                     message_id=claimed.message_id,
                 )
+                _hand_queue_slot(claimed.conversation_id)
                 continue
 
             entries = await TurnJournalRepository(session).load_owned(
@@ -164,6 +166,7 @@ async def run_turn_lease_sweep() -> int:
                 message_id=claimed.message_id,
                 entries=len(entries),
             )
+            _hand_queue_slot(claimed.conversation_id)
             continue
 
         state = TurnState.from_journal(entries or [])
@@ -229,6 +232,7 @@ async def run_turn_lease_sweep() -> int:
             ok = False
         if ok:
             await release_turn_lease(claimed.message_id)
+            _hand_queue_slot(claimed.conversation_id)
         else:
             logger.warning(
                 "turn_lease.sweep_salvage_failed",
@@ -243,14 +247,23 @@ async def run_turn_lease_sweep() -> int:
     return started
 
 
-async def turn_lease_sweep_loop() -> None:
+def _hand_queue_slot(conversation_id: str) -> None:
+    """A recovered or salvaged turn released the slot. Unstarted FIFO may drain."""
+    from agentcore.runtime.turn.durable import note_conversation_slot_free
+
+    note_conversation_slot_free(conversation_id)
+
+
+async def turn_lease_sweep_loop(*, boot: bool = True) -> None:
     """Run :func:`run_turn_lease_sweep` forever on the configured interval."""
     # Boot pass first so a restart immediately reclaims orphaned RUNNING turns.
-    try:
-        await run_turn_lease_sweep()
-    except Exception as e:  # noqa: BLE001
-        log = logger.error if is_schema_error(e) else logger.warning
-        log("turn_lease.boot_sweep_failed", error=str(e))
+    # Lifespan awaits one sweep itself, then starts this loop with ``boot=False``.
+    if boot:
+        try:
+            await run_turn_lease_sweep()
+        except Exception as e:  # noqa: BLE001
+            log = logger.error if is_schema_error(e) else logger.warning
+            log("turn_lease.boot_sweep_failed", error=str(e))
 
     interval = settings.turn_lease_sweep_interval_seconds
     while True:

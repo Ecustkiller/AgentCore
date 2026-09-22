@@ -41,7 +41,6 @@ from agentcore.tools.builtin.delegate.schema import (
     NESTED_DELEGATE_DESCRIPTION,
     NESTED_STAFF_HOW,
     TASK_FILL_HOW,
-    TASK_WINDOW_HOW,
 )
 from agentcore.tools.builtin.run import run_description
 
@@ -201,7 +200,7 @@ def test_consult_hook_lives_only_in_the_core():
     )
     hint = _CEO_CORE_HINT
     ceo = _compose_ceo({"delegate", "consult", "ask_user", "debate"})
-    preamble = "\n".join(_on_demand_preamble(with_summaries=True))
+    preamble = "\n".join(_on_demand_preamble())
     assert "consult(name)" not in hint
     assert "<按需目录>" not in hint
     assert "consult(name)" in ceo
@@ -265,13 +264,9 @@ def test_delegate_when_is_shared_window_bound():
     assert DELEGATE_WHEN in NESTED_DELEGATE_DESCRIPTION
     assert DELEGATE_STAFF_HOW in DELEGATE_DESCRIPTION
     task_desc = _TASK_PROPS["task"]["description"]
-    assert TASK_WINDOW_HOW in task_desc
-    assert TASK_FILL_HOW in task_desc
-    assert TASK_WINDOW_HOW not in DELEGATE_DESCRIPTION
+    assert task_desc == TASK_FILL_HOW
     assert TASK_FILL_HOW not in DELEGATE_DESCRIPTION
-    assert TASK_WINDOW_HOW not in NESTED_DELEGATE_DESCRIPTION
     assert TASK_FILL_HOW not in NESTED_DELEGATE_DESCRIPTION
-    assert TASK_WINDOW_HOW not in _CEO_CORE_HINT
     assert TASK_FILL_HOW not in _CEO_CORE_HINT
     assert DELEGATE_STAFF_HOW in NESTED_DELEGATE_DESCRIPTION
     assert NESTED_STAFF_HOW in NESTED_DELEGATE_DESCRIPTION

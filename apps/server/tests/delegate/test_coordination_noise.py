@@ -356,21 +356,12 @@ async def test_idle_timeout_bumps_backoff_and_real_event_resets(monkeypatch):
 
 
 def test_coordination_tool_schemas_are_short_triggers():
-    """协调套件 when-to-use 留按钮；手册（解析失败候选、空 wait 审批）走回执。"""
+    """协调套件 when-to-use 留按钮；手册走回执。"""
     from agentcore.runtime.coordination.tools import (
         CancelWorkerTool,
         QueueUserMessageTool,
         ResolveEscalationTool,
-        WaitTool,
     )
-
-    wait_desc = WaitTool().schema.description
-    assert "无需处置" in wait_desc
-    assert set(WaitTool().schema.parameters["properties"]) == set()
-    assert "可静默" in wait_desc
-    assert "请示" in wait_desc
-    assert "假装推进" not in wait_desc
-    assert "同构再派" not in wait_desc
 
     cancel = CancelWorkerTool().schema
     assert "终止" in cancel.description
@@ -401,14 +392,14 @@ def test_coordination_tool_schemas_are_short_triggers():
 
 
 def test_inject_footer_does_not_repeat_tool_how():
-    """Mid-run inject: facts only. 可静默 stays on wait description."""
+    """Mid-run inject: facts only. 可静默 stays on the team-start receipt."""
     session = CoordinationSession(execution_id="e", total_workers=3)
     text = format_coordination_events(session, [_wc("w1")])
     assert "【协调期】" not in text
     assert "可静默" not in text
     assert "worker_completed" in text
     assert "只在【里程碑】写合成草稿" not in text
-    assert "可用工具：wait" not in text
+    assert "可用工具" not in text
     assert "三选一" not in text
     assert "【终稿纪律】" not in text
     assert "谁在后台、完成后会再汇报" not in text

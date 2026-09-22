@@ -404,93 +404,28 @@ async def test_coord_drive_session_saver_does_not_shadow_coordination_session():
     clear_active_coordination("e")
 
 
-async def test_wait_tool_is_clean_noop_during_coordination():
-    """协调期无需处置：wait 成功返回，不产生 error 工具调用。"""
-    clear_active_coordination()
-    session = CoordinationSession(execution_id="e", total_workers=2)
-    from structlog.testing import capture_logs
-
-    from agentcore.runtime.coordination.session import set_active_coordination
-    from agentcore.runtime.coordination.tools import WaitTool
-
-    set_active_coordination(session)
-    tool = WaitTool()
-    with capture_logs() as logs:
-        result = await tool.execute({"reason": "纯进展，无需处置"}, ctx())
-    assert result.success is True
-    assert result.error is None
-    assert "等待" in (result.output or "")
-    waits = [e for e in logs if e.get("event") == "coordination.wait"]
-    assert len(waits) == 1
-    assert waits[0]["execution_id"] == "e"
-    clear_active_coordination()
-
-
-async def test_wait_tool_finds_adopted_live_when_context_is_mint():
-    """跨回合 adopt：context.execution_id 是本回合 mint，wait 仍能找到旧 live 图。"""
+async def test_cancel_worker_finds_adopted_live_when_context_is_mint():
+    """跨回合 adopt：context.execution_id 是本回合 mint，控制仍能找到旧 live 图。"""
     clear_active_coordination()
     from agentcore.runtime.coordination.session import (
         current_execution_id,
         set_active_coordination,
     )
-    from agentcore.runtime.coordination.tools import WaitTool
 
     session = CoordinationSession(execution_id="e-live", total_workers=2)
     set_active_coordination(session)
+    session.arm_worker_timeout("w1", role="研究员", timeout_s=60)
     token = current_execution_id.set("e-live")
     try:
         mint_ctx = ctx()
         mint_ctx.execution_id = "e-mint"
-        result = await WaitTool().execute({}, mint_ctx)
+        result = await CancelWorkerTool().execute({"run_id": "w1"}, mint_ctx)
         assert result.success is True
-        assert result.error is None
-        assert "等待" in (result.output or "")
+        assert "w1" in session.cancel_run_ids()
     finally:
         current_execution_id.reset(token)
+        session.close()
         clear_active_coordination()
-
-
-async def test_wait_tool_listens_when_hot_user_pending(monkeypatch):
-    """热审批未点时 wait 是听团（等你允许），不是推进，也不整队收场。"""
-    clear_active_coordination()
-    session = CoordinationSession(
-        execution_id="e", total_workers=2, conversation_id="c-wait"
-    )
-    from agentcore.runtime.coordination.session import set_active_coordination
-    from agentcore.runtime.coordination.tools import WaitTool
-    from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
-
-    reg = InteractionRegistry()
-    reg.create(
-        "a1", "c-wait", kind=InteractionKind.APPROVAL, payload={"tool_name": "write"}
-    )
-    monkeypatch.setattr(
-        "agentcore.runtime.interaction_orphan.default_interaction_registry",
-        lambda: reg,
-    )
-    set_active_coordination(session)
-    try:
-        result = await WaitTool().execute({}, ctx())
-        text = result.output or ""
-        assert result.success is True
-        assert result.error is None
-        assert "等你允许" in text
-        assert "write" in text
-        assert "听团" in text
-        assert "无需处置" not in text
-        assert "团队已取消" not in text
-        assert "调度已停" not in text
-    finally:
-        clear_active_coordination()
-
-
-async def test_wait_tool_errors_outside_coordination():
-    clear_active_coordination()
-    from agentcore.runtime.coordination.tools import WaitTool
-
-    result = await WaitTool().execute({}, ctx())
-    assert result.success is False
-    assert "协调模式" in (result.error or "")
 
 
 async def test_cancel_worker_requests_cancel():
@@ -1063,7 +998,6 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
     import agentcore.runtime.coordination.wait as coord_wait
     from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
     from agentcore.runtime.coordination.session import current_execution_id
-    from agentcore.runtime.coordination.tools import WaitTool
     from agentcore.runtime.engine import react_loop
     from agentcore.tools.builtin.delegate import DelegateTool
     from agentcore.tools.protocol import ToolContext
@@ -1096,12 +1030,11 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
     class _CoordCeoProvider:
         def __init__(self) -> None:
             self.delegate_calls = 0
-            self.wait_calls = 0
+            self.listen_calls = 0
             self.final_calls = 0
 
         async def stream(self, request):  # noqa: ANN001
             tool_msgs = [m for m in request.messages if m.role == "tool"]
-            last_tool = (tool_msgs[-1].content or "") if tool_msgs else ""
             coord_injected = any(
                 m.role == "user" and m.content and "团队协调事件" in m.content
                 for m in request.messages
@@ -1139,22 +1072,12 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
                         )
                     ]
                 )
-            elif "已确认等待" in last_tool or all_done:
+            elif all_done:
                 self.final_calls += 1
                 yield LLMChunk(delta_content="最终合成：A 与 B 已对齐，按方案 A 定稿。")
-            elif coord_injected and self.wait_calls == 0 and not all_done:
-                self.wait_calls += 1
-                args = json.dumps({"reason": "听团"})
-                yield LLMChunk(
-                    delta_tool_calls=[
-                        ToolCallDelta(
-                            index=0,
-                            id="ceo-wait1",
-                            function_name="wait",
-                            arguments_delta=args,
-                        )
-                    ]
-                )
+            elif coord_injected and self.listen_calls == 0 and not all_done:
+                self.listen_calls += 1
+                return
             else:
                 self.final_calls += 1
                 yield LLMChunk(delta_content="最终合成：A 与 B 已对齐，按方案 A 定稿。")
@@ -1181,7 +1104,6 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
     )
     reg = ToolRegistry()
     reg.register(delegate)
-    reg.register(WaitTool())
     reg.register(CancelWorkerTool())
 
     messages: list[LLMMessage] = [
@@ -1206,7 +1128,6 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
         current_execution_id.reset(exec_token)
 
     assert ceo_llm.delegate_calls == 1
-    # 中途 wait 只在空转 yield 捎带已完成摘要时才发生；终稿必须有。
     assert "最终合成" in content
     assert rounds >= 2
     assert any("团队协调事件" in (m.content or "") for m in messages if m.role == "user")

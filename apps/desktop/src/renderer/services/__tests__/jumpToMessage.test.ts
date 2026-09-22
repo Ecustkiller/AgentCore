@@ -56,7 +56,7 @@ beforeEach(() => {
 });
 
 describe("jumpToMessage", () => {
-  it("focuses by client bubble id when permalink carries serverMessageId", () => {
+  it("focuses by client bubble id when the target is serverMessageId", () => {
     const store = useConversationStore.getState();
     store.switchConversation(CID);
     store.addMessage({

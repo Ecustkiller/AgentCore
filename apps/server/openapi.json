@@ -249,7 +249,8 @@
               {
                 "enum": [
                   "always",
-                  "on_demand"
+                  "on_demand",
+                  "paths"
                 ],
                 "type": "string"
               },
@@ -316,13 +317,20 @@
         "type": "object"
       },
       "AccountRulesListResponse": {
-        "description": "Always rules for ``<设定>`` plus on_demand bodies for 规则目录 / ``consult``.\n\n``ancestor_*`` carry the enclosing folders' layers, outermost-first, and\n``folder_chain`` is that same chain by id with the current folder last: the engine may\nbe a desktop sidecar with no folders table, so the cloud is the only place that can\nresolve「谁在谁里面」(双模式工作区 §5.4 沿树继承).",
+        "description": "Always rules for ``<设定>``, path rules for ``<路径约定>``, on_demand for consult.\n\n``ancestor_*`` carry the enclosing folders' layers, outermost-first, and\n``folder_chain`` is that same chain by id with the current folder last: the engine may\nbe a desktop sidecar with no folders table, so the cloud is the only place that can\nresolve「谁在谁里面」(双模式工作区 §5.4 沿树继承).",
         "properties": {
           "ancestor_on_demand_rules": {
             "items": {
               "$ref": "#/components/schemas/AccountRuleDoc"
             },
             "title": "Ancestor On Demand Rules",
+            "type": "array"
+          },
+          "ancestor_path_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleDoc"
+            },
+            "title": "Ancestor Path Rules",
             "type": "array"
           },
           "ancestor_rules": {
@@ -346,6 +354,13 @@
             "title": "Global On Demand Rules",
             "type": "array"
           },
+          "global_path_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleDoc"
+            },
+            "title": "Global Path Rules",
+            "type": "array"
+          },
           "global_rules": {
             "items": {
               "$ref": "#/components/schemas/AccountRuleDoc"
@@ -358,6 +373,13 @@
               "$ref": "#/components/schemas/AccountRuleDoc"
             },
             "title": "Project On Demand Rules",
+            "type": "array"
+          },
+          "project_path_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleDoc"
+            },
+            "title": "Project Path Rules",
             "type": "array"
           },
           "project_rules": {
@@ -2817,21 +2839,11 @@
         "title": "AutoTitleResponse",
         "type": "object"
       },
-      "AutonomyPolicy": {
-        "description": "User-global *default recipe* for new conversations (seeds :class:`PermissionAxes`).\n\nRuntime gates read the conversation's ``permission_axes`` — not this column.\nStored on ``users.autonomy_policy`` (设置页「新会话默认权限配方」).",
-        "enum": [
-          "cautious",
-          "less_interrupt",
-          "managed"
-        ],
-        "title": "AutonomyPolicy",
-        "type": "string"
-      },
       "AutonomyUpdate": {
         "properties": {
           "policy": {
-            "$ref": "#/components/schemas/AutonomyPolicy",
-            "description": "New-session default recipe: cautious | less_interrupt | managed"
+            "$ref": "#/components/schemas/WorkspaceBoundary",
+            "description": "New-session default boundary: read | folder | computer"
           }
         },
         "required": [
@@ -2843,8 +2855,8 @@
       "AutonomyView": {
         "properties": {
           "policy": {
-            "$ref": "#/components/schemas/AutonomyPolicy",
-            "default": "less_interrupt"
+            "$ref": "#/components/schemas/WorkspaceBoundary",
+            "default": "folder"
           }
         },
         "title": "AutonomyView",
@@ -4162,15 +4174,6 @@
         ],
         "title": "CloneRepoResponse",
         "type": "object"
-      },
-      "CommandAxis": {
-        "description": "How execution-class tools (code / terminal / test) are authorized.",
-        "enum": [
-          "ask",
-          "auto"
-        ],
-        "title": "CommandAxis",
-        "type": "string"
       },
       "ContextGapModel": {
         "description": "早期对话没能进摘要、也已滑出原文窗口——这一轮 AI 确实读不到它们。\n\nThe failure half of ``context_compacted``: that flag says folding HAS run, and a\nbool cannot tell a healthy rolling summary apart from folding that kept failing\nuntil the chat outgrew its window. Present only when the loss is provable from\nstored state (``conversation/context_gap.py``); absent means either intact or\nnot computed, and a client must stay quiet on both rather than warn on a guess.\n\nWording obligations for whoever renders this (same honesty bar as the memory\nalways-quota card): name what did not happen and what the user can do, never let\nit read as a capability lost for good. Nothing was deleted — the transcript is\nwhole on screen, and the backlog folds itself in incrementally once folding can\nrun again. ``recovery_at`` is upstream's own date when it gave one; its absence\nmeans「不知道，会自动重试」and must not be dressed up as a deadline.",
@@ -6486,7 +6489,8 @@
             "default": "always",
             "enum": [
               "always",
-              "on_demand"
+              "on_demand",
+              "paths"
             ],
             "title": "Apply Mode",
             "type": "string"
@@ -6806,7 +6810,8 @@
               {
                 "enum": [
                   "always",
-                  "on_demand"
+                  "on_demand",
+                  "paths"
                 ],
                 "type": "string"
               },
@@ -6934,6 +6939,37 @@
           "content"
         ],
         "title": "EditChatMessageRequest",
+        "type": "object"
+      },
+      "EditQueuedTurnRequest": {
+        "description": "Replace one queued turn's payload. Identity and order stay on the server.\n\nSame emptiness rule as send: blank text is allowed only when attachments\nremain. Credentials, ``interjection_id``, and table selection are not fields\nhere — enqueue already captured them.",
+        "properties": {
+          "agent_mentions": {
+            "items": {
+              "$ref": "#/components/schemas/AgentMention"
+            },
+            "maxItems": 10,
+            "title": "Agent Mentions",
+            "type": "array"
+          },
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/MessageAttachment"
+            },
+            "maxItems": 20,
+            "title": "Attachments",
+            "type": "array"
+          },
+          "content": {
+            "maxLength": 32000,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "EditQueuedTurnRequest",
         "type": "object"
       },
       "EmailCodeAcceptedResponse": {
@@ -7248,15 +7284,6 @@
         ],
         "title": "ExternalGrantResponse",
         "type": "object"
-      },
-      "FileWriteAxis": {
-        "description": "Whether reversible file mutations need per-call approval.",
-        "enum": [
-          "ask",
-          "session"
-        ],
-        "title": "FileWriteAxis",
-        "type": "string"
       },
       "FolderGroup": {
         "description": "A project plus the conversations it holds (grouped sidebar payload).",
@@ -8111,16 +8138,6 @@
         ],
         "title": "HandoffJobSummary",
         "type": "object"
-      },
-      "HostAxis": {
-        "description": "本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 delegation 静默授）。",
-        "enum": [
-          "off",
-          "ask",
-          "session"
-        ],
-        "title": "HostAxis",
-        "type": "string"
       },
       "InferenceTokenRequest": {
         "description": "Optional mint body — scopes returned ``model`` to a conversation main slot.",
@@ -9308,17 +9325,6 @@
             "title": "Evidence Ledger",
             "type": "array"
           },
-          "feedback": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feedback"
-          },
           "followups": {
             "items": {
               "type": "string"
@@ -10501,19 +10507,11 @@
         "type": "object"
       },
       "PermissionAxesModel": {
-        "description": "Session permission axes (运行时单一真相源 · file_write/command/host).",
+        "description": "Conversation boundary (运行时单一真相源).",
         "properties": {
-          "command": {
-            "$ref": "#/components/schemas/CommandAxis",
-            "default": "auto"
-          },
-          "file_write": {
-            "$ref": "#/components/schemas/FileWriteAxis",
-            "default": "session"
-          },
-          "host": {
-            "$ref": "#/components/schemas/HostAxis",
-            "default": "session"
+          "boundary": {
+            "$ref": "#/components/schemas/WorkspaceBoundary",
+            "default": "folder"
           }
         },
         "title": "PermissionAxesModel",
@@ -10804,7 +10802,7 @@
         "type": "object"
       },
       "QueuedTurnItem": {
-        "description": "One process-local FIFO queued turn (排队条权威内容源；GET / 快照).\n\n``turn_queued`` / ``turn_queue_cancelled`` remain change signals only.\n``turn_queue_started`` is the timeline user-bubble entrance (content on the\nframe), not a change-only ping.\n``interjection_id`` is set when the entry was promoted from a user interjection\n(协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.\n``position`` is 1-based FIFO index.\n``attachments`` / ``agent_mentions`` are the same fields drain forwards to\n``stream_chat`` (optional additive — old clients ignore).",
+        "description": "One process-local FIFO queued turn (排队条权威内容源；GET / 快照).\n\n``turn_queued`` / ``turn_queue_cancelled`` remain change signals only.\n``turn_queue_started`` is the timeline user-bubble entrance (content on the\nframe), not a change-only ping.\n``interjection_id`` is set when the entry was promoted from a user interjection\n(协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.\n``user_message_id`` is the persisted user-row id (cancel deletes it; drain\nreuses it). Optional additive — old clients ignore. Omitted / null when unset.\n``position`` is 1-based FIFO index.\n``attachments`` / ``agent_mentions`` are the same fields drain forwards to\n``stream_chat`` (optional additive — old clients ignore).",
         "properties": {
           "agent_mentions": {
             "items": {
@@ -10844,6 +10842,17 @@
           "queue_id": {
             "title": "Queue Id",
             "type": "string"
+          },
+          "user_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Message Id"
           }
         },
         "required": [
@@ -11379,6 +11388,24 @@
           "code"
         ],
         "title": "RegisterVerifyRequest",
+        "type": "object"
+      },
+      "ReorderQueuedTurnsRequest": {
+        "description": "Exact permutation of the conversation's current queued-turn ids.",
+        "properties": {
+          "queue_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Queue Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "queue_ids"
+        ],
+        "title": "ReorderQueuedTurnsRequest",
         "type": "object"
       },
       "ReplayConversation": {
@@ -12614,28 +12641,6 @@
           "profile_id"
         ],
         "title": "SetDefaultModelProfileRequest",
-        "type": "object"
-      },
-      "SetMessageFeedbackRequest": {
-        "description": "Set or clear the user's 点赞/点踩 on an assistant message (回复反馈).\n\n``feedback`` is ``\"up\"`` / ``\"down\"`` to rate the reply, or ``null`` to clear the\nrating back to 未评价 (toggling the same side off). The route does not restrict by\nrole — rating is only meaningful on assistant replies, but a value on any row is a\nharmless store.",
-        "properties": {
-          "feedback": {
-            "anyOf": [
-              {
-                "enum": [
-                  "up",
-                  "down"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feedback"
-          }
-        },
-        "title": "SetMessageFeedbackRequest",
         "type": "object"
       },
       "ShareListResponse": {
@@ -14038,7 +14043,7 @@
         "type": "object"
       },
       "ToolApproval": {
-        "description": "Tool approval requirement levels (可逆性 × 副作用).\n\nTwo live levels: ``NEVER`` (silent) and ``GRANTABLE`` (first-grant / per-call\nvia session permission axes). The former ``ALWAYS`` (every call, no turn grant)\nhad no consumers and was removed — irreversible external tools are not in the\nMVP set.",
+        "description": "Tool approval requirement levels (可逆性 × 副作用).\n\nTwo live levels: ``NEVER`` (silent) and ``GRANTABLE`` (may still prompt for\nirreversible shapes). Boundary decides whether the tool is assembled;\nin-boundary writes and ``run`` do not prompt. Irreversible external\nactions stay on the always-confirm / breaker path.",
         "enum": [
           "never",
           "grantable"
@@ -15736,6 +15741,16 @@
         "title": "WorkspaceBindingResponse",
         "type": "object"
       },
+      "WorkspaceBoundary": {
+        "description": "What this conversation may do. One value, not three axes.\n\n``read`` — look only. ``folder`` — change this folder and run inside it\n(default). ``computer`` — folder plus the local Host face. Stored as\n``permission_axes.boundary``. Checkpoints, breakers, and always-confirm\ncommands are orthogonal.",
+        "enum": [
+          "read",
+          "folder",
+          "computer"
+        ],
+        "title": "WorkspaceBoundary",
+        "type": "string"
+      },
       "WorkspaceEditDoc": {
         "description": "Full text of a cloud workspace file for in-panel editing, plus CAS baseline.\n\nUnlike the preview download (truncated at the transfer cap), this returns the\n**whole** file so a save never drops the tail. ``mtime_ms`` is the write-time CAS\nbaseline (compared on write); ``eol`` lets the editor restore the original line\nending. Cloud files are server-stored UTF-8, so there is no encoding field.",
         "properties": {
@@ -16056,7 +16071,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.7.26"
+    "version": "0.7.27"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -16481,7 +16496,7 @@
     },
     "/v1/account/rules/list": {
       "post": {
-        "description": "User rules for turn assembly: always → ``<设定>``; on_demand → catalog + consult.",
+        "description": "User rules for turn assembly: always → ``<设定>``; paths → index; on_demand → catalog.",
         "operationId": "list_account_user_rules_v1_account_rules_list_post",
         "parameters": [
           {
@@ -24487,7 +24502,7 @@
         ]
       },
       "post": {
-        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\n发送即有流 (D9): this endpoint **always** returns SSE (never 202 JSON).\n\n``delivery`` 必填（``steer`` | ``queue``；缺 → 422）：\n\n- **空闲** → 开跑并流式推送整个回合（客户端仍带 ``delivery=steer``）。\n- **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。\n- **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。\n- **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。\n- **经典 in-flight + steer** → 挂到 live turn 进程内 pending（DURABLE\n  ``user_interjection(received)``；步顶注入后再发 ``injected``）；\n  无 accepting 窗口 / 回合已收口 → 回落 FIFO（``turn_queued.degraded_from=steer``）。\n- **热路 pending**（approval / escalation / …）仍 409。\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nRequest-scoped DB session for preflight only — explicitly closed before the SSE\nstream opens so a long-lived stream never holds a pooled connection (fixes\nGC-termination warnings on abrupt teardown).",
+        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\n发送即有流 (D9): this endpoint **always** returns SSE (never 202 JSON).\n\n``delivery`` 必填（``steer`` | ``queue``；缺 → 422）：\n\n- **空闲** → 开跑并流式推送整个回合（客户端仍带 ``delivery=steer``）。\n- **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。\n- **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。\n- **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。\n- **经典 in-flight + steer** → 队长循环还在接受时挂到进程内 pending（DURABLE\n  ``user_interjection(received)``；下一工具步顶再发 ``injected``）。散文收口\n  不为未读插话多留一轮；赶不上下一步的 leftover 升成下一回合\n  （``queued`` + ``turn_queued.degraded_from=steer``）。无 accepting 窗口 →\n  普通 FIFO，不标 ``degraded_from``。\n- **热路 pending**（approval / escalation / …）仍 409。\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.\n\nRequest-scoped DB session for preflight only — explicitly closed before the SSE\nstream opens so a long-lived stream never holds a pooled connection (fixes\nGC-termination warnings on abrupt teardown).",
         "operationId": "send_message_v1_conversations__conversation_id__messages_post",
         "parameters": [
           {
@@ -25022,100 +25037,6 @@
           }
         },
         "summary": "Continue Message",
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
-    "/v1/conversations/{conversation_id}/messages/{message_id}/feedback": {
-      "patch": {
-        "description": "Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈).\n\nOwner-scoped like delete (prove conversation ownership first, then update only within\nit, so a guessed cross-user ``message_id`` can't be rated — IDOR-safe). ``feedback`` is\n``\"up\"`` / ``\"down\"`` to rate, or ``null`` to clear the rating (toggling the same side\noff). 404 when the message isn't in this conversation.",
-        "operationId": "set_message_feedback_v1_conversations__conversation_id__messages__message_id__feedback_patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "message_id",
-            "required": true,
-            "schema": {
-              "title": "Message Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetMessageFeedbackRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set Message Feedback",
         "tags": [
           "conversations"
         ]
@@ -25658,6 +25579,91 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/queued-turns/reorder": {
+      "post": {
+        "description": "Permute the process-local FIFO. The id list must be the current set.",
+        "operationId": "reorder_queued_turns_v1_conversations__conversation_id__queued_turns_reorder_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderQueuedTurnsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reorder Queued Turns",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/cancel": {
       "post": {
         "description": "Cancel one FIFO queued turn before drain (同对话再发 · 按项取消).\n\nOwner-gated like send. Removes the entry by ``queue_id``; already started / unknown\n→ 404. Stop does **not** clear the queue — cancel is the only per-item withdraw.\n\nOn success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink AND signals\nit to every端 following the conversation (云对话多端同权 B2 · 验收 5). The signal lane\nis what makes the withdraw visible when there is no live run at all — the queue\noutlives its host turn (drain not yet armed / deferred owns the next slot), and until\nnow cancelling in that window told the other端 nothing.",
@@ -25737,6 +25743,184 @@
           }
         },
         "summary": "Cancel Queued Turn",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/edit": {
+      "post": {
+        "description": "Replace one queued turn's text, attachments, and mentions before drain.\n\nSame ``queue_id`` and persisted user row. Position, credentials,\n``interjection_id``, and table selection stay as captured at enqueue.\nAlready started / unknown id / missing user row → 404. Blank text with no\nattachments → 422.",
+        "operationId": "edit_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__edit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "queue_id",
+            "required": true,
+            "schema": {
+              "title": "Queue Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditQueuedTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Queued Turn",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/stop-and-send": {
+      "post": {
+        "description": "Move this queued item to the front, then hard-stop the live turn.\n\nThe next drain starts this item. Items that were ahead of it stay behind.\nStop still does not clear the rest of the FIFO.",
+        "operationId": "stop_and_send_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__stop_and_send_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "queue_id",
+            "required": true,
+            "schema": {
+              "title": "Queue Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop And Send Queued Turn",
         "tags": [
           "conversations"
         ]
@@ -32530,7 +32714,7 @@
     },
     "/v1/inference/web_search": {
       "post": {
-        "description": "Run server-side web search for a sidecar turn (SearXNG→Tavily; no client keys).",
+        "description": "Run server-side web search for a sidecar turn (SearXNG; no client keys).",
         "operationId": "inference_web_search_v1_inference_web_search_post",
         "parameters": [
           {

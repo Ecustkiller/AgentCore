@@ -3,6 +3,10 @@ import {
   installAccountStateIngress,
   resetAccountStateIngressForTests,
 } from "@/services/accountStateIngress";
+import {
+  rememberPromotedUserRow,
+  resetPromotedUserRowsForTests,
+} from "@/services/turns/queuedTurnLocal";
 import { useAiAttentionStore } from "@/stores/aiAttention";
 import {
   applyAiTurnActivitySnapshot,
@@ -84,6 +88,7 @@ describe("accountStateIngress ai_turn_activity", () => {
 describe("accountStateIngress turn_queue", () => {
   beforeEach(() => {
     resetAccountStateIngressForTests();
+    resetPromotedUserRowsForTests();
     useQueuedTurnsStore.setState({ byConversation: {} });
     useConversationStore.setState({ byId: {} });
     getConversationsMock.mockReturnValue([]);
@@ -121,6 +126,33 @@ describe("accountStateIngress turn_queue", () => {
       },
     ]);
   }
+
+  it("点名之后的快照不再把该用户行放回条上", () => {
+    rememberPromotedUserRow("c-queue", "u-named");
+    cloudCb?.({
+      type: "turn_queue_snapshot",
+      payload: {
+        conversation_id: "c-queue",
+        items: [
+          {
+            queue_id: "q-named",
+            content: "好的",
+            position: 1,
+            user_message_id: "u-named",
+          },
+          {
+            queue_id: "q-other",
+            content: "下一条",
+            position: 2,
+            user_message_id: "u-other",
+          },
+        ],
+      },
+    });
+    const left = useQueuedTurnsStore.getState().list("c-queue");
+    expect(left.map((e) => e.queueId)).toEqual(["q-other"]);
+    expect(left[0]?.queueDepth).toBe(1);
+  });
 
   it("账号空表必达：重连假条掉", () => {
     seedCloud("c-stale", "q-stale");
@@ -311,6 +343,34 @@ describe("accountStateIngress turn_queue", () => {
         agentMentions: [{ agent_id: "server-agent", role: "研究员" }],
       }),
     ]);
+  });
+
+  it("快照 user_message_id 对上气泡，盖过本端旧 id", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q1",
+      conversationId: "c1",
+      content: "stale",
+      position: 1,
+      queueDepth: 1,
+      messageId: "local-id",
+    });
+    cloudCb?.({
+      type: "turn_queue_snapshot",
+      payload: {
+        conversation_id: "c1",
+        items: [
+          {
+            queue_id: "q1",
+            content: "server",
+            position: 1,
+            user_message_id: "server-user",
+          },
+        ],
+      },
+    });
+    expect(useQueuedTurnsStore.getState().list("c1")[0]?.messageId).toBe(
+      "server-user",
+    );
   });
 
   it("快照未带 extras 时不从旧条接回", () => {

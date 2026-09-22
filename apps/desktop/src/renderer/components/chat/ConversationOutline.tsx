@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
  * 对话大纲 / 回合导航 (对话基础功能补齐) — a floating table-of-contents over the *loaded*
  * turns of the open conversation. Each user message opens a turn, so the outline lists the
  * user prompts (whitespace-collapsed, truncated); clicking one jumps to that turn
- * (scroll) via the shared `focusMessage`. Complements 会话内查找 and 消息永久链接:
+ * (scroll) via the shared `focusMessage`. Complements 会话内查找:
  * find by text, jump by structure.
  *
  * Only shown once there are ≥2 turns to navigate (a single-turn chat needs no outline).

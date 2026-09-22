@@ -18,6 +18,7 @@ type MessageWindowActions = Pick<
   | "setMemoryUpdates"
   | "addMemoryUpdate"
   | "addMessage"
+  | "insertMessageBefore"
   | "updateMessage"
   | "removeMessage"
   | "truncateAfter"
@@ -113,6 +114,34 @@ export function createMessageWindowActions(
       patchConversation(conversationId, (rt) => ({
         messages: [...rt.messages, message],
       })),
+
+    insertMessageBefore: (message, beforeId, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        if (
+          rt.messages.some(
+            (m) => m.id === message.id || m.serverMessageId === message.id,
+          )
+        ) {
+          return null;
+        }
+        let idx = rt.messages.findIndex(
+          (m) => m.id === beforeId || m.serverMessageId === beforeId,
+        );
+        if (idx < 0) {
+          for (let i = rt.messages.length - 1; i >= 0; i--) {
+            if (rt.messages[i]?.role === "assistant") {
+              idx = i;
+              break;
+            }
+          }
+        }
+        if (idx < 0) {
+          return { messages: [...rt.messages, message] };
+        }
+        const messages = rt.messages.slice();
+        messages.splice(idx, 0, message);
+        return { messages };
+      }),
 
     updateMessage: (id, update, conversationId) =>
       patchConversation(conversationId, (rt) => ({

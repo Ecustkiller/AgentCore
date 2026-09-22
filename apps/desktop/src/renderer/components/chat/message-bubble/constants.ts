@@ -10,7 +10,6 @@ import {
   BookOpen,
   Brain,
   Camera,
-  Clock,
   Code2,
   Compass,
   FileText,
@@ -103,7 +102,6 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   cancel_worker: { Icon: UserX, label: "Cancel worker" },
   resolve_escalation: { Icon: Gavel, label: "Resolve escalate" },
   queue_user_message: { Icon: Inbox, label: "Queue message" },
-  wait: { Icon: Clock, label: "Wait" },
   // L3 团队浏览器（单工具 `browser`，按 action 展示；同构 host）
   browser: { Icon: Globe, label: "Browser" },
   // 历史会话回放：旧 browser_* 七键只供展示，不注册、不转发。

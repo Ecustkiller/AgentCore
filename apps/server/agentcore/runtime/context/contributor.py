@@ -54,6 +54,10 @@ class SectionOrder(IntEnum):
     BASE = 100
     RUNTIME_CONTEXT = 200
     MEMORY = 300
+    # Path-rule index (one line per bounded pattern). Stable per desk, so it
+    # stays in the system prefix beside <设定>. Full bodies ride the envelope
+    # and the matching read/write result, not this slot.
+    PATH_RULES = 310
     CEO_CORE = 400
     SKILL_DIRECTORY = 500
     # The 记忆主题目录 (consult's catalog) sits beside the skill directory:

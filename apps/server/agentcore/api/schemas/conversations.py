@@ -5,48 +5,22 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from agentcore.core.types import (
-    CommandAxis,
-    FileWriteAxis,
-    HostAxis,
-    PermissionAxes,
-    validate_permission_axes,
-)
+from agentcore.core.types import WorkspaceBoundary
 
 
 class PermissionAxesModel(BaseModel):
-    """Session permission axes (运行时单一真相源 · file_write/command/host)."""
+    """Conversation boundary (运行时单一真相源)."""
 
     model_config = {"extra": "ignore"}
 
-    file_write: FileWriteAxis = FileWriteAxis.SESSION
-    command: CommandAxis = CommandAxis.AUTO
-    host: HostAxis = HostAxis.SESSION
+    boundary: WorkspaceBoundary = WorkspaceBoundary.FOLDER
 
-    @model_validator(mode="after")
-    def _reject_illegal(self) -> "PermissionAxesModel":
-        # Raises ValueError on command=auto ∧ file_write=ask.
-        validate_permission_axes(
-            file_write=self.file_write.value,
-            command=self.command.value,
-            host=self.host.value,
-        )
-        return self
-
-    def to_axes(self) -> PermissionAxes:
-        return PermissionAxes(
-            file_write=self.file_write,
-            command=self.command,
-            host=self.host,
-        )
+    def to_axes(self) -> WorkspaceBoundary:
+        return self.boundary
 
     @classmethod
-    def from_axes(cls, axes: PermissionAxes) -> "PermissionAxesModel":
-        return cls(
-            file_write=axes.file_write,
-            command=axes.command,
-            host=axes.host,
-        )
+    def from_axes(cls, axes: WorkspaceBoundary) -> "PermissionAxesModel":
+        return cls(boundary=axes)
 
 
 class ContextGapModel(BaseModel):
@@ -136,10 +110,10 @@ class ConversationSummary(BaseModel):
     @field_validator("permission_axes", mode="before")
     @classmethod
     def _coerce_axes(cls, value: object) -> object:
-        if isinstance(value, PermissionAxes):
+        if isinstance(value, WorkspaceBoundary):
             return PermissionAxesModel.from_axes(value)
         if isinstance(value, dict):
-            return PermissionAxes.from_mapping(value).to_dict()
+            return WorkspaceBoundary.from_mapping(value).to_dict()
         return value
 
 

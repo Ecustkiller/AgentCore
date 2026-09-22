@@ -64,21 +64,6 @@ describe("formatProcessExport", () => {
     expect(text).not.toContain("c-8f31ab02");
   });
 
-  it("does not export wait.reason; labels the row Wait", () => {
-    expect(
-      formatProcessExport([
-        {
-          kind: "tool",
-          id: "w1",
-          tool_name: "wait",
-          arguments: { reason: "学术视角研究员仍在跑…" },
-          result: null,
-          status: "success",
-        },
-      ]),
-    ).toBe("· Wait");
-  });
-
   it("uses English chrome for list_folders / git subcommand, not snake_case or commit headline", () => {
     expect(
       formatProcessExport([

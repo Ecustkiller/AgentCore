@@ -65,7 +65,7 @@ async def test_resolve_interaction_rejects_stage_card_kind():
 @pytest.mark.asyncio
 async def test_drive_top_level_no_longer_hangs_team_preview(monkeypatch):
     """顶层也不再挂 team_preview。"""
-    from agentcore.core.types import AutonomyPolicy
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.runtime.delegate.worker_grant import maybe_auto_grant_before_workers
 
     monkeypatch.setattr(
@@ -74,7 +74,7 @@ async def test_drive_top_level_no_longer_hangs_team_preview(monkeypatch):
 
     class _Tool:
         _depth = 0
-        _permission_axes = AutonomyPolicy.LESS_INTERRUPT
+        _permission_axes = WorkspaceBoundary.FOLDER
         _pending_pause = False
         _base_tool_context = type("C", (), {"backend": None})()
         _approval_gate = None

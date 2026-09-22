@@ -34,7 +34,7 @@
   --color-border-soft: var(--border-soft);
   --color-border-strong: var(--border-strong);
   --color-ring: var(--ring);
-  --color-brand-2: var(--brand-2);
+  --color-blue-2: var(--blue-2);
 
   /* 中性文本阶梯：dim > faint > ghost，越往后越弱。 */
   --color-dim: var(--dim);
@@ -81,29 +81,29 @@
 
   --primary: oklch(0.75 0.13 235);
   --primary-foreground: oklch(0.15 0.03 265);
-  --brand-2: oklch(0.78 0.09 210);
+  --blue-2: oklch(0.78 0.09 210);
 
-  /* 招牌渐变（深靛 → 亮青）：描边、辉光、主 CTA 共用一条。
+  /* 蓝渐变（深靛 → 亮青）：描边、辉光、主 CTA 共用一条。
      四个色停都在 hue 200–275 内，是同一条光的四个位置，不是四种颜色。 */
   --grad-1: oklch(0.65 0.15 270);
   --grad-2: oklch(0.72 0.14 250);
   --grad-3: oklch(0.8 0.12 225);
   --grad-4: oklch(0.86 0.1 205);
-  --brand-gradient: linear-gradient(
+  --blue-gradient: linear-gradient(
     90deg,
     oklch(0.62 0.16 272) 0%,
     oklch(0.72 0.14 248) 40%,
     oklch(0.8 0.12 226) 70%,
     oklch(0.88 0.1 202) 100%
   );
-  /* 四步机制的阶段色：跟着招牌渐变同向走，越往后越亮——
+  /* 四步机制的阶段色：跟着蓝渐变同向走，越往后越亮——
      四步走完要有「越来越实」的感觉，靠明度递进而不是换色相。 */
   --pp-c1: oklch(0.6 0.16 275);
   --pp-c2: oklch(0.7 0.14 250);
   --pp-c3: oklch(0.8 0.12 226);
   --pp-c4: oklch(0.88 0.1 200);
 
-  /* 标题渐变字：与招牌渐变同族，但反向铺（亮青起、深靛收），比它更短。 */
+  /* 标题渐变字：与蓝渐变同族，但反向铺（亮青起、深靛收），比它更短。 */
   --head-gradient: linear-gradient(
     100deg,
     oklch(0.88 0.1 205) 0%,
@@ -111,9 +111,9 @@
     oklch(0.66 0.16 270) 100%
   );
 
-  /* 压在招牌渐变之上的文字色（主 CTA、下载页徽标、生态区那张高亮卡）。
+  /* 压在蓝渐变之上的文字色（主 CTA、下载页徽标、生态区那张高亮卡）。
      渐变是亮色，所以这里必须是深色，否则白字直接消失。 */
-  --on-brand: oklch(0.14 0.03 265);
+  --on-blue: oklch(0.14 0.03 265);
 
   /* 白纸分区专用的深色点缀。
      亮色渐变落到白纸上等于没有，那几个容器里整套 --grad-* 都要换深色版
@@ -122,8 +122,8 @@
   --paper-g2: oklch(0.4 0.16 258);
   --paper-g3: oklch(0.46 0.15 245);
   --paper-g4: oklch(0.38 0.13 232);
-  --paper-on-brand: oklch(1 0 0);
-  --paper-brand-gradient: linear-gradient(
+  --paper-on-blue: oklch(1 0 0);
+  --paper-blue-gradient: linear-gradient(
     90deg,
     oklch(0.46 0.16 272) 0%,
     oklch(0.38 0.15 252) 45%,
@@ -228,7 +228,7 @@
  *
  * 亮色渐变压在深蓝画布上很干净，落到白纸分区就等于消失。这里在那几个容器上
  * 就地重声明同名变量——自定义属性会继承下去，所有 var(--grad-*) /
- * var(--brand-gradient) 的用法自动跟着翻深，不必给每个用到的地方单独写规则。 */
+ * var(--blue-gradient) 的用法自动跟着翻深，不必给每个用到的地方单独写规则。 */
 .pill-nav,
 .paper-panel,
 .paper-curtain {
@@ -237,9 +237,9 @@
   --grad-3: var(--paper-g3);
   --grad-4: var(--paper-g4);
   --primary: var(--paper-g2);
-  --brand-gradient: var(--paper-brand-gradient);
+  --blue-gradient: var(--paper-blue-gradient);
   --head-gradient: var(--paper-head-gradient);
-  --on-brand: var(--paper-on-brand);
+  --on-blue: var(--paper-on-blue);
 }
 
 @layer base {
@@ -323,7 +323,7 @@
   flex: 0 0 auto;
 }
 .eyebrow-alt::before {
-  background: var(--brand-2);
+  background: var(--blue-2);
 }
 
 .section-title {
@@ -803,7 +803,7 @@
 
 /* ══ 材质与光 ══════════════════════════════════════════════ */
 
-/* 招牌彩虹「洗色」。
+/* 蓝渐变洗色。
  *
  * 暗纸下缘与页脚字标共用同一条渐变、同一档模糊、同一层噪点——接缝两侧
  * 必须是同一套纹理，才读得出「一束光从纸背后透过来」而不是两处装饰。
@@ -876,7 +876,7 @@
   background-size: 340px 300px, 210px 260px, 430px 380px, 280px 220px, 520px 460px;
 }
 
-/* 极光：Hero 与 CTA 背后的大面积柔光，三色对应招牌渐变的三段。 */
+/* 极光：Hero 与 CTA 背后的大面积柔光，三色对应蓝渐变的三段。 */
 .aurora {
   background:
     radial-gradient(60% 46% at 22% 62%, var(--glow-2), transparent 68%),
@@ -964,7 +964,7 @@ html[lang="zh-CN"] .accent {
 
 /* ══ 能交付什么：左右交替的图文卡 ══════════════════════════
  *
- * 每张卡的主色由内联 --uc 注入（取招牌渐变的一个色停），
+ * 每张卡的主色由内联 --uc 注入（取蓝渐变的一个色停），
  * 图、图标、勾选、按钮、辉光全部引用它——换色只改调用处一个变量。
  */
 
@@ -1254,7 +1254,7 @@ html[lang="zh-CN"] .accent {
   left: 0;
   width: 2px;
   border-radius: 2px;
-  background: var(--brand-gradient);
+  background: var(--blue-gradient);
 }
 
 .hero-quote-mark {
@@ -1293,7 +1293,7 @@ html[lang="zh-CN"] .accent {
 /* ══ 下载页 ══════════════════════════════════════════════
  *
  * 复用首页那套「纸 + 主色」语言：卡片同一档圆角与描边，
- * 强调态（当前设备）走招牌渐变描边而不是实心主色块。
+ * 强调态（当前设备）走蓝渐变描边而不是实心主色块。
  */
 
 .dl-kicker {
@@ -1329,7 +1329,7 @@ html[lang="zh-CN"] .accent {
   border-color: transparent;
   background:
     linear-gradient(var(--panel), var(--panel)) padding-box,
-    var(--brand-gradient) border-box;
+    var(--blue-gradient) border-box;
   box-shadow: 0 1.5rem 3rem -1.5rem color-mix(in oklab, var(--grad-2), transparent 55%);
 }
 
@@ -1342,11 +1342,11 @@ html[lang="zh-CN"] .accent {
 .dl-badge {
   padding: 0.25rem 0.625rem;
   border-radius: 1.25rem;
-  background: var(--brand-gradient);
+  background: var(--blue-gradient);
   font-family: var(--font-mono);
   font-size: 0.625rem;
   letter-spacing: 0.14em;
-  color: var(--on-brand);
+  color: var(--on-blue);
 }
 
 /* 文件行：整行可点，右侧动作用主色。 */
@@ -1467,14 +1467,14 @@ html[lang="zh-CN"] .accent {
   color: var(--grad-4);
 }
 
-/* 字标：走招牌渐变，与右侧 CTA 是同一条光。
+/* 字标：走蓝渐变，与右侧 CTA 是同一条光。
    渐变裁在字形上，字号和字重都要够——细小的渐变字会糊成一团。 */
 .brand-word {
   font-size: 1.3125rem;
   font-weight: 700;
   letter-spacing: -0.035em;
   line-height: 1;
-  background: var(--brand-gradient);
+  background: var(--blue-gradient);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -1497,10 +1497,10 @@ html[lang="zh-CN"] .accent {
   border-radius: 0.75rem;
   font-size: 0.90625rem;
   font-weight: 600;
-  color: var(--on-brand);
+  color: var(--on-blue);
   white-space: nowrap;
   cursor: pointer;
-  background: var(--brand-gradient);
+  background: var(--blue-gradient);
   box-shadow: 0 10px 30px -12px color-mix(in oklab, var(--grad-2), transparent 40%);
   transition:
     transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
@@ -1538,7 +1538,7 @@ html[lang="zh-CN"] .accent {
   color: var(--foreground);
   background:
     linear-gradient(var(--background), var(--background)) padding-box,
-    var(--brand-gradient) border-box;
+    var(--blue-gradient) border-box;
   opacity: 0.85;
   transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -1705,7 +1705,7 @@ html[lang="zh-CN"] .accent {
   left: 0;
   height: 3px;
   width: 0;
-  background: var(--brand-gradient);
+  background: var(--blue-gradient);
   transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .footer-link:hover::after {

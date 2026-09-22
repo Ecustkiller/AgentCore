@@ -1,12 +1,6 @@
 ---
 description: 日志规范——写日志时阅读。Logger 获取、事件命名、禁止项。
 alwaysApply: false
-globs:
-  - "apps/server/agentcore/core/logging.py"
-  - "apps/server/agentcore/core/log_context.py"
-  - "apps/server/agentcore/observability/catalog.py"
-  - "apps/server/agentcore/observability/events.py"
-  - "apps/server/scripts/sync_log_event_registry.py"
 ---
 
 # 日志规范

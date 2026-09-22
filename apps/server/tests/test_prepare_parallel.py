@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from agentcore.memory.rules_injection import TurnRuleView
 from agentcore.runtime.context import WorkspaceGitFact
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.pipeline.assemble import assemble_ceo_turn
@@ -53,8 +54,8 @@ async def test_prepare_independent_io_overlaps(monkeypatch, tmp_path):
     ends: dict[str, float] = {}
 
     monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.assemble_turn_rules",
-        _sleeper("rules", starts, ends, ""),
+        "agentcore.runtime.pipeline.prepare.load_turn_rule_view",
+        _sleeper("rules", starts, ends, TurnRuleView()),
     )
     monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.resolve_desk_folder_label",

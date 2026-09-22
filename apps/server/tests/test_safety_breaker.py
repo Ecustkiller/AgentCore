@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from agentcore.core.types import AutonomyPolicy, ToolApproval, ToolFace, recipe_to_axes
+from agentcore.core.types import ToolApproval, ToolFace, WorkspaceBoundary
 from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.engine import tool_exec as tool_exec_mod
@@ -548,7 +548,7 @@ async def test_force_authorize_ignores_turn_grant_and_delegation():
         conversation_id="conv-cb",
         registry=registry,
         timeout_seconds=5.0,
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        permission_axes=WorkspaceBoundary.FOLDER,
         delegation_grantable_tools=frozenset({"run"}),
     )
     gate.grant_delegation("exec-1")
@@ -579,7 +579,7 @@ async def test_force_authorize_refuses_approve_always_grant():
         conversation_id="conv-cb2",
         registry=registry,
         timeout_seconds=5.0,
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
     task = asyncio.create_task(
         gate.authorize(
@@ -607,7 +607,7 @@ async def test_full_trust_auto_pass_bypassed_for_destructive_via_tool_exec():
         conversation_id="conv-ft",
         registry=registry,
         timeout_seconds=5.0,
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        permission_axes=WorkspaceBoundary.FOLDER,
         delegation_grantable_tools=frozenset({"run"}),
     )
 
@@ -641,7 +641,7 @@ async def test_full_trust_auto_pass_bypassed_for_destructive_via_tool_exec():
 
     assert (
         execution_tool_auto_passes(
-            _Local(), "run", permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED)
+            _Local(), "run", permission_axes=WorkspaceBoundary.FOLDER
         )
         is True
     )
@@ -688,7 +688,7 @@ async def test_sensitive_credential_read_forces_approval():
         conversation_id="conv-ask",
         registry=registry,
         timeout_seconds=5.0,
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
     secret_body = "PREVIEW_ONLY_KEY=super-secret-value\nOTHER=1\n"
     executed_args: dict[str, Any] = {}
@@ -774,7 +774,7 @@ async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
         conversation_id="conv-grant",
         registry=registry,
         timeout_seconds=5.0,
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
     read_paths: list[str] = []
 
@@ -859,7 +859,7 @@ async def test_sensitive_credential_preview_soft_fail_still_asks():
         conversation_id="conv-soft",
         registry=registry,
         timeout_seconds=5.0,
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
     class _Backend:

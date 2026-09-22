@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 from structlog.testing import capture_logs
 
-from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.llm.provider.protocol import ToolCall
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.delegate.drive_setup import resolve_worker_gate
@@ -64,7 +64,7 @@ def _session_cloud_gate(sink: EventSink, registry: InteractionRegistry) -> Appro
         timeout_seconds=5.0,
         file_op_tools=approval_class_tool_names(),
         delegation_grantable_tools=delegation_grantable_tool_names(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
 
@@ -203,7 +203,7 @@ async def test_always_confirm_without_gate_is_denied_not_pushed():
 def test_cloud_worker_skip_never_covers_always_confirm():
     """判据层：云端免逐次卡的判定本身必须先问恒确认。"""
     cloud = _CloudBackend()
-    session = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
+    session = WorkspaceBoundary.FOLDER
     file_ops = approval_class_tool_names()
 
     for command in ("git push origin feature/x", "gh pr create --title feat"):

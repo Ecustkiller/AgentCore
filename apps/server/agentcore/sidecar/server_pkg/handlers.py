@@ -12,7 +12,7 @@ from agentcore.account.credentials import AccountCredentials
 from agentcore.api.schemas.messages import ResolveInteractionRequest, interaction_result_from_body
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary
 from agentcore.folders.credentials import FoldersCredentials
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
@@ -94,6 +94,19 @@ class HandlerMixin:
             durable_roster=self._run_session_store is not None,
         )
         self._install_local_queue_starter()
+        from agentcore.runtime.turn.durable import (
+            ENGINE_SIDECAR,
+            install_postgres_turn_queue,
+            restore_durable_turn_queue,
+            turn_queue_durable_enabled,
+        )
+
+        if turn_queue_durable_enabled():
+            install_postgres_turn_queue(
+                engine=ENGINE_SIDECAR,
+                user_id=self._user_id,
+                local_root_id=str(params.get("rootId") or "").strip(),
+            )
         await self._reply(
             request_id,
             {
@@ -120,9 +133,16 @@ class HandlerMixin:
                     "deliverMessage": True,
                     "cancelQueuedTurn": True,
                     "listQueuedTurns": True,
+                    "reorderQueuedTurns": True,
+                    "stopAndSendQueuedTurn": True,
+                    "editQueuedTurn": True,
                 },
             },
         )
+        # After the initialize result, so queue/needStart is not the first frame
+        # the desktop handles for this process.
+        if turn_queue_durable_enabled():
+            asyncio.create_task(restore_durable_turn_queue())
 
     async def _on_warm_mcp_discover(self, request_id: Any, params: dict[str, Any]) -> None:
         """Non-turn RPC: seed MCP discover cache from desktop ``list_tools`` payload."""
@@ -540,7 +560,7 @@ class HandlerMixin:
         apply_desktop_bridge_from_turn(params.get("browserBridge"))
 
     @staticmethod
-    def _parse_permission_axes(params: dict[str, Any]) -> PermissionAxes | None:
+    def _parse_permission_axes(params: dict[str, Any]) -> WorkspaceBoundary | None:
         """Coerce desktop ``permissionAxes`` object.
 
         Unknown / missing / non-object ⇒ ``None`` (caller keeps current / default).
@@ -548,7 +568,7 @@ class HandlerMixin:
         raw_axes = params.get("permissionAxes")
         if isinstance(raw_axes, dict):
             try:
-                return PermissionAxes.from_mapping(raw_axes)
+                return WorkspaceBoundary.from_mapping(raw_axes)
             except ValueError:
                 return None
         return None

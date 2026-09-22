@@ -154,16 +154,18 @@ async def test_directory_lists_only_how_bearing_assembled_tools():
 
 
 def test_directory_groups_sections_and_compacts_tool_families():
+    """两栏才打栏名；技能决策时刻组只排序，不印子标题。"""
     browser = ConsultDirectoryEntry(name="browser", summary="真实浏览器", section="tool")
     skill = ConsultDirectoryEntry(
         name="data_file_landing", summary="整理表", section="skill", group="交付"
     )
     out = render_on_demand_directory([browser, skill])
     assert "能力指引：" in out
-    assert "交付：" in out
+    assert "交付：" not in out
     assert "低频工具：" in out
-    assert "- browser：真实浏览器" in out
-    assert "- data_file_landing：整理表" in out
+    assert '- 真实浏览器。consult("browser")' in out
+    assert '- 整理表。consult("data_file_landing")' in out
+    assert "- data_file_landing：" not in out
 
 
 async def test_merged_consult_copies_group_and_face():
@@ -357,7 +359,7 @@ def test_clone_preserves_already_offered_tools():
 
 
 def test_preamble_and_core_make_consult_discoverable():
-    preamble = "\n".join(_on_demand_preamble(with_summaries=True))
+    preamble = "\n".join(_on_demand_preamble())
     desc = ConsultTool(source=None).schema.description  # type: ignore[arg-type]
     assert "按需目录" in preamble
     assert "consult(name)" in preamble

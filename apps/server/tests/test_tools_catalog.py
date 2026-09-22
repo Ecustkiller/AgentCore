@@ -30,8 +30,7 @@ _EXPECTED_NAMES = {
     "run",
 }
 
-# CEO default roster = builtin surface (read + write + execute + Host). On-demand
-# exporters stay registered; opening FC table withholds them separately.
+# CEO default roster = folder boundary (read + write + execute, no Host).
 _CEO_DEFAULT_NAMES = {
     "web_search",
     "web_fetch",
@@ -45,7 +44,6 @@ _CEO_DEFAULT_NAMES = {
     "md_export",
     "grep",
     "run",
-    "host",
 }
 _MUTATION_NAMES = {
     "write",
@@ -80,7 +78,7 @@ def test_worker_registry_adds_worker_surface_tools_without_leaking_them():
     ceo = {s.name for s in build_ceo_tool_registry().list_all()}
     assert worker >= _WORKER_SURFACE_NAMES
     # builtins + the worker-surface primitives, nothing else.
-    assert worker == _EXPECTED_NAMES | _WORKER_SURFACE_NAMES | {"host"}
+    assert worker == _EXPECTED_NAMES | _WORKER_SURFACE_NAMES
     assert builtin.isdisjoint(_WORKER_SURFACE_NAMES)
     # Default CEO registry omits worker-surface names (escalate/handoff never join CEO).
     assert ceo.isdisjoint(_WORKER_SURFACE_NAMES)
@@ -231,16 +229,26 @@ def test_ceo_registry_write_tools_are_grantable():
         assert schemas[name].approval is ToolApproval.NEVER, name
 
 
-def test_ceo_registry_holds_host_regardless_of_desktop_online():
+def test_computer_boundary_holds_host_regardless_of_desktop_online():
+    from agentcore.core.types import WorkspaceBoundary
+
     schemas = {
-        s.name: s for s in build_ceo_tool_registry(desktop_online=False).list_all()
+        s.name: s
+        for s in build_ceo_tool_registry(
+            desktop_online=False, permission_axes=WorkspaceBoundary.COMPUTER
+        ).list_all()
     }
-    assert set(schemas) == _CEO_DEFAULT_NAMES
+    assert "host" in schemas
     assert schemas["host"].approval is ToolApproval.NEVER
     online = {
-        s.name: s for s in build_ceo_tool_registry(desktop_online=True).list_all()
+        s.name
+        for s in build_ceo_tool_registry(
+            desktop_online=True, permission_axes=WorkspaceBoundary.COMPUTER
+        ).list_all()
     }
-    assert set(online) == _CEO_DEFAULT_NAMES
+    assert "host" in online
+    folder = {s.name for s in build_ceo_tool_registry().list_all()}
+    assert "host" not in folder
 
 
 def test_ceo_registry_browser_interactive_grantable_when_include_browser():

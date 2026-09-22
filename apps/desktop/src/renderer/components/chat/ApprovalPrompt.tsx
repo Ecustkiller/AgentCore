@@ -18,10 +18,6 @@ import {
   DecisionCardIcon,
 } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import {
-  getConversations,
-  patchConversationCache,
-} from "@/hooks/useConversations";
 import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -29,20 +25,12 @@ import {
   isFileOpTool,
   supportsTurnGrant,
 } from "@/services/approvals";
-import {
-  type PermissionAxes,
-  matchRecipe,
-  recipeToAxes,
-  setConversationPermissionAxes,
-} from "@/services/permissionAxes";
 import { useConversationStore } from "@/stores/conversation";
 import {
   type ApprovalView,
   isToolGranted,
-  useInteractionStore,
   usePendingApprovals,
 } from "@/stores/interactions";
-import { usePermissionChangeStore } from "@/stores/permissionChanges";
 import type { ApprovalDecision } from "@/types/events";
 import { Loader2, ShieldAlert } from "lucide-react";
 import {
@@ -57,9 +45,6 @@ import rehypeHighlight from "rehype-highlight";
 const HIGHLIGHT_PLUGINS: ComponentPropsWithoutRef<
   typeof ReactMarkdown
 >["rehypePlugins"] = [[rehypeHighlight, { ignoreMissing: true }]];
-
-/** Consecutive same-tool approval prompts before nudging full_trust. */
-const FULL_TRUST_HINT_AFTER = 3;
 
 /** Gate-injected meta on ``approval.arguments`` — not tool args; strip from card preview. */
 const APPROVAL_GATE_META_KEYS = new Set([
@@ -546,19 +531,6 @@ function leftoverApprovalArgs(
   return leftover;
 }
 
-/** Count approval cards (any status except orphaned) for a tool this conversation. */
-function countToolApprovals(conversationId: string, toolName: string): number {
-  let n = 0;
-  for (const e of useInteractionStore.getState().byId.values()) {
-    if (e.conversationId !== conversationId) continue;
-    if (e.kind !== "approval") continue;
-    if (e.status === "orphaned") continue;
-    if (String(e.payload.tool_name ?? "") !== toolName) continue;
-    n += 1;
-  }
-  return n;
-}
-
 /**
  * Pending tool-approval surface — composer-dock strip（ChatView 决策区 / 底栏一体）.
  * Visually fuses with MessageInput when ``attached`` (Chat bottom bar).
@@ -603,13 +575,6 @@ export function ApprovalCard({
   attached?: boolean;
 }) {
   const [clicked, setClicked] = useState<ApprovalDecision | null>(null);
-  const [trustBusy, setTrustBusy] = useState(false);
-  const [axesOverride, setAxesOverride] = useState<PermissionAxes | null>(null);
-  const axes =
-    axesOverride ??
-    getConversations().find((c) => c.id === approval.conversationId)
-      ?.permissionAxes;
-  const recipe = axes ? matchRecipe(axes) : "custom";
 
   const isCodeExecute = approval.toolName === "code_execute";
   const isFileBatch = approval.toolName === "file_batch";
@@ -623,16 +588,6 @@ export function ApprovalCard({
   /** True fuse: no turn-scope grants (approve_always / approve_always_files). */
   const showTurnGrantButtons = !forceOneShot;
   const headline = primaryArg(approval.toolName, approval.arguments);
-
-  const sameToolCount = useMemo(
-    () => countToolApprovals(approval.conversationId, approval.toolName),
-    [approval.conversationId, approval.toolName],
-  );
-  const showManagedHint =
-    sameToolCount >= FULL_TRUST_HINT_AFTER &&
-    recipe !== "managed" &&
-    !forceOneShot &&
-    !sensitivePathReadAsk;
 
   const batchOps = useMemo(() => {
     if (!isFileBatch) return [];
@@ -694,35 +649,6 @@ export function ApprovalCard({
     });
   };
 
-  const switchManaged = () => {
-    if (trustBusy || !approval.conversationId) return;
-    if (
-      !window.confirm(
-        "切换到「全放行」后，已授权目录里改文件和跑命令不再每次问你。" +
-          "没加入本对话的目录仍然改不了。" +
-          "删盘、读私钥、装软件仍会拦住。确定继续？",
-      )
-    ) {
-      return;
-    }
-    setTrustBusy(true);
-    const next = recipeToAxes("managed");
-    void setConversationPermissionAxes(approval.conversationId, next)
-      .then((saved) => {
-        patchConversationCache(approval.conversationId, {
-          permissionAxes: saved,
-        });
-        setAxesOverride(saved);
-        // 与 PermissionAxesBadge 一致：同步审计后重拉，主流立即出现 A→B 行。
-        void usePermissionChangeStore
-          .getState()
-          .load(approval.conversationId)
-          .catch(() => {});
-      })
-      .catch((err) => notifyError(err, "切换失败"))
-      .finally(() => setTrustBusy(false));
-  };
-
   const spinnerFor = (decision: ApprovalDecision) =>
     busy && clicked === decision ? (
       <Loader2 size={13} className="animate-spin" />
@@ -731,6 +657,7 @@ export function ApprovalCard({
   const onceButton = (
     <Button
       variant="primary"
+      className="touch-target"
       icon={spinnerFor("approve")}
       disabled={busy}
       onClick={() => onDecide("approve")}
@@ -742,6 +669,7 @@ export function ApprovalCard({
     showTurnGrantButtons && supportsTurnGrant(approval.toolName) ? (
       <Button
         variant="outline"
+        className="touch-target"
         icon={spinnerFor("approve_always")}
         disabled={busy}
         onClick={() => onDecide("approve_always")}
@@ -824,20 +752,6 @@ export function ApprovalCard({
                 {escalationHint ? `：${escalationHint}` : ""}
               </p>
             )}
-            {showManagedHint && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                同类审批较频繁。可切换为
-                <button
-                  type="button"
-                  className="mx-0.5 text-primary underline-offset-2 hover:underline"
-                  disabled={trustBusy}
-                  onClick={switchManaged}
-                >
-                  全放行
-                </button>
-                （下一回合生效；熔断仍在）。
-              </p>
-            )}
             {isCodeExecute && codeText != null && (
               <ApprovalCollapsiblePreview
                 text={codeText}
@@ -888,6 +802,7 @@ export function ApprovalCard({
         {isFileOp && showTurnGrantButtons && (
           <Button
             variant="outline"
+            className="touch-target"
             icon={spinnerFor("approve_always_files")}
             disabled={busy}
             onClick={() => onDecide("approve_always_files")}
@@ -897,6 +812,7 @@ export function ApprovalCard({
         )}
         <Button
           variant="danger"
+          className="touch-target"
           icon={spinnerFor("deny")}
           disabled={busy}
           onClick={() => onDecide("deny")}

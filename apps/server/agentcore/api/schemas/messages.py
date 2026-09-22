@@ -157,18 +157,6 @@ class RegenerateMessageRequest(BaseModel):
     agent_mentions: list[AgentMention] | None = None
 
 
-class SetMessageFeedbackRequest(BaseModel):
-    """Set or clear the user's 点赞/点踩 on an assistant message (回复反馈).
-
-    ``feedback`` is ``"up"`` / ``"down"`` to rate the reply, or ``null`` to clear the
-    rating back to 未评价 (toggling the same side off). The route does not restrict by
-    role — rating is only meaningful on assistant replies, but a value on any row is a
-    harmless store.
-    """
-
-    feedback: Literal["up", "down"] | None = None
-
-
 # --- Interaction resolve (§8.2 unified suspend-resume bridge) ---
 # One ``POST /conversations/{id}/interactions/{interaction_id}`` settles hot-path
 # interactions; the body is discriminated on ``kind`` (approval /
@@ -760,10 +748,6 @@ class MessageDetail(BaseModel):
     # 回合结果质量（与 finish_reason / usage.status 正交）：ok | partial | paused | error。
     # 写入 usage JSON，读路径投影。本波不产出 paused。null for user / pre-feature rows.
     outcome: Literal["ok", "partial", "paused", "error"] | None = None
-    # 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction signal on this assistant
-    # reply — "up" | "down" | null(未评价). Auto-populated from the ORM attribute via
-    # from_attributes so a reloaded bubble replays the user's rating. null for user rows.
-    feedback: str | None = None
     # 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列快照；读路径补 cny_total（元 = nano/1e9）。
     # null for user / unmetered / pre-feature rows. Hover payroll still uses GET …/cost.
     cost: CostBreakdown | None = None
@@ -1343,6 +1327,8 @@ class QueuedTurnItem(BaseModel):
     frame), not a change-only ping.
     ``interjection_id`` is set when the entry was promoted from a user interjection
     (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
+    ``user_message_id`` is the persisted user-row id (cancel deletes it; drain
+    reuses it). Optional additive — old clients ignore. Omitted / null when unset.
     ``position`` is 1-based FIFO index.
     ``attachments`` / ``agent_mentions`` are the same fields drain forwards to
     ``stream_chat`` (optional additive — old clients ignore).
@@ -1352,6 +1338,7 @@ class QueuedTurnItem(BaseModel):
     content: str
     position: int = Field(..., ge=1)
     interjection_id: str | None = None
+    user_message_id: str | None = None
     attachments: list[MessageAttachment] = Field(default_factory=list)
     agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
 
@@ -1377,3 +1364,28 @@ class QueuedTurnListResponse(BaseModel):
     """Current conversation FIFO queue snapshot (进程内；重启后为空)."""
 
     items: list[QueuedTurnItem] = Field(default_factory=list)
+
+
+class ReorderQueuedTurnsRequest(BaseModel):
+    """Exact permutation of the conversation's current queued-turn ids."""
+
+    queue_ids: list[str] = Field(min_length=1)
+
+
+class EditQueuedTurnRequest(BaseModel):
+    """Replace one queued turn's payload. Identity and order stay on the server.
+
+    Same emptiness rule as send: blank text is allowed only when attachments
+    remain. Credentials, ``interjection_id``, and table selection are not fields
+    here — enqueue already captured them.
+    """
+
+    content: str = Field(..., max_length=32000)
+    attachments: list[MessageAttachment] = Field(default_factory=list, max_length=20)
+    agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def _require_content_or_attachments(self) -> "EditQueuedTurnRequest":
+        if not (self.content and self.content.strip()) and not self.attachments:
+            raise ValueError("消息内容与附件不能同时为空")
+        return self

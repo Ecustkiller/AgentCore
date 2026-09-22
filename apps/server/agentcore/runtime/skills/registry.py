@@ -11,7 +11,8 @@ AUDIENCE_CEO_ONLY: tuple[str, ...] = (AUDIENCE_CEO,)
 AUDIENCE_WORKER_ONLY: tuple[str, ...] = (AUDIENCE_WORKER,)
 AUDIENCE_BOTH: tuple[str, ...] = (AUDIENCE_CEO, AUDIENCE_WORKER)
 
-# Catalog subtitles under 能力指引. Empty groups are omitted at render.
+# Decision-moment sort for the skill catalog. Empty groups are omitted.
+# Labels are not printed in ``<按需目录>``; the summary is the trigger.
 GROUP_ORCHESTRATION = "编排"
 GROUP_WORKSPACE = "工作区"
 GROUP_DELIVERY = "交付"
@@ -37,9 +38,10 @@ class SystemSkill:
     named tool is wired this turn (e.g. ``run`` needs the ``run`` tool), so the
     prompt never advertises a capability the CEO cannot act
     on. ``audience`` is who may *see* the entry (CEO vs worker). Default both.
-    ``group`` is the Chinese 能力指引 subtitle (编排 / 工作区 / 交付 / 产品 / 工具).
     Directory listing and ``consult`` fetch share this filter — do not advertise
     a name the same source cannot fetch. Not a task-intent classifier.
+    ``group`` is the decision-moment sort key (编排 / 工作区 / 交付 / 产品 / 工具).
+    The model directory orders by it and does not print the label.
     """
 
     name: str

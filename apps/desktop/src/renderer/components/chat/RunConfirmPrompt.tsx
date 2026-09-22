@@ -82,13 +82,28 @@ export function RunConfirmPrompt() {
         </div>
 
         <DecisionCardFooter tone="primary" className="mt-0">
-          <Button variant="outline" disabled={busy} onClick={onCancel}>
+          <Button
+            variant="outline"
+            className="touch-target"
+            disabled={busy}
+            onClick={onCancel}
+          >
             取消
           </Button>
-          <Button variant="primary" disabled={busy} onClick={onRun}>
+          <Button
+            variant="primary"
+            className="touch-target"
+            disabled={busy}
+            onClick={onRun}
+          >
             运行
           </Button>
-          <Button variant="outline" disabled={busy} onClick={onAllowSession}>
+          <Button
+            variant="outline"
+            className="touch-target"
+            disabled={busy}
+            onClick={onAllowSession}
+          >
             本会话都允许
           </Button>
         </DecisionCardFooter>

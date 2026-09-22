@@ -171,14 +171,14 @@ def test_ceo_prompt_skill_directory_lists_ungated():
     )
     assert "按需目录" in with_run
     assert "编排：" not in with_run
-    assert "- product_help：" in with_run
+    assert 'consult("product_help")' in with_run
 
     without_run = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
         ceo_tool_names={"delegate", "consult"},
     )
-    assert "- product_help：" in without_run
+    assert 'consult("product_help")' in without_run
 
 
 def test_tool_blurbs_stay_off_directory_and_prompt():
@@ -271,5 +271,5 @@ def test_on_demand_directory_splits_folder_off_orchestration():
     assert "表格：" not in out
     assert "文档：" not in out
     assert "编排：" in out
-    assert out.index("文件夹：") < out.index("- folders：列出或解析云文件夹") < out.index("编排：")
-    assert out.index("编排：") < out.index("- delegate：派活")
+    assert out.index("文件夹：") < out.index('consult("folders")') < out.index("编排：")
+    assert out.index("编排：") < out.index('consult("delegate")')

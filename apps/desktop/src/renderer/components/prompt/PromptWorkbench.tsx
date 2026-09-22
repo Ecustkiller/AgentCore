@@ -22,16 +22,20 @@ import {
 } from "react";
 
 export type PromptSaveState = "idle" | "saving" | "saved" | "error";
-export type PromptApplyMode = "always" | "on_demand";
+export type PromptApplyMode = "always" | "on_demand" | "paths";
 
 const APPLY_MODE_ITEMS = [
   { value: "always", label: "常驻" },
   { value: "on_demand", label: "按需" },
+  { value: "paths", label: "碰到文件" },
 ] as const;
 
 const TITLE_LABEL = "名称";
 const CATALOG_LINE_LABEL = "一句话介绍";
 const CATALOG_LINE_PLACEHOLDER = "干什么、什么时候该翻开";
+const PATH_LINE_PLACEHOLDER = "碰到这类文件就遵守的那一句";
+const PATHS_LABEL = "路径";
+const PATHS_PLACEHOLDER = "**/*.tsx、src/*.py";
 const AUTOSAVE_DEBOUNCE_MS = 1500;
 
 const TITLE_FIELD_CLASS =
@@ -43,6 +47,8 @@ export interface PromptWorkbenchDraft {
   title: string;
   trigger: string;
   body: string;
+  applyMode?: PromptApplyMode;
+  paths?: string;
 }
 
 export function PromptWorkbench({
@@ -51,6 +57,7 @@ export function PromptWorkbench({
   badges,
   applyMode,
   onApplyModeChange,
+  initialPaths = "",
   initialTrigger,
   triggerEnabled = false,
   initialBody,
@@ -65,9 +72,10 @@ export function PromptWorkbench({
   title: string;
   titleEditable?: boolean;
   badges?: ReactNode;
-  /** `undefined` hides the 常驻 | 按需 switch. */
+  /** `undefined` hides the 常驻 | 按需 | 碰到文件 switch. */
   applyMode?: PromptApplyMode;
   onApplyModeChange?: (mode: PromptApplyMode) => void;
+  initialPaths?: string;
   initialTrigger?: string;
   /** Show the catalog line (even when the seed is empty). */
   triggerEnabled?: boolean;
@@ -85,6 +93,7 @@ export function PromptWorkbench({
   const catalogLineId = useId();
   const [titleValue, setTitleValue] = useState(title);
   const [trigger, setTrigger] = useState(initialTrigger ?? "");
+  const [paths, setPaths] = useState(initialPaths);
   const [body, setBody] = useState(initialBody);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<PromptSaveState>("idle");
@@ -103,6 +112,7 @@ export function PromptWorkbench({
     title: titleValue,
     trigger,
     body,
+    ...(applyMode !== undefined ? { applyMode, paths } : {}),
   };
   dirtyRef.current = dirty;
 
@@ -184,6 +194,8 @@ export function PromptWorkbench({
   }, []);
 
   const showCatalogLine = applyMode !== "always" && triggerEnabled;
+  const catalogPlaceholder =
+    applyMode === "paths" ? PATH_LINE_PLACEHOLDER : CATALOG_LINE_PLACEHOLDER;
   const showTitleRow = titleEditable || applyMode !== undefined;
   const showCover = !previewing && (showTitleRow || showCatalogLine);
   const triggerText = trigger.trim();
@@ -219,7 +231,10 @@ export function PromptWorkbench({
             <SegmentedControl
               aria-label="加载方式"
               value={applyMode}
-              onChange={(next) => onApplyModeChange?.(next)}
+              onChange={(next) => {
+                onApplyModeChange?.(next);
+                markDirty({ applyMode: next });
+              }}
               items={APPLY_MODE_ITEMS}
               className="w-auto shrink-0"
             />
@@ -234,7 +249,7 @@ export function PromptWorkbench({
                 {CATALOG_LINE_LABEL}
               </span>
               <span className="min-w-0 whitespace-pre-wrap text-muted-foreground text-sm">
-                {triggerText || CATALOG_LINE_PLACEHOLDER}
+                {triggerText || catalogPlaceholder}
               </span>
             </div>
           ) : (
@@ -248,7 +263,7 @@ export function PromptWorkbench({
               <Textarea
                 id={catalogLineId}
                 aria-label={CATALOG_LINE_LABEL}
-                placeholder={CATALOG_LINE_PLACEHOLDER}
+                placeholder={catalogPlaceholder}
                 rows={2}
                 value={trigger}
                 onChange={(event) => {
@@ -264,6 +279,29 @@ export function PromptWorkbench({
             </label>
           )}
         </div>
+      ) : null}
+      {applyMode === "paths" ? (
+        <label
+          htmlFor={`${catalogLineId}-paths`}
+          className="mt-2 flex min-w-0 items-baseline gap-2"
+        >
+          <span className="shrink-0 text-muted-foreground text-xs">
+            {PATHS_LABEL}
+          </span>
+          <Input
+            id={`${catalogLineId}-paths`}
+            aria-label={PATHS_LABEL}
+            placeholder={PATHS_PLACEHOLDER}
+            value={paths}
+            disabled={readOnly}
+            onChange={(event) => {
+              const next = event.target.value;
+              setPaths(next);
+              markDirty({ paths: next });
+            }}
+            className={cn(CATALOG_FIELD_CLASS, "min-w-0 flex-1")}
+          />
+        </label>
       ) : null}
     </div>
   ) : null;

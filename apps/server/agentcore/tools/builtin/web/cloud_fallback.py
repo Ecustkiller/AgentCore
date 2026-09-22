@@ -3,7 +3,7 @@
 Desktop sidecar turns bind the round's inference JWT into a ContextVar; when the
 local SearXNG primary fails with a connect / not-ready class error, ``web_search``
 POSTs ``{origin}/v1/inference/web_search`` with that Bearer. Cloud API processes
-never bind the ContextVar → behaviour unchanged. Sidecar still holds no Tavily key.
+never bind the ContextVar → behaviour unchanged. Sidecar holds no search API key.
 
 Leaf-layer auth is intentionally not ``LLMCredentials`` — web tools must not
 import ``agentcore.llm``. Sidecar maps turn credentials into

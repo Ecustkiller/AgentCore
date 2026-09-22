@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.config import settings
-from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime import pipeline
 from agentcore.runtime.checkpoints import CheckpointDecision
@@ -153,13 +153,11 @@ async def test_resume_gate_carries_callers_permission_axes(monkeypatch):
     """续跑沿用调用方解析的非默认档——挂起期间改设置，续跑立即生效。"""
     _patch_seams(monkeypatch)
 
-    result = await _run_resume(permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS))
+    result = await _run_resume(permission_axes=WorkspaceBoundary.READ)
 
     assert result["finish_reason"] == FinishReason.END_TURN
     assert len(_RecordingGate.instances) == 1
-    assert _RecordingGate.instances[0]["permission_axes"] == recipe_to_axes(
-        AutonomyPolicy.CAUTIOUS
-    )
+    assert _RecordingGate.instances[0]["permission_axes"] is WorkspaceBoundary.READ
 
 
 async def test_resume_gate_defaults_to_less_interrupt_when_caller_omits(monkeypatch):
@@ -170,6 +168,4 @@ async def test_resume_gate_defaults_to_less_interrupt_when_caller_omits(monkeypa
 
     assert result["finish_reason"] == FinishReason.END_TURN
     assert len(_RecordingGate.instances) == 1
-    assert _RecordingGate.instances[0]["permission_axes"] == recipe_to_axes(
-        AutonomyPolicy.LESS_INTERRUPT
-    )
+    assert _RecordingGate.instances[0]["permission_axes"] is WorkspaceBoundary.FOLDER

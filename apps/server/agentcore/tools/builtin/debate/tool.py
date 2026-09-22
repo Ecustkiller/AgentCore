@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from agentcore.core.logging import get_logger
 from agentcore.core.types import (
     DEFAULT_PERMISSION_AXES,
-    PermissionAxes,
+    WorkspaceBoundary,
     ToolApproval,
     ToolEffect,
     ToolFace,
@@ -113,7 +113,7 @@ class DebateTool:
         suspension_saver: SuspensionSaver | None = None,
         suspension_deleter: SuspensionDeleter | None = None,
         folder_id: str | None = None,
-        permission_axes: PermissionAxes | None = None,
+        permission_axes: WorkspaceBoundary | None = None,
         registry: ClientRequestBridge | None = None,
         session_store: Any = None,
         session_loader: Any = None,

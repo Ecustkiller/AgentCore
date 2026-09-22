@@ -5,6 +5,7 @@ Thin CLI over ``agentcore.observability.query``. Run from apps/server:
     uv run python scripts/log_timeline.py <conversation_id>
     uv run python scripts/log_timeline.py --recent
     uv run python scripts/log_timeline.py --trace <trace_id>
+    uv run python scripts/log_timeline.py --messages --trace <trace_id>
     uv run python scripts/log_timeline.py --json --trace <trace_id>
     uv run python scripts/log_timeline.py --raw --trace <trace_id>
     uv run python scripts/log_timeline.py --since 24h --trace <trace_id>
@@ -12,9 +13,11 @@ Thin CLI over ``agentcore.observability.query``. Run from apps/server:
     uv run python scripts/log_timeline.py --pack <dir> --trace <trace_id>
     uv run python scripts/log_timeline.py --pack <dir> --full --trace <trace_id>
 
-Default output is ``decision_spine`` (human + ``--json`` isomorphic). Pass
-``--raw`` for the full ``log_events`` firehose (``llm.call`` lines pin
-``prefix_breach`` before the 120-char cut). ``--pack`` writes an investigation
+Default output is ``decision_spine`` (human + ``--json`` isomorphic).
+``--messages`` prints message text to stdout (same redaction as pack
+``messages.json``: no reasoning body, no LLM bodies, no journal) and does not
+write a file. Pass ``--raw`` for the full ``log_events`` firehose (``llm.call``
+lines pin ``prefix_breach`` before the 120-char cut). ``--pack`` writes an investigation
 pack (decision_spine.json + timeline.jsonl + meta.json; optional previews /
 turn_metrics; redacted journal when the store has rows; ``--full`` adds
 messages.json without LLM bodies — never raw turn_journal). Exact-ID queries
@@ -42,6 +45,7 @@ _BARE_HEX32_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 _EMPTY_HIT_SYNC_HINT = (
     "本地无命中且像线上 → 先 `pnpm sync:logs`，再加 "
     "`--export-dir ../../logs/prod-export`。\n"
+    "贴文含 build: dev 且用户没说线上 → 不要 sync。\n"
     "ID 形态：无连字符 32-hex = trace_id；带连字符 UUID = conversation_id。\n"
     "events.jsonl 是 API 容器 json-file 环（10m×5），不是 --days 天档案。"
 )
@@ -59,7 +63,10 @@ from agentcore.observability.query.decision_spine import (  # noqa: E402
     format_decision_spine,
 )
 from agentcore.observability.query.jsonl import discover_log_files  # noqa: E402
-from agentcore.observability.query.pack import write_investigation_pack  # noqa: E402
+from agentcore.observability.query.pack import (  # noqa: E402
+    message_text_document,
+    write_investigation_pack,
+)
 from agentcore.observability.query.store import open_conversation_store  # noqa: E402
 from agentcore.observability.query.timeline import (  # noqa: E402
     extract_conversation_id,
@@ -192,6 +199,7 @@ def _parse_cli_args(
     bool,
     Path | None,
     bool,
+    bool,
     list[str],
 ]:
     log_file = LOG_FILE
@@ -201,6 +209,7 @@ def _parse_cli_args(
     raw = False
     pack_dir: Path | None = None
     full = False
+    messages = False
     positional: list[str] = []
     i = 0
     while i < len(argv):
@@ -229,10 +238,63 @@ def _parse_cli_args(
         elif arg == "--full":
             full = True
             i += 1
+        elif arg == "--messages":
+            messages = True
+            i += 1
         else:
             positional.append(arg)
             i += 1
-    return log_file, export_dir, since, as_json, raw, pack_dir, full, positional
+    return (
+        log_file,
+        export_dir,
+        since,
+        as_json,
+        raw,
+        pack_dir,
+        full,
+        messages,
+        positional,
+    )
+
+
+def reject_messages_combo(
+    *,
+    messages: bool,
+    pack_dir: Path | None,
+    full: bool,
+    raw: bool,
+) -> None:
+    """``--messages`` is stdout-only. Writing a pack or dumping the firehose is separate."""
+    if messages and (pack_dir is not None or full or raw):
+        raise SystemExit(
+            "--messages 只打到标准输出，不要和 --pack / --full / --raw 一起用"
+        )
+
+
+async def _print_message_text(
+    store: Any,
+    *,
+    conversation_id: str | None,
+    trace_id: str | None,
+) -> None:
+    if not conversation_id:
+        print(
+            json.dumps(
+                {
+                    "error": "conversation_id_missing",
+                    "trace_id": trace_id,
+                    "messages": [],
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
+    document = await message_text_document(
+        store,
+        conversation_id=str(conversation_id),
+        trace_id=trace_id,
+    )
+    print(json.dumps(document, ensure_ascii=False, default=str))
 
 
 # Human --raw truncates at 120 chars; pin these so prefix-cache triage survives the cut.
@@ -567,15 +629,25 @@ def format_decision_spines_for_conversation(
 
 
 async def main() -> None:
-    log_file, export_dir, since, as_json, raw, pack_dir, full, args = _parse_cli_args(
-        sys.argv[1:]
-    )
+    (
+        log_file,
+        export_dir,
+        since,
+        as_json,
+        raw,
+        pack_dir,
+        full,
+        messages,
+        args,
+    ) = _parse_cli_args(sys.argv[1:])
     if export_dir:
         log_file = export_dir / "events.jsonl"
 
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
         return
+
+    reject_messages_combo(messages=messages, pack_dir=pack_dir, full=full, raw=raw)
 
     if full and pack_dir is None:
         raise SystemExit("--full 仅用于排查包：请同时传 --pack <dir>")
@@ -584,6 +656,8 @@ async def main() -> None:
 
     try:
         if args[0] == "--recent":
+            if messages:
+                raise SystemExit("--messages 需要 --trace 或 conversation_id")
             if pack_dir is not None:
                 raise SystemExit("--pack 需要 --trace <trace_id>（或裸 32-hex）")
             n = int(args[1]) if len(args) > 1 else 5
@@ -608,7 +682,7 @@ async def main() -> None:
                 raw_trace = args[1]
             else:
                 raw_trace = args[0]
-                if not as_json and pack_dir is None:
+                if not as_json and pack_dir is None and not messages:
                     print(f"已按 trace_id 解释（无连字符 32-hex）: {raw_trace}")
             trace_id = normalize_trace_id_arg(raw_trace)
             # Pre-load events for gap detection before query builds the spine.
@@ -623,6 +697,13 @@ async def main() -> None:
                 store=store,
                 jsonl_gap=gap,
             )
+            if messages:
+                await _print_message_text(
+                    store,
+                    conversation_id=result.meta.get("conversation_id"),
+                    trace_id=trace_id,
+                )
+                return
             if pack_dir is not None:
                 meta = await write_investigation_pack(
                     result,
@@ -700,6 +781,25 @@ async def main() -> None:
             log_file=log_file,
             since=since,
         )
+        if messages:
+            if result.meta.get("error") == "conversation_not_found":
+                print(
+                    json.dumps(
+                        {
+                            "error": "conversation_not_found",
+                            "conversation_id": conv_id,
+                            "messages": [],
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                return
+            await _print_message_text(
+                store,
+                conversation_id=conv_id,
+                trace_id=None,
+            )
+            return
         if as_json:
             print(json.dumps(result.to_json_dict(raw=raw), ensure_ascii=False, default=str))
             return

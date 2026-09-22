@@ -484,6 +484,16 @@ def _start_echo_counts(
     return added, len(seeded_ids)
 
 
+# 协调期可见面纪律的唯一所有者。不进每批注入、不进工具 schema。
+COORDINATION_PERIOD_HINT = (
+    "【协调期】图在转、无新结论可静默；对用户开口只谈请示/阻塞/阶段结论/回应中途插话。"
+)
+
+
+def _append_coordination_period_hint(fact: str) -> str:
+    return f"{fact}\n{COORDINATION_PERIOD_HINT}"
+
+
 def _coordination_start_echo(
     *,
     roster: str,
@@ -492,16 +502,18 @@ def _coordination_start_echo(
     completed: int,
     seeded: bool,
 ) -> str:
-    """One-sentence host fact for the CEO tool result."""
+    """Host fact plus the one coordination-period posture line."""
     if seeded:
-        return (
+        fact = (
             f"【队员已追加·协调模式】已追加 {added} 名队员（{roster}）；"
             f"图共 {total} 名，其中 {completed} 名已完成。"
         )
-    return (
-        f"【团队已启动·协调模式】已派出 {added} 名队员（{roster}）；"
-        f"图共 {total} 名，其中 {completed} 名已完成。"
-    )
+    else:
+        fact = (
+            f"【团队已启动·协调模式】已派出 {added} 名队员（{roster}）；"
+            f"图共 {total} 名，其中 {completed} 名已完成。"
+        )
+    return _append_coordination_period_hint(fact)
 
 
 def _drop_all_completed_events(session: CoordinationSession) -> int:
@@ -830,7 +842,7 @@ def _merge_into_active_coordination(
     else:
         roles = [n.role or n.agent_name or n.run_id for n in added_nodes]
         roster = "、".join(roles) if roles else "（无新队员）"
-        output = (
+        output = _append_coordination_period_hint(
             f"【队员已追加·协调模式】已追加 {added_count} 名队员（{roster}）；"
             f"图共 {session.total_workers} 名，其中 {completed_k} 名已完成。"
             "仍属同一协作图 / 同一协调会话。"

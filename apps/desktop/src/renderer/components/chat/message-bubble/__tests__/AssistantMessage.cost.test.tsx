@@ -77,10 +77,6 @@ vi.mock("@/stores/interactions", async (importOriginal) => {
   };
 });
 
-vi.mock("@/services/messages", () => ({
-  setMessageFeedback: vi.fn(),
-}));
-
 vi.mock("@/services/turns", () => ({
   runRegenerate: vi.fn(),
 }));
@@ -357,7 +353,7 @@ describe("AssistantMessage turn cost at bubble end", () => {
     expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
   });
 
-  it("轮次不在气泡脚，只在更多用量详情", async () => {
+  it("轮次不在气泡脚，只在用量弹出层", async () => {
     renderBubble(
       settledMessage({
         rounds: 3,
@@ -373,7 +369,7 @@ describe("AssistantMessage turn cost at bubble end", () => {
     );
     expect(screen.getByText("¥5.00")).toBeTruthy();
     expect(screen.queryByText("3 轮")).toBeNull();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("button", { name: "用量" }));
     expect(await screen.findByText("ReAct 轮次")).toBeTruthy();
     expect(screen.getByText("3 轮")).toBeTruthy();
   });

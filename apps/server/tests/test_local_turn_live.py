@@ -432,7 +432,6 @@ async def test_get_overlay_stacks_running_and_segments(monkeypatch):
         evidence_ledger=[],
         followups=[],
         cost=None,
-        feedback=None,
         trace_id=_TRACE,
     )
     user = SimpleNamespace(user_id="u1")

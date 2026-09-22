@@ -2,6 +2,7 @@ import {
   isCoordinationActive,
   isLiveCoordinatingTurn,
   resolveDefaultDelivery,
+  resolveOccupiedShortcutDelivery,
 } from "@/lib/composerDelivery";
 import { useConversationStore } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
@@ -26,7 +27,7 @@ describe("composerDelivery", () => {
     expect(resolveDefaultDelivery(true, CID)).toBe("queue");
   });
 
-  it("协调活跃（有 plan）+ 生成中 → steer", () => {
+  it("协调活跃（有 plan）+ 生成中 → queue", () => {
     useConversationStore.getState().createAssistantMessage(CID);
     const messages = useConversationStore.getState().byId[CID]?.messages ?? [];
     const aid = messages[0]?.id;
@@ -53,7 +54,7 @@ describe("composerDelivery", () => {
     });
     expect(isCoordinationActive(CID)).toBe(true);
     expect(isLiveCoordinatingTurn(CID)).toBe(true);
-    expect(resolveDefaultDelivery(true, CID)).toBe("steer");
+    expect(resolveDefaultDelivery(true, CID)).toBe("queue");
   });
 
   it("灯灭但协作图还在转 → 仍是这桌（非空闲）", () => {
@@ -73,5 +74,37 @@ describe("composerDelivery", () => {
     );
     expect(isLiveCoordinatingTurn(CID)).toBe(true);
     expect(resolveDefaultDelivery(false, CID)).toBe("steer");
+    expect(resolveOccupiedShortcutDelivery(CID)).toBe("steer");
+  });
+
+  it("经典散文快捷键 → queue；工具步还在跑 → steer", () => {
+    useConversationStore.getState().createAssistantMessage(CID);
+    expect(resolveOccupiedShortcutDelivery(CID)).toBe("queue");
+    const runtime = useConversationStore.getState().byId[CID];
+    const message = runtime?.messages[0];
+    expect(message).toBeTruthy();
+    useConversationStore.setState({
+      byId: {
+        [CID]: {
+          ...runtime!,
+          messages: [
+            {
+              ...message!,
+              process: [
+                {
+                  kind: "tool",
+                  id: "t1",
+                  tool_name: "read_file",
+                  arguments: {},
+                  result: null,
+                  status: "running",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    expect(resolveOccupiedShortcutDelivery(CID)).toBe("steer");
   });
 });

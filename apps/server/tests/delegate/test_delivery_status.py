@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.runtime.delegate.delivery_status import (
     build_delivery_status,
     maybe_emit_delivery_status,
@@ -1300,7 +1300,7 @@ async def test_execute_ignores_retired_completion_criteria_kind():
         history=[],
         tools=ToolRegistry(),
         base_tool_context=local_ctx(),
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+        permission_axes=WorkspaceBoundary.FOLDER,
         folder_id="test_birth",
         approval_gate=None,
     )

@@ -622,7 +622,7 @@ BROWSER_TOOL_PARAMETERS: dict[str, Any] = {
         },
         "url": {
             "type": "string",
-            "description": "navigate：公网 http(s) 或工作区相对 HTML。禁 file://。",
+            "description": "navigate：公网 http(s) 或工作区相对 HTML。",
         },
         "ref": {
             "type": "string",

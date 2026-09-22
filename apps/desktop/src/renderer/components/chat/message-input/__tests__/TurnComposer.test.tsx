@@ -141,43 +141,21 @@ vi.mock("@/hooks/useWorkspaces", () => ({
   useWorkspaces: () => ({ data: [] }),
 }));
 vi.mock("@/services/permissionAxes", () => ({
-  RECIPE_LABELS: {
-    cautious: { short: "谨慎", description: "问" },
-    less_interrupt: { short: "少打断", description: "少" },
-    managed: { short: "托管", description: "同权" },
+  BOUNDARY_LABELS: {
+    read: { short: "只看", description: "看" },
+    folder: { short: "这个文件夹", description: "文件夹" },
+    computer: { short: "这台电脑", description: "电脑" },
   },
-  RECIPE_ORDER: ["cautious", "less_interrupt", "managed"],
-  RECIPE_AXES: {
-    less_interrupt: {
-      file_write: "session",
-      command: "auto",
-      host: "session",
-    },
-  },
-  DEFAULT_PERMISSION_AXES: {
-    file_write: "session",
-    command: "auto",
-    host: "session",
-  },
-  FILE_WRITE_OPTIONS: [],
-  COMMAND_OPTIONS: [],
-  matchRecipe: () => "less_interrupt",
-  axesShortLabel: () => "少打断",
-  recipeToAxes: () => ({
-    file_write: "session",
-    command: "auto",
-    host: "session",
-  }),
+  BOUNDARY_ORDER: ["read", "folder", "computer"],
+  DEFAULT_PERMISSION_AXES: { boundary: "folder" },
+  boundaryShortLabel: () => "这个文件夹",
+  axesEqual: () => false,
   resolveDefaultPermissionAxes: () =>
-    Promise.resolve({
-      file_write: "session",
-      command: "auto",
-      host: "session",
-    }),
+    Promise.resolve({ boundary: "folder" }),
   setConversationPermissionAxes: vi.fn(),
   setComposerDraftAxes: vi.fn(),
-  confirmAutoCommandIfNeeded: () => true,
-  isIllegalAxes: () => false,
+  setUserDefaultRecipe: vi.fn(),
+  confirmComputerIfNeeded: () => true,
 }));
 vi.mock("@/components/chat/message-input/useVoiceInput", () => ({
   useVoiceInput: () => ({
@@ -702,7 +680,7 @@ describe("TurnComposer variants", () => {
     expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
   });
 
-  it("stopping + draft: 排队/插队 remain; stop button is 停止中…", async () => {
+  it("stopping + draft: 发送 remains, no 排队/插队; stop button is 停止中…", async () => {
     genMock.value = true;
     useConversationStore.setState({
       byId: {
@@ -712,8 +690,13 @@ describe("TurnComposer variants", () => {
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "下一句");
     renderComposer("bar");
-    expect(screen.getByRole("button", { name: "排队发送" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "插队" })).toBeTruthy();
+    const send = screen.getByRole("button", { name: "发送" });
+    expect(send.getAttribute("title")).toBe(
+      "排队至本回合结束后发送",
+    );
+    expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止中…" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "停止生成" })).toBeNull();
   });
@@ -738,21 +721,25 @@ describe("TurnComposer variants", () => {
     expect(stop.querySelector(".animate-spin")).toBeNull();
   });
 
-  it("generating + draft: 排队发送 + 插队 + 停止生成 coexist", async () => {
+  it("generating + draft: 发送 + 停止生成, no 排队/插队", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "下一句");
     renderComposer("bar");
-    expect(screen.getByRole("button", { name: "排队发送" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "插队" })).toBeTruthy();
+    const send = screen.getByRole("button", { name: "发送" });
+    expect(send.className).toContain("bg-foreground");
+    expect(send.className).not.toContain("bg-primary");
+    expect(send.className).toContain("size-8");
+    expect(send.getAttribute("title")).toBe(
+      "排队至本回合结束后发送",
+    );
+    expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "插入" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "插队" }));
-    expect(handleSendMock).toHaveBeenCalledWith({ delivery: "steer" });
-
-    handleSendMock.mockClear();
-    fireEvent.click(screen.getByRole("button", { name: "排队发送" }));
+    fireEvent.click(send);
     expect(handleSendMock).toHaveBeenCalledWith();
   });
 
@@ -778,49 +765,87 @@ describe("TurnComposer variants", () => {
     expect(dropMock.handleDrop).toHaveBeenCalled();
   });
 
-  it("generating + draft: centered card also shows 排队发送 + 插队 + 停止", async () => {
+  it("generating + draft: centered card also shows 发送 + 停止, no 排队", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "下一句");
     renderComposer();
-    expect(screen.getByRole("button", { name: "排队发送" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "插队" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
   });
 
-  it("generating + draft: Ctrl/Cmd+Enter forces steer", async () => {
+  it("generating + draft: Ctrl/Cmd+Enter queues like Enter on classic prose", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "插一句");
     renderComposer("bar");
     const body = screen.getByTestId("composer-body");
     fireEvent.keyDown(body, { key: "Enter", ctrlKey: true });
+    expect(handleSendMock).toHaveBeenCalledWith({ delivery: "queue" });
+  });
+
+  it("经典工具步还在执行：Ctrl/Cmd+Enter 送进当前回合", async () => {
+    genMock.value = true;
+    useConversationStore.setState({
+      currentConversationId: OUTCOME_CID,
+      byId: {
+        [OUTCOME_CID]: {
+          ...EMPTY_RUNTIME,
+          isGenerating: true,
+          messages: [
+            {
+              id: "a-tool",
+              role: "assistant",
+              content: "",
+              createdAt: new Date().toISOString(),
+              executionId: null,
+              isStreaming: true,
+              process: [
+                {
+                  kind: "tool",
+                  id: "t1",
+                  tool_name: "read_file",
+                  arguments: {},
+                  result: null,
+                  status: "running",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const { useComposerDraftStore } = await import("@/stores/composer");
+    useComposerDraftStore.getState().setValue(OUTCOME_CID, "改用另一份");
+    renderComposer("bar");
+    expect(screen.getByRole("button", { name: "发送" }).getAttribute("title")).toBe(
+      "排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 送进当前回合",
+    );
+    fireEvent.keyDown(screen.getByTestId("composer-body"), {
+      key: "Enter",
+      ctrlKey: true,
+    });
     expect(handleSendMock).toHaveBeenCalledWith({ delivery: "steer" });
   });
 
-  it("协调活跃 + 草稿：发送主按钮 + 排队，无插队", async () => {
+  it("协调活跃 + 草稿：发送 + 停止，排队不另放字钮", async () => {
     genMock.value = true;
     seedCoordinationActive();
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue(OUTCOME_CID, "补一句");
     renderComposer("bar");
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
-    const queue = screen.getByRole("button", { name: "排队" });
-    expect(queue).toBeTruthy();
-    expect(queue.getAttribute("title")).toBe("等团队收工后再说");
-    expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
     expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     expect(handleSendMock).toHaveBeenCalledWith();
-
-    handleSendMock.mockClear();
-    fireEvent.click(queue);
-    expect(handleSendMock).toHaveBeenCalledWith({ delivery: "queue" });
   });
 
-  it("协调活跃 + 草稿：Enter 走默认，Ctrl/Cmd+Enter 传 queue", async () => {
+  it("协调活跃 + 草稿：Enter 走默认，Ctrl/Cmd+Enter 送进当前回合", async () => {
     genMock.value = true;
     seedCoordinationActive();
     const { useComposerDraftStore } = await import("@/stores/composer");
@@ -831,19 +856,17 @@ describe("TurnComposer variants", () => {
     expect(handleSendMock).toHaveBeenCalledWith();
     handleSendMock.mockClear();
     fireEvent.keyDown(body, { key: "Enter", ctrlKey: true });
-    expect(handleSendMock).toHaveBeenCalledWith({ delivery: "queue" });
+    expect(handleSendMock).toHaveBeenCalledWith({ delivery: "steer" });
   });
 
-  it("灯灭但队还在：发送主按钮 + 排队，无插队", async () => {
+  it("灯灭但队还在：发送 + 停止，无排队字钮", async () => {
     genMock.value = false;
     seedCoordinationLampOff();
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue(OUTCOME_CID, "补一句");
     renderComposer("bar");
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
-    const queue = screen.getByRole("button", { name: "排队" });
-    expect(queue).toBeTruthy();
-    expect(queue.getAttribute("title")).toBe("等团队收工后再说");
+    expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
     expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
   });
@@ -989,15 +1012,15 @@ describe("TurnComposer variants", () => {
     expect(send.className).not.toContain("bg-foreground");
   });
 
-  it("idle: draft fills 发送 with brand blue, not inverse ink", async () => {
+  it("idle: draft fills 发送 with inverse ink", async () => {
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "试试效果");
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(false);
-    expect(send.className).toContain("bg-primary");
+    expect(send.className).toContain("bg-foreground");
     expect(send.className).toContain("size-8");
-    expect(send.className).not.toContain("bg-foreground");
+    expect(send.className).not.toContain("bg-primary");
     expect(send.className).not.toContain("bg-muted");
   });
 
@@ -1266,8 +1289,8 @@ describe("TurnComposer variants", () => {
     expect(send.getAttribute("data-sending")).toBe("true");
     expect(send.getAttribute("aria-busy")).toBe("true");
     expect((send as HTMLButtonElement).disabled).toBe(true);
-    expect(send.className).toContain("bg-primary");
-    expect(send.className).not.toContain("bg-foreground");
+    expect(send.className).toContain("bg-foreground");
+    expect(send.className).not.toContain("bg-primary");
     fireEvent.click(send);
     expect(handleSendMock).not.toHaveBeenCalled();
   });
@@ -1302,7 +1325,7 @@ describe("TurnComposer variants", () => {
     expect(send.getAttribute("title")).toBe(COMPOSER_FOLDER_READ_ONLY_HINT);
   });
 
-  it("viewer generating: 插队 / 排队 disabled；Enter 不发", async () => {
+  it("viewer generating: 发送 disabled, no 排队；Enter 不发", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     seedOpenConversation("c-view");
@@ -1310,12 +1333,11 @@ describe("TurnComposer variants", () => {
     folderLists.accessible = [cloudDesk("f-shared", "队友桌", "viewer")];
     useComposerDraftStore.getState().setValue("c-view", "下一句");
     renderComposer("bar");
-    const steer = screen.getByRole("button", { name: "插队" });
-    const queue = screen.getByRole("button", { name: "排队发送" });
-    expect((steer as HTMLButtonElement).disabled).toBe(true);
-    expect((queue as HTMLButtonElement).disabled).toBe(true);
-    expect(steer.getAttribute("title")).toBe(COMPOSER_FOLDER_READ_ONLY_HINT);
-    expect(queue.getAttribute("title")).toBe(COMPOSER_FOLDER_READ_ONLY_HINT);
+    expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "插队" })).toBeNull();
+    const send = screen.getByRole("button", { name: "发送" });
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect(send.getAttribute("title")).toBe(COMPOSER_FOLDER_READ_ONLY_HINT);
     fireEvent.keyDown(screen.getByTestId("composer-body"), { key: "Enter" });
     fireEvent.keyDown(screen.getByTestId("composer-body"), {
       key: "Enter",

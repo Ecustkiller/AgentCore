@@ -748,12 +748,17 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
               if (fileName !== skillFileName(item.label)) {
                 await renameDocument(item.mineId, fileName);
               }
+              const mode = draft.applyMode ?? item.applyMode;
+              if (mode === "paths" && !draft.paths.trim()) {
+                throw new Error("碰到文件要写路径，比如 **/*.tsx");
+              }
               const written = await writeDocument(
                 item.mineId,
                 composeSkillContent(
-                  item.applyMode,
+                  mode,
                   draft.description,
                   draft.body,
+                  draft.paths,
                 ),
                 item.version,
               );

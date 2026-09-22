@@ -84,7 +84,7 @@ function canPaintTeamCompleted(execution: Execution): boolean {
  * User-stop is not an error; rate-limit / partial must not paint「已停止」.
  * Empty interrupt (`send_next`) is idle chrome — verdict lives on the composer.
  * Partial + rate-limit keeps this scoreboard; why + 排查包 follow `showComposerHint`.
- * Team fail / partial 排查包 hangs on bubble「更多」, not this strip.
+ * Team fail / partial 排查包 hangs on the bubble footer, not this strip.
  * Failure face is the same thin scoreboard (失败 + n/m + duration);
  * task brief / failure sentence live on the node and dock.
  * stopping：可见「停止中」、冻住用时。工人全终态且图已

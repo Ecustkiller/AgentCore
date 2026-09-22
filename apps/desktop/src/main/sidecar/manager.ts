@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   SIDECAR_CHANNELS,
   SIDECAR_QUEUE_NEED_START,
@@ -12,12 +11,16 @@ import {
   type SidecarDebateSteerRequest,
   type SidecarDeliverMessageAck,
   type SidecarDeliverMessageRequest,
+  type SidecarEditQueuedTurnAck,
+  type SidecarEditQueuedTurnRequest,
   type SidecarInference,
   type SidecarInterveneAck,
   type SidecarListBrowserSessionsRequest,
   type SidecarListBrowserSessionsResult,
   type SidecarListQueuedTurnsRequest,
   type SidecarListQueuedTurnsResult,
+  type SidecarReorderQueuedTurnsRequest,
+  type SidecarStopAndSendQueuedTurnRequest,
   type SidecarOccupancyRequest,
   type SidecarOccupancyResponse,
   type SidecarQueuedAttachment,
@@ -378,6 +381,7 @@ function parseQueuedTurnItems(reply: unknown): SidecarQueuedTurnItem[] {
         ? raw.position
         : items.length + 1;
     const interjectionId = strField(raw, "interjectionId", "interjection_id");
+    const userMessageId = strField(raw, "userMessageId", "user_message_id");
     const degraded = raw.degradedFrom ?? raw.degraded_from;
     const attachments = raw.attachments;
     const mentions = raw.agentMentions ?? raw.agent_mentions;
@@ -386,6 +390,7 @@ function parseQueuedTurnItems(reply: unknown): SidecarQueuedTurnItem[] {
       content: typeof raw.content === "string" ? raw.content : "",
       position,
       ...(interjectionId ? { interjectionId } : {}),
+      ...(userMessageId ? { userMessageId } : {}),
       ...(degraded === "steer" ? { degradedFrom: "steer" as const } : {}),
       ...(Array.isArray(attachments)
         ? { attachments: attachments as SidecarQueuedTurnItem["attachments"] }
@@ -496,6 +501,7 @@ export class SidecarManager {
     const ready = client
       .request("initialize", {
         userId: userId?.trim() || "local",
+        rootId,
         workspaceRoot,
         approvalsEnabled: SIDECAR_APPROVALS_ENABLED,
         // The app-private data dir for durable pause frames (双模式工作区 §一.1):
@@ -1630,6 +1636,55 @@ export class SidecarManager {
     return { items: parseQueuedTurnItems(reply) };
   }
 
+  /** 本机 FIFO 改顺序。无进程抛错，调用方回滚。 */
+  async reorderQueuedTurns(
+    req: SidecarReorderQueuedTurnsRequest,
+  ): Promise<void> {
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
+    if (!entry) throw new Error("本地引擎未运行，无法调整排队顺序");
+    await entry.client.request("reorderQueuedTurns", {
+      conversationId: req.conversationId,
+      queueIds: req.queueIds,
+    });
+  }
+
+  /** 队首 + 硬停。无进程 / 已不在队抛错。 */
+  async stopAndSendQueuedTurn(
+    req: SidecarStopAndSendQueuedTurnRequest,
+  ): Promise<void> {
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
+    if (!entry) throw new Error("本地引擎未运行，无法停止并发送");
+    await entry.client.request("stopAndSendQueuedTurn", {
+      conversationId: req.conversationId,
+      queueId: req.queueId,
+    });
+  }
+
+  /** 就地改正文 / 附件 / @。无进程或已不在队 → ``not_found``。 */
+  async editQueuedTurn(
+    req: SidecarEditQueuedTurnRequest,
+  ): Promise<SidecarEditQueuedTurnAck> {
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
+    if (!entry) return { status: "not_found" };
+    try {
+      await entry.client.request("editQueuedTurn", {
+        conversationId: req.conversationId,
+        queueId: req.queueId,
+        content: req.content,
+        ...(req.attachments && req.attachments.length > 0
+          ? { attachments: req.attachments }
+          : {}),
+        ...(req.agentMentions && req.agentMentions.length > 0
+          ? { agentMentions: req.agentMentions }
+          : {}),
+      });
+      return { status: "saved" };
+    } catch (err) {
+      if (isQueuedTurnNotFound(err)) return { status: "not_found" };
+      throw err;
+    }
+  }
+
   /** 结算一个被挂起的交互（审批 / ask_user / 本地工具）。 */
   async respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }> {
     const entry = this.entries.get(entryKey(req.rootId, req.subpath));
@@ -1680,12 +1735,10 @@ export class SidecarManager {
   }
 
   /**
-   * FIFO 出队：与点发送同一条 startTurn（先占位再开跑）。
-   * 无窗口 / 无进程 / 占位失败 → 不发 RPC，sidecar 超时后诚实 start_failed。
+   * FIFO 出队：把开跑交给渲染进程（先认领事件，再 startTurn）。
+   * 无窗口 / 无进程 → 不发通知，sidecar 超时后诚实 start_failed。
    */
-  private async startQueuedTurnFromSidecar(
-    params: Record<string, unknown>,
-  ): Promise<void> {
+  private startQueuedTurnFromSidecar(params: Record<string, unknown>): void {
     const conversationId = String(params.conversationId ?? "").trim();
     const userMessageId = String(params.userMessageId ?? "").trim();
     const messageId = String(params.messageId ?? "").trim();
@@ -1721,40 +1774,21 @@ export class SidecarManager {
     const tableSelection = Array.isArray(params.tableSelection)
       ? capTableSelection(params.tableSelection as string[])
       : undefined;
-    try {
-      await this.startTurn(
-        resolved.wc,
-        {
-          conversationId,
-          rootId: resolved.rootId,
-          subpath: resolved.subpath,
-          turnId: randomUUID(),
-          traceId,
-          userMessageId,
-          messageId,
-          userMessage,
-          ...(queueId ? { queueId } : {}),
-          ...(mentions && mentions.length > 0
-            ? { agentMentions: mentions }
-            : {}),
-          ...(attachments && attachments.length > 0 ? { attachments } : {}),
-          ...(tableSelection && tableSelection.length > 0
-            ? { tableSelection }
-            : {}),
-        },
-        ".",
-      );
-    } catch (err) {
-      logDesktop({
-        level: "error",
-        event: "sidecar.queue_need_start_failed",
-        fields: {
-          conversation_id: conversationId,
-          queue_id: queueId,
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
+    safeWcSend(resolved.wc, SIDECAR_CHANNELS.queueNeedStart, {
+      conversationId,
+      rootId: resolved.rootId,
+      subpath: resolved.subpath,
+      queueId,
+      userMessageId,
+      messageId,
+      traceId,
+      userMessage,
+      ...(mentions && mentions.length > 0 ? { agentMentions: mentions } : {}),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      ...(tableSelection && tableSelection.length > 0
+        ? { tableSelection }
+        : {}),
+    });
   }
 
   private onNotification(
@@ -1766,7 +1800,7 @@ export class SidecarManager {
       return;
     }
     if (method === SIDECAR_QUEUE_NEED_START) {
-      void this.startQueuedTurnFromSidecar(params);
+      this.startQueuedTurnFromSidecar(params);
       return;
     }
     if (method !== "turn/event") return;

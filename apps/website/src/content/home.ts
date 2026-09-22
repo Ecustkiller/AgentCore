@@ -368,7 +368,7 @@ export const MECHANISM = {
 
 /**
  * 交付物卡片。左右图文交替，accent 决定该行的主色与辉光。
- * accent 取招牌渐变的四个色停，让这一屏和站内其它渐变是同一套颜色。
+ * accent 取蓝渐变的四个色停，让这一屏和站内其它渐变是同一套颜色。
  */
 export const USECASES = {
   title: {
@@ -638,7 +638,7 @@ export const ECOSYSTEM = {
         zh: "团队行为的红线与约束",
         en: "The red lines and constraints your team follows.",
       },
-      accent: "brand-2" as const,
+      accent: "blue-2" as const,
     },
     {
       code: "Team",

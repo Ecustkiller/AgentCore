@@ -4,6 +4,7 @@ import {
 } from "@/components/files/notifyConversationWorkspaceTree";
 import { EXECUTION_RECORD_TOOLS } from "@/lib/executionRecords";
 import type { BrowserHostKind } from "@/services/browserSessions";
+import { insertUserRowOnce } from "@/services/turns/queuedTurnLocal";
 import { useBrowserSessionsStore } from "@/stores/browserSessions";
 import { useConversationStore } from "@/stores/conversation";
 import {
@@ -46,6 +47,16 @@ import { flushPendingFrames, queueFrame } from "../execFrameBuffer";
 import { ceoMessageId, execMessageId, routeHintFromPayload } from "../helpers";
 import { refreshAfterBackgroundExecution } from "../refreshAfterBackgroundExecution";
 import type { DispatchContext } from "../types";
+
+function rememberedInterjection(interjectionId: string) {
+  for (const runtime of Object.values(useExecutionStore.getState().byId)) {
+    const hit = runtime.userInterjections?.find(
+      (item) => item.interjectionId === interjectionId,
+    );
+    if (hit) return hit;
+  }
+  return undefined;
+}
 
 /** Stamp an escalation process marker (required or raised) onto the CEO lane. */
 function stampEscalationTimelineMarker(
@@ -274,6 +285,15 @@ export function handleExecutionEvent(
     case "user_interjection": {
       const leaf = userInterjectionFromPayload(event.payload);
       if (leaf) {
+        if (leaf.status === "injected" || leaf.status === "addressed") {
+          const prior = rememberedInterjection(leaf.interjectionId);
+          insertUserRowOnce(conversationId, {
+            id: leaf.userMessageId || prior?.userMessageId || "",
+            content: leaf.content || prior?.content || "",
+            attachments: leaf.attachments ?? prior?.attachments,
+            agentMentions: leaf.agentMentions ?? prior?.agentMentions,
+          });
+        }
         const mid = execMessageId(
           conversationId,
           routeHintFromPayload(event.payload),

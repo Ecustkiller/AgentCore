@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
@@ -37,163 +36,53 @@ class MessageRole(StrEnum):
 class ToolApproval(StrEnum):
     """Tool approval requirement levels (可逆性 × 副作用).
 
-    Two live levels: ``NEVER`` (silent) and ``GRANTABLE`` (first-grant / per-call
-    via session permission axes). The former ``ALWAYS`` (every call, no turn grant)
-    had no consumers and was removed — irreversible external tools are not in the
-    MVP set.
+    Two live levels: ``NEVER`` (silent) and ``GRANTABLE`` (may still prompt for
+    irreversible shapes). Boundary decides whether the tool is assembled;
+    in-boundary writes and ``run`` do not prompt. Irreversible external
+    actions stay on the always-confirm / breaker path.
     """
 
     NEVER = "never"
     GRANTABLE = "grantable"
 
 
-class FileWriteAxis(StrEnum):
-    """Whether reversible file mutations need per-call approval."""
+class WorkspaceBoundary(StrEnum):
+    """What this conversation may do. One value, not three axes.
 
-    ASK = "ask"
-    SESSION = "session"
-
-
-class CommandAxis(StrEnum):
-    """How execution-class tools (code / terminal / test) are authorized."""
-
-    ASK = "ask"
-    AUTO = "auto"
-
-
-class HostAxis(StrEnum):
-    """本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 delegation 静默授）。"""
-
-    OFF = "off"
-    ASK = "ask"
-    SESSION = "session"
-
-
-class AutonomyPolicy(StrEnum):
-    """User-global *default recipe* for new conversations (seeds :class:`PermissionAxes`).
-
-    Runtime gates read the conversation's ``permission_axes`` — not this column.
-    Stored on ``users.autonomy_policy`` (设置页「新会话默认权限配方」).
+    ``read`` — look only. ``folder`` — change this folder and run inside it
+    (default). ``computer`` — folder plus the local Host face. Stored as
+    ``permission_axes.boundary``. Checkpoints, breakers, and always-confirm
+    commands are orthogonal.
     """
 
-    CAUTIOUS = "cautious"  # ask / ask / off
-    LESS_INTERRUPT = "less_interrupt"  # session / auto / session (default)
-    MANAGED = "managed"  # same axes as less_interrupt
+    READ = "read"
+    FOLDER = "folder"
+    COMPUTER = "computer"
 
+    @property
+    def allows_write(self) -> bool:
+        return self is not WorkspaceBoundary.READ
 
-@dataclass(frozen=True)
-class PermissionAxes:
-    """Conversation-level permission axes (运行时单一真相源).
+    @property
+    def allows_execution(self) -> bool:
+        return self is not WorkspaceBoundary.READ
 
-    - ``file_write`` — ask = per-call; session = trust reversible writes
-    - ``command`` — ask = withhold execution class / per-call exec; auto = silent local exec
-    - ``host`` — off / ask / session for the local Host face (orthogonal to command)
-
-    Illegal: ``command=auto`` ∧ ``file_write=ask``.
-    ask_user / plan_review / circuit-breakers / sensitive reads are orthogonal.
-    ``team_kickoff`` and ``command=kickoff`` are retired: extra keys dropped;
-    ``command=kickoff`` is not a :class:`CommandAxis` value (API 422).
-    """
-
-    file_write: FileWriteAxis = FileWriteAxis.SESSION
-    command: CommandAxis = CommandAxis.AUTO
-    host: HostAxis = HostAxis.SESSION
-
-    def __post_init__(self) -> None:
-        if self.command is CommandAxis.AUTO and self.file_write is FileWriteAxis.ASK:
-            raise ValueError(
-                "illegal permission axes: command=auto requires file_write=session"
-            )
+    @property
+    def allows_host(self) -> bool:
+        return self is WorkspaceBoundary.COMPUTER
 
     def to_dict(self) -> dict[str, str]:
-        return {
-            "file_write": self.file_write.value,
-            "command": self.command.value,
-            "host": self.host.value,
-        }
+        return {"boundary": self.value}
 
     @classmethod
-    def from_mapping(cls, raw: Mapping[str, Any] | None) -> PermissionAxes:
-        """Parse stored / wire JSON; unknown / missing → less_interrupt defaults.
-
-        Extra keys (retired ``team_kickoff``) are ignored. ``command=kickoff`` is
-        not a live enum value — it fails :class:`CommandAxis` and falls through
-        to defaults (no session→auto / ask→ask merge). ``host`` 缺省 = ``session``.
-        """
-        if not raw:
-            return DEFAULT_PERMISSION_AXES
-        try:
-            return cls(
-                file_write=FileWriteAxis(
-                    str(raw.get("file_write") or FileWriteAxis.SESSION.value)
-                ),
-                command=CommandAxis(str(raw.get("command") or CommandAxis.AUTO.value)),
-                host=HostAxis(str(raw.get("host") or HostAxis.SESSION.value)),
-            )
-        except (ValueError, TypeError, KeyError):
-            return DEFAULT_PERMISSION_AXES
-
-    @property
-    def trusts_file_writes(self) -> bool:
-        return self.file_write is FileWriteAxis.SESSION
-
-    @property
-    def auto_executes(self) -> bool:
-        return self.command is CommandAxis.AUTO
-
-    @property
-    def withholds_execution_tools(self) -> bool:
-        """command=ask: do not register execution class (对齐原 observe 执行侧)."""
-        return self.command is CommandAxis.ASK
-
-    @property
-    def host_disabled(self) -> bool:
-        return self.host is HostAxis.OFF
-
-    @property
-    def trusts_host(self) -> bool:
-        return self.host is HostAxis.SESSION
+    def from_mapping(cls, raw: Mapping[str, Any] | None) -> WorkspaceBoundary:
+        """Parse stored / wire JSON. Missing or unknown ``boundary`` raises."""
+        if not isinstance(raw, Mapping) or "boundary" not in raw:
+            raise ValueError("boundary required")
+        return cls(str(raw["boundary"]))
 
 
-DEFAULT_PERMISSION_AXES = PermissionAxes(
-    file_write=FileWriteAxis.SESSION,
-    command=CommandAxis.AUTO,
-    host=HostAxis.SESSION,
-)
-
-_RECIPE_TO_AXES: dict[AutonomyPolicy, PermissionAxes] = {
-    AutonomyPolicy.CAUTIOUS: PermissionAxes(
-        FileWriteAxis.ASK,
-        CommandAxis.ASK,
-        HostAxis.OFF,
-    ),
-    AutonomyPolicy.LESS_INTERRUPT: DEFAULT_PERMISSION_AXES,
-    AutonomyPolicy.MANAGED: DEFAULT_PERMISSION_AXES,
-}
-
-
-def recipe_to_axes(policy: AutonomyPolicy) -> PermissionAxes:
-    """Map user-default recipe → conversation PermissionAxes."""
-    return _RECIPE_TO_AXES.get(policy, DEFAULT_PERMISSION_AXES)
-
-
-def validate_permission_axes(
-    *,
-    file_write: str,
-    command: str,
-    host: str = HostAxis.SESSION.value,
-    **_discarded: object,
-) -> PermissionAxes:
-    """Parse + validate axes for API writes; raises ValueError on illegal combo / enum.
-
-    Extra keys (retired ``team_kickoff``) are ignored. ``command=kickoff`` is
-    not a :class:`CommandAxis` value and raises (API 422).
-    """
-    return PermissionAxes(
-        file_write=FileWriteAxis(file_write),
-        command=CommandAxis(command),
-        host=HostAxis(host),
-    )
+DEFAULT_PERMISSION_AXES = WorkspaceBoundary.FOLDER
 
 
 class ToolFace(StrEnum):

@@ -111,6 +111,28 @@ def test_try_enqueue_requires_accepting_window():
     _reset_for_tests()
 
 
+def test_prose_return_does_not_hold_for_unread_classic_steer():
+    """未读经典插话不把散文 Return 留在本回合。"""
+    from agentcore.llm.profiles import ProfileParams
+    from agentcore.runtime.engine.loop import _should_hold_return_for_interjection
+
+    _reset_for_tests()
+    begin_accepting("c-hold", execution_id="e1")
+    assert try_enqueue(conversation_id="c-hold", content="改一下") is not None
+    try:
+        assert (
+            _should_hold_return_for_interjection(
+                role="captain",
+                profile=ProfileParams(),
+                round_idx=0,
+            )
+            is False
+        )
+    finally:
+        end_accepting("c-hold")
+        _reset_for_tests()
+
+
 async def _never() -> None:
     await asyncio.Future()
 
@@ -381,61 +403,60 @@ async def test_react_loop_drains_steer_at_step_top():
 
 
 @pytest.mark.asyncio
-async def test_react_loop_holds_return_to_hear_steer_same_turn():
-    """散文无工具步：流中插队不 leftover 升队，同回合再跑一轮并 injected。"""
+async def test_react_loop_prose_steer_becomes_next_turn():
+    """散文无工具步：流中插话不留在本回合，收口后升成下一回合。"""
     _reset_for_tests()
-    cid = "c-loop-hold-return"
+    cid = "c-loop-prose-queue"
     turn_queue.clear(cid)
-    ctx = replace(_context(), conversation_id=cid, execution_id="exec-hold-return")
-
-    seen_user_contents: list[str] = []
-    enqueued = False
-
-    class _SpyProvider(_ScriptedProvider):
-        async def stream(self, request):  # noqa: ANN001
-            nonlocal enqueued
-            for m in request.messages:
-                if m.role == "user" and m.content:
-                    seen_user_contents.append(m.content)
-            async for chunk in super().stream(request):
-                if not enqueued and chunk.delta_content:
-                    enqueued = True
-                    assert try_enqueue(conversation_id=cid, content="改成要点列表") is not None
-                yield chunk
-
-    provider = _SpyProvider(
-        [
-            [LLMChunk(delta_content="先写一长段")],
-            [LLMChunk(delta_content="已按要点改")],
-        ]
-    )
-    messages: list[LLMMessage] = [LLMMessage(role="user", content="写一段说明")]
+    ctx = replace(_context(), conversation_id=cid, execution_id="exec-prose-queue")
     sink = EventSink()
-    content, *_ = await react_loop(
-        messages=messages,
-        llm=provider,
-        tools=_registry(_StubTool()),
-        sink=sink,
-        tool_context=ctx,
-        profile=make_profile_params(max_rounds=4),
-        turn_model="m",
-        role="captain",
-        approval_gate=None,
-    )
-    assert "已按要点改" in content
-    assert any("改成要点列表" in c and "中途补充" in c for c in seen_user_contents)
-    assert any(
-        m.role == "user" and m.content and "改成要点列表" in m.content for m in messages
-    )
-    assert peek_count(cid) == 0
-    assert turn_queue.depth(cid) == 0
-    injected = [
-        e for e in sink._history if e.type is EventType.USER_INTERJECTION  # noqa: SLF001
-    ]
-    assert any(e.payload.get("status") == "injected" for e in injected)
-    assert not any(e.payload.get("status") == "queued" for e in injected)
-    turn_queue.clear(cid)
-    _reset_for_tests()
+    blocker = asyncio.create_task(_never())
+    turn_runs.register(conversation_id=cid, task=blocker, sink=sink)
+    try:
+        seen_user_contents: list[str] = []
+        enqueued = False
+
+        class _SpyProvider(_ScriptedProvider):
+            async def stream(self, request):  # noqa: ANN001
+                nonlocal enqueued
+                for m in request.messages:
+                    if m.role == "user" and m.content:
+                        seen_user_contents.append(m.content)
+                async for chunk in super().stream(request):
+                    if not enqueued and chunk.delta_content:
+                        enqueued = True
+                        assert try_enqueue(conversation_id=cid, content="改成要点列表") is not None
+                    yield chunk
+
+        provider = _SpyProvider([[LLMChunk(delta_content="先写一长段")]])
+        messages: list[LLMMessage] = [LLMMessage(role="user", content="写一段说明")]
+        content, *_ = await react_loop(
+            messages=messages,
+            llm=provider,
+            tools=_registry(_StubTool()),
+            sink=sink,
+            tool_context=ctx,
+            profile=make_profile_params(max_rounds=4),
+            turn_model="m",
+            role="captain",
+            approval_gate=None,
+        )
+        assert content == "先写一长段"
+        assert provider.calls == 1
+        assert not any("改成要点列表" in c for c in seen_user_contents)
+        assert peek_count(cid) == 0
+        assert turn_queue.depth(cid) == 1
+        interjections = [
+            e for e in sink._history if e.type is EventType.USER_INTERJECTION  # noqa: SLF001
+        ]
+        assert any(e.payload.get("status") == "queued" for e in interjections)
+        assert not any(e.payload.get("status") == "injected" for e in interjections)
+    finally:
+        turn_queue.clear(cid)
+        blocker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await blocker
+        _reset_for_tests()
 
 
 @pytest.mark.asyncio

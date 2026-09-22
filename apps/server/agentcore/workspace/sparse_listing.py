@@ -167,8 +167,3 @@ def partition_sparse_paths(
 
     # Project shared space: attachments only; the rest collapse into the summary.
     return rows, len(others)
-
-
-def format_remaining_summary(remaining: int) -> str:
-    """One-line elision for shared project files not listed individually."""
-    return f"另有 {remaining} 个文件，需要时用 file_list / grep"

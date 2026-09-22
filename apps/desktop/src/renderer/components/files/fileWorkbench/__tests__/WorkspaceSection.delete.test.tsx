@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * 文件中枢工作区轨：右键「删除对话」一键软删（撤销 toast），「删除文件夹」不再挂在「我的文件」。
+ * 文件中枢工作区轨：对话根右键「删除对话」一键软删；文件夹根右键「删除文件夹…」
+ * 走与侧栏同一确认（所有者才有；树内文件「删除」不是这条）。
  */
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -13,6 +14,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,7 +24,9 @@ const mocks = vi.hoisted(() => ({
   notifyConversationDeleted: vi.fn(),
   dropConversationRuntime: vi.fn(),
   deleteFolder: vi.fn(),
+  notifyInfo: vi.fn(),
   navigate: vi.fn(),
+  folderRole: "owner" as "owner" | "editor" | "viewer",
 }));
 
 vi.mock("@/components/files/FileTree", () => ({
@@ -55,7 +59,7 @@ vi.mock("@/hooks/useFolders", () => ({
       mode: "cloud",
       localRootId: null,
       localSubpath: null,
-      myRole: "owner" as const,
+      myRole: mocks.folderRole,
     },
   ],
   releaseFolderConversations: vi.fn(),
@@ -81,6 +85,12 @@ vi.mock("@/stores/conversation", () => ({
 
 vi.mock("@/lib/conversationDeleteCopy", () => ({
   notifyConversationDeleted: mocks.notifyConversationDeleted,
+}));
+
+vi.mock("@/lib/toast", () => ({
+  notifyError: vi.fn(),
+  notifyActionError: vi.fn(),
+  notifyInfo: mocks.notifyInfo,
 }));
 
 import { WorkspaceSection } from "../WorkspaceSection";
@@ -142,8 +152,10 @@ beforeEach(() => {
   mocks.restoreConversation.mockReset();
   mocks.notifyConversationDeleted.mockReset();
   mocks.dropConversationRuntime.mockReset();
-  mocks.deleteFolder.mockReset();
+  mocks.deleteFolder.mockReset().mockResolvedValue(undefined);
+  mocks.notifyInfo.mockReset();
   mocks.navigate.mockReset();
+  mocks.folderRole = "owner";
 });
 
 afterEach(cleanup);
@@ -166,16 +178,35 @@ describe("工作区轨删除", () => {
     expect(screen.queryByTitle("取消")).toBeNull();
     expect(screen.queryByText(/确认删除/)).toBeNull();
     expect(mocks.deleteFolder).not.toHaveBeenCalled();
+    expect(screen.queryByText("删除文件夹…")).toBeNull();
   });
 
-  it("右键不再出现删除文件夹", async () => {
+  it("所有者右键文件夹根经确认后软删，点菜单本身不删", async () => {
     renderSection();
 
     fireEvent.contextMenu(screen.getByText("季度报告"));
-    await screen.findByText("重命名");
-    expect(screen.queryByText("删除文件夹…")).toBeNull();
-    expect(screen.queryByText("删除文件夹「季度报告」？")).toBeNull();
+    fireEvent.click(await screen.findByText("删除文件夹…"));
     expect(mocks.deleteFolder).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("删除文件夹「季度报告」？")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除文件夹" }));
+
+    await waitFor(() => expect(mocks.deleteFolder).toHaveBeenCalledWith("f1"));
+    expect(mocks.notifyInfo).toHaveBeenCalledWith(
+      "已删除文件夹",
+      expect.objectContaining({ description: "季度报告" }),
+    );
     expect(mocks.deleteConversation).not.toHaveBeenCalled();
+  });
+
+  it("协作者右键文件夹根没有删除文件夹", async () => {
+    mocks.folderRole = "editor";
+    renderSection();
+
+    fireEvent.contextMenu(screen.getByText("季度报告"));
+    await screen.findByText("新建文件");
+    expect(screen.queryByText("删除文件夹…")).toBeNull();
+    expect(mocks.deleteFolder).not.toHaveBeenCalled();
   });
 });

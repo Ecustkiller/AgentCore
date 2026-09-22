@@ -105,7 +105,7 @@ export default function DownloadView() {
               <span
                 aria-hidden="true"
                 className="block h-px w-5 shrink-0"
-                style={{ background: "var(--brand-gradient)" }}
+                style={{ background: "var(--blue-gradient)" }}
               />
               {t(HERO.eyebrow)}
             </p>
@@ -147,7 +147,7 @@ export default function DownloadView() {
                   className="btn-outline max-sm:min-h-[3.25rem] max-sm:w-full sm:px-7 sm:py-4"
                   style={{
                     background:
-                      "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--brand-gradient) border-box",
+                      "linear-gradient(var(--ink-deep), var(--ink-deep)) padding-box, var(--blue-gradient) border-box",
                   }}
                 >
                   {t(LABELS.allPlatforms)}
@@ -272,7 +272,7 @@ export default function DownloadView() {
                   <span
                     aria-hidden="true"
                     className="block h-px w-5 shrink-0"
-                    style={{ background: "var(--brand-gradient)" }}
+                    style={{ background: "var(--blue-gradient)" }}
                   />
                   {t(INSTALL.eyebrow)}
                 </p>

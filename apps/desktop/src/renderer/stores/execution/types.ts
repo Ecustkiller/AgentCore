@@ -126,7 +126,6 @@ export const TOOL_LABELS: Record<string, string> = {
   cancel_worker: "Cancel worker",
   resolve_escalation: "Resolve escalate",
   queue_user_message: "Queue message",
-  wait: "Wait",
   // 交接 — keep in sync with TOOL_META English chrome.
   handoff: "Handoff",
   docs_read: "Read doc",
@@ -514,6 +513,8 @@ export interface UserInterjection {
   content: string;
   status: UserInterjectionStatus;
   note: string | null;
+  /** 落库用户行。received 时时间线不画；injected / addressed 时按这个 id 放入。 */
+  userMessageId?: string;
   attachments?: UserInterjectionAttachment[];
   /** Soft `@` role chips on the interjection bubble (prompt hint, not a hard route). */
   agentMentions?: UserInterjectionMention[];

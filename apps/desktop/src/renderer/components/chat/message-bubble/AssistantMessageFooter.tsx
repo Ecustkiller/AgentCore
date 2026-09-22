@@ -4,10 +4,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
 import { formatCompact, formatDuration, formatOutputSpeed } from "@/lib/format";
@@ -20,9 +23,7 @@ import {
   precedingUserMessageId,
   supportDiagnosticExtrasFromError,
 } from "@/lib/supportDiagnostics";
-import { notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { setMessageFeedback } from "@/services/messages";
 import type { UsageBreakdown } from "@/services/usage";
 import type { Message } from "@/stores/conversation";
 import {
@@ -38,12 +39,9 @@ import {
 import {
   Check,
   Copy,
-  Fingerprint,
+  Gauge,
   Layers,
-  Link2,
-  MoreHorizontal,
-  ThumbsDown,
-  ThumbsUp,
+  Package,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import {
@@ -53,7 +51,7 @@ import {
 } from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
-/** Signal-only summary (cost / duration) — token, 输出速度, ReAct rounds live in「更多」. */
+/** Signal-only summary (cost / duration) — token, 输出速度, ReAct rounds live in「用量」. */
 export function AssistantMessageMetaSummary({
   costText,
   durationMs,
@@ -159,33 +157,67 @@ function UsageDetailPanel({
   );
 }
 
-async function copyDiagnostic(value: string) {
-  await copyText(value);
-}
-
-/** 消息永久链接 (对话基础功能补齐): a hash anchor that reopens the conversation and
- * lands on this exact turn (scroll). Portable to the web build as a real
- * shareable URL; in desktop it round-trips through the same #/conversations/:id?msg=
- * route ConversationPage honors on load. */
-function messagePermalink(conversationId: string, messageId: string): string {
-  const base = window.location.href.split("#")[0];
-  return `${base}#/conversations/${conversationId}?msg=${messageId}`;
-}
-
-export function MessageMoreMenu({
-  message,
-  captainContext,
-  showSupportPack = true,
+function ReceivedContextButton({
+  blocks,
+  process,
 }: {
-  message: Message;
-  captainContext: ContextBlockWire[];
-  /** False when this bubble is not the pack host. */
-  showSupportPack?: boolean;
+  blocks: ContextBlockWire[];
+  process: Message["process"];
 }) {
-  const [contextOpen, setContextOpen] = useState(false);
-  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const [open, setOpen] = useState(false);
+  if (blocks.length === 0) return null;
+  return (
+    <>
+      <SimpleTooltip label="收到的上下文">
+        <IconButton
+          size="sm"
+          aria-label="收到的上下文"
+          onClick={() => setOpen(true)}
+        >
+          <Layers size={14} />
+        </IconButton>
+      </SimpleTooltip>
+      <ReceivedContextDialog
+        blocks={blocks}
+        process={process}
+        open={open}
+        onOpenChange={setOpen}
+      />
+    </>
+  );
+}
 
-  // 查 bug 走排查包喂 AI。失败横幅不挂这一项。
+function UsagePopoverButton({ message }: { message: Message }) {
+  const usage = message.usage;
+  const hasSpendUsage = !!usage && (usage.input > 0 || usage.output > 0);
+  if (!hasSpendUsage || !usage) return null;
+  return (
+    <Popover>
+      <SimpleTooltip label="用量">
+        <PopoverTrigger asChild>
+          <IconButton size="sm" aria-label="用量">
+            <Gauge size={14} />
+          </IconButton>
+        </PopoverTrigger>
+      </SimpleTooltip>
+      <PopoverContent align="start" className="w-52 p-0">
+        <UsageDetailPanel usage={usage} generationMs={message.generationMs} />
+        {message.rounds != null && message.rounds > 1 && (
+          <div className="flex justify-between gap-3 px-3 pb-1.5 text-xs text-muted-foreground">
+            <span>ReAct 轮次</span>
+            <span className="tabular-nums text-foreground">
+              {message.rounds} 轮
+            </span>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CopySupportPackButton({ message }: { message: Message }) {
+  const [copied, setCopied] = useState(false);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const serverMessageId = assistantProjectionId(message);
   const diagnosticIds = {
     conversationId,
@@ -198,142 +230,59 @@ export function MessageMoreMenu({
     executionId: message.executionId,
     ...supportDiagnosticExtrasFromError(message.error),
   };
-  const diagnosticText = formatSupportDiagnosticText(diagnosticIds);
-  const usage = message.usage;
-  const hasSpendUsage = !!usage && (usage.input > 0 || usage.output > 0);
-  const hasMenu =
-    !!conversationId ||
-    captainContext.length > 0 ||
-    hasSpendUsage ||
-    !!diagnosticText;
+  if (!formatSupportDiagnosticText(diagnosticIds)) return null;
 
-  if (!hasMenu) return null;
-
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <IconButton
-            size="sm"
-            aria-label="更多"
-            data-testid="assistant-more-menu"
-          >
-            <MoreHorizontal size={14} />
-          </IconButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {conversationId && (
-            <DropdownMenuItem
-              onSelect={() =>
-                void copyDiagnostic(
-                  messagePermalink(conversationId, serverMessageId),
-                )
-              }
-            >
-              <Link2 size={14} className="shrink-0 text-muted-foreground" />
-              复制消息链接
-            </DropdownMenuItem>
-          )}
-          {captainContext.length > 0 && (
-            <DropdownMenuItem onSelect={() => setContextOpen(true)}>
-              <Layers size={14} className="shrink-0 text-muted-foreground" />
-              收到的上下文
-            </DropdownMenuItem>
-          )}
-          {hasSpendUsage && usage && (
-            <>
-              {(!!conversationId || captainContext.length > 0) && (
-                <DropdownMenuSeparator />
-              )}
-              <DropdownMenuLabel>用量详情</DropdownMenuLabel>
-              <UsageDetailPanel
-                usage={usage}
-                generationMs={message.generationMs}
-              />
-              {message.rounds != null && message.rounds > 1 && (
-                <div className="flex justify-between gap-3 px-3 pb-1.5 text-xs text-muted-foreground">
-                  <span>ReAct 轮次</span>
-                  <span className="tabular-nums text-foreground">
-                    {message.rounds} 轮
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-          {showSupportPack && diagnosticText && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => {
-                  void buildSupportDiagnosticPack(diagnosticIds).then(
-                    (text) => {
-                      if (text) void copyDiagnostic(text);
-                    },
-                  );
-                }}
-              >
-                <Fingerprint
-                  size={14}
-                  className="shrink-0 text-muted-foreground"
-                />
-                复制排查包
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ReceivedContextDialog
-        blocks={captainContext}
-        process={message.process}
-        open={contextOpen}
-        onOpenChange={setContextOpen}
-      />
-    </>
-  );
-}
-
-/** 回复反馈 (点赞/点踩, 对话基础功能补齐): thumbs up/down on an assistant reply. The active
- * side highlights in the brand color; clicking it again clears the rating (toggle off).
- * Optimistic — the service flips the bubble immediately and reverts on a failed persist. */
-function FeedbackButtons({ message }: { message: Message }) {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const feedback = message.feedback ?? null;
-  const rate = (side: "up" | "down") => {
-    if (!conversationId) return;
-    const next = feedback === side ? null : side;
-    void setMessageFeedback(conversationId, message.id, next).catch((err) =>
-      notifyError(err, "反馈失败"),
-    );
+  const onCopy = async () => {
+    const text = await buildSupportDiagnosticPack(diagnosticIds);
+    if (text && (await copyText(text))) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
   };
+
+  return (
+    <SimpleTooltip label={copied ? "已复制" : "复制排查包"}>
+      <IconButton
+        size="sm"
+        aria-label="复制排查包"
+        onClick={() => void onCopy()}
+      >
+        {copied ? <Check size={14} /> : <Package size={14} />}
+      </IconButton>
+    </SimpleTooltip>
+  );
+}
+
+/** Per-turn inspect: snapshot, token detail, support pack. Each slot hides when empty. */
+export function AssistantTurnInspect({
+  message,
+  captainContext,
+  showContext = true,
+  showUsage = true,
+  showSupportPack = true,
+}: {
+  message: Message;
+  captainContext: ContextBlockWire[];
+  showContext?: boolean;
+  showUsage?: boolean;
+  /** False when this bubble is not allowed to host the pack. */
+  showSupportPack?: boolean;
+}) {
   return (
     <>
-      <SimpleTooltip label="有帮助">
-        <IconButton
-          size="sm"
-          aria-label="有帮助"
-          aria-pressed={feedback === "up"}
-          className={feedback === "up" ? "text-primary" : undefined}
-          onClick={() => rate("up")}
-        >
-          <ThumbsUp size={14} />
-        </IconButton>
-      </SimpleTooltip>
-      <SimpleTooltip label="没帮助">
-        <IconButton
-          size="sm"
-          aria-label="没帮助"
-          aria-pressed={feedback === "down"}
-          className={feedback === "down" ? "text-primary" : undefined}
-          onClick={() => rate("down")}
-        >
-          <ThumbsDown size={14} />
-        </IconButton>
-      </SimpleTooltip>
+      {showContext ? (
+        <ReceivedContextButton
+          blocks={captainContext}
+          process={message.process}
+        />
+      ) : null}
+      {showUsage ? <UsagePopoverButton message={message} /> : null}
+      {showSupportPack ? <CopySupportPackButton message={message} /> : null}
     </>
   );
 }
 
-/** Assistant bubble footer — actions left, usage summary + time right, low-freq in「更多」. */
+/** Assistant bubble footer — actions left, ¥ + time right. Inspect sits with the actions. */
 export function AssistantMessageFooter({
   message,
   captainContext,
@@ -350,7 +299,7 @@ export function AssistantMessageFooter({
   onRegenerate: () => void;
   /** Settled failure face; feeds copy via visibleMessageText. */
   displayError?: { code: string; message: string } | null;
-  /** Keep「更多」visible (not hover-reveal) when it is the pack host. */
+  /** Keep「复制排查包」visible (not hover-reveal) when this turn owes a pack. */
   pinSupportPack?: boolean;
   /** False when this bubble is not the pack host. */
   showSupportPack?: boolean;
@@ -379,13 +328,22 @@ export function AssistantMessageFooter({
       exportError,
     ),
   );
-  const more = (
-    <MessageMoreMenu
+  const inspect = (
+    <AssistantTurnInspect
       message={message}
       captainContext={captainContext}
-      showSupportPack={showSupportPack}
+      showSupportPack={showSupportPack && !pinSupportPack}
     />
   );
+  const pinnedPack = pinSupportPack ? (
+    <AssistantTurnInspect
+      message={message}
+      captainContext={captainContext}
+      showContext={false}
+      showUsage={false}
+      showSupportPack={showSupportPack}
+    />
+  ) : null;
   return (
     <div className="mt-1 flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-0.5">
@@ -430,14 +388,13 @@ export function AssistantMessageFooter({
               </IconButton>
             </SimpleTooltip>
           )}
-          <FeedbackButtons message={message} />
           {showRegenerate ? (
             <RegenerateMessageAction onRegenerate={onRegenerate} />
           ) : null}
           <CloneMessageAction messageId={message.id} />
-          {!pinSupportPack ? more : null}
+          {inspect}
         </div>
-        {pinSupportPack ? more : null}
+        {pinnedPack}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         <AssistantMessageMetaSummary

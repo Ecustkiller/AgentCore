@@ -321,24 +321,6 @@ class MessageRepository:
         )
         await self._session.commit()
 
-    async def set_feedback(
-        self, message_id: str, *, conversation_id: str, feedback: str | None
-    ) -> bool:
-        """Set / clear the user's 点赞/点踩 on a message (回复反馈). Returns whether a row matched.
-
-        Scoped by ``conversation_id`` (defense in depth — the route has already proven
-        ownership of the conversation, so a guessed id from another chat won't match →
-        IDOR-safe). ``feedback`` is ``"up"`` / ``"down"`` to rate, or ``None`` to clear
-        the rating back to 未评价. A no-match id is a harmless False (route 404s).
-        """
-        result = await self._session.execute(
-            update(Message)
-            .where(Message.id == message_id, Message.conversation_id == conversation_id)
-            .values(feedback=feedback)
-        )
-        await self._session.commit()
-        return (result.rowcount or 0) > 0
-
     async def copy_through(
         self,
         source_conversation_id: str,
@@ -356,10 +338,9 @@ class MessageRepository:
         Returns ``None`` if ``until_message_id`` is not in the source (caller 404s).
 
         Intentionally NOT copied: ``trace_id`` (a copy is not a real turn — reusing it would
-        double-link the original turn's logs), ``feedback`` (a rating belongs to the turn the
-        user actually rated), and the separate ``turn_journal`` replay stream (§8.3, keyed by
-        message id) — so a cloned multi-agent turn keeps its final text but re-renders as a
-        plain bubble rather than replaying its team graph.
+        double-link the original turn's logs) and the separate ``turn_journal`` replay stream
+        (§8.3, keyed by message id) — so a cloned multi-agent turn keeps its final text but
+        re-renders as a plain bubble rather than replaying its team graph.
         """
         rows = await self.list_all_for_conversation(source_conversation_id)
         cutoff = next((i for i, r in enumerate(rows) if r.id == until_message_id), None)

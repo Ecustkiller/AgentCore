@@ -62,6 +62,7 @@ def test_scenarios_lint_ok():
     assert "survey_codebase_layout" in keys
     assert "explain_named_readme" in keys
     assert "discuss_arch_bug_maintain_facets" in keys
+    assert "discuss_tool_prompt_one_topic" in keys
     assert "identity_who_are_you" in keys
     assert "compare_three_js_frameworks" in keys
 
@@ -140,6 +141,14 @@ def test_discuss_and_prd_fixture_fields():
     assert facets.expect_max_workers == 2
     assert facets.expect_min_workers == 1
     assert "写成文档" in facets.user_message
+    prompt = by_key["discuss_tool_prompt_one_topic"]
+    assert prompt.workspace == "codebase"
+    assert prompt.expect_playbook == ""
+    assert "DIRECT" in prompt.expect_action and "DELEGATE" in prompt.expect_action
+    assert "ASK" not in prompt.expect_action
+    assert prompt.expect_max_workers == 1
+    assert prompt.expect_min_workers is None
+    assert "提示词" in prompt.user_message
     identity = by_key["identity_who_are_you"]
     assert identity.expect_playbook == ""
     assert "DIRECT" in identity.expect_action and "ASK" in identity.expect_action
@@ -398,6 +407,37 @@ def test_classify_landing_extended_observation():
     )
     assert facet_over["landing"] == "workers_over"
     assert facet_over["workers"] == 3
+    prompt_over = classify_landing(
+        action="DELEGATE",
+        playbook=None,
+        expect="",
+        offered=offered,
+        task_count=4,
+        expect_action="DIRECT|DELEGATE",
+        expect_max_workers=1,
+    )
+    assert prompt_over["landing"] == "workers_over"
+    assert prompt_over["workers"] == 4
+    prompt_one = classify_landing(
+        action="DELEGATE",
+        playbook=None,
+        expect="",
+        offered=offered,
+        task_count=1,
+        expect_action="DIRECT|DELEGATE",
+        expect_max_workers=1,
+    )
+    assert prompt_one["landing"] == "handwritten_expected"
+    prompt_direct = classify_landing(
+        action="DIRECT",
+        playbook=None,
+        expect="",
+        offered=offered,
+        task_count=0,
+        expect_action="DIRECT|DELEGATE",
+        expect_max_workers=1,
+    )
+    assert prompt_direct["landing"] == "allowed_action"
     brief_hand = classify_landing(
         action="DELEGATE",
         playbook=None,

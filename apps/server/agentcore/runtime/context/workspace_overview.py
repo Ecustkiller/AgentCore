@@ -5,7 +5,9 @@
 fingerprint). If ``AGENTS.md`` / ``CLAUDE.md`` exists, a one-line pointer
 (name only). Sparse listing
 (双模式工作区): attachments + 裸聊 scratch; project shared trees collapse into
-「另有 N 个文件」with no mtime path sample. Folder chats additionally name
+「另有 N 个文件」with no mtime path sample. A capped index does not
+report that cap as a count — the line is only that the walk stopped.
+Folder chats additionally name
 this-conversation writes / edits / exports (not reads; cap 8) so recent
 deliverables stay visible without a full-tree dump or mtime sample.
 
@@ -64,17 +66,32 @@ def attach_workspace_file_index(prompt: str, file_index: str) -> str:
     return f"{before}\n{index}\n{after}"
 
 
-async def _safe_index(backend: WorkspaceBackend) -> list[str] | None:
-    """Newest-first workspace file paths; ``None`` if listing unavailable/failed.
+def format_unlisted_file_fact(*, remaining: int, index_truncated: bool) -> str:
+    """Fact line for files the index did not name.
 
-    ``[]`` means the index ran successfully but the workspace has no files.
+    A hit on the index cap is not a census of the tree. The cap count stays
+    out of the prompt; the line only says the walk stopped.
+    """
+    if index_truncated:
+        return "索引到上限，未列完"
+    if remaining > 0:
+        return f"另有 {remaining} 个文件"
+    return ""
+
+
+async def _safe_index(backend: WorkspaceBackend) -> tuple[list[str], bool] | None:
+    """Newest-first paths plus whether the walk hit its cap.
+
+    ``None`` if listing is unavailable or failed. An empty path list means the
+    index ran and the workspace has no files. The cap flag is part of the
+    result — callers must not drop it and then print the path count as a total.
     """
     index = getattr(backend, "index_files", None)
     if index is None:
         return None
     try:
-        paths, _truncated = await index(order="recent")
-        return list(paths)
+        paths, truncated = await index(order="recent")
+        return list(paths), bool(truncated)
     except Exception as e:  # noqa: BLE001 — overview is best-effort, never fail a turn
         logger.debug("workspace.overview_index_failed", error=str(e))
         return None
@@ -169,17 +186,18 @@ async def build_workspace_overview(
     )
 
     pointer = await _convention_pointer(backend)
-    paths = await _safe_index(backend)
+    indexed = await _safe_index(backend)
     sections: list[str] = []
     if pointer:
         sections.append(pointer)
 
-    if paths is None:
+    if indexed is None:
         extra, _, _ = _edit_bullets(edits, listed_paths=set(), used=0, line_count=0)
         if extra:
             sections.append(FILE_INDEX_HEADER + "\n" + "\n".join(extra))
         return "\n\n".join(sections)
 
+    paths, index_truncated = indexed
     if not paths:
         extra, _, _ = _edit_bullets(edits, listed_paths=set(), used=0, line_count=0)
         if extra:
@@ -211,8 +229,11 @@ async def build_workspace_overview(
     others = {p.replace("\\", "/").lstrip("./") for p in paths if not is_attachment_path(p)}
     remaining = max(0, remaining - sum(1 for p in named if p in others))
 
-    if remaining > 0:
-        lines.append(f"另有 {remaining} 个文件")
+    unlisted = format_unlisted_file_fact(
+        remaining=remaining, index_truncated=index_truncated
+    )
+    if unlisted:
+        lines.append(unlisted)
 
     if lines:
         sections.append(FILE_INDEX_HEADER + "\n" + "\n".join(lines))

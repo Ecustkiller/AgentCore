@@ -79,12 +79,12 @@ export function formatCompact(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-/** Hide thresholds for 输出速度 in「更多」— short bursts and tiny replies are noise. */
+/** Hide thresholds for 输出速度 in「用量」— short bursts and tiny replies are noise. */
 export const OUTPUT_SPEED_MIN_TOKENS = 10;
 export const OUTPUT_SPEED_MIN_MS = 250;
 
 /**
- * 输出速度 for the assistant「更多」usage panel.
+ * 输出速度 for the assistant「用量」popover.
  * `outputTokens / (generationMs/1000)` — decode window only, not whole-turn 用时.
  * Returns null when the number would lie or jitter (old rows, sidecar token-empty).
  */

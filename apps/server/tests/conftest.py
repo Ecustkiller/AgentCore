@@ -16,6 +16,8 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 os.environ["LOG_LEVEL"] = "WARNING"
+# Lifespan and sidecar initialize must not reload a shared database's queue.
+os.environ["AGENTCORE_TURN_QUEUE_DURABLE"] = "0"
 
 import pytest
 import pytest_asyncio
@@ -25,6 +27,16 @@ import pytest_asyncio
 # integration conftest) never has its LIVE basetemp deleted out from under it.
 _TMP_PREFIX = "agentcore_pytest_"
 _TMP_REAP_AGE_S = 6 * 3600
+
+
+@pytest.fixture(autouse=True)
+def _reset_turn_queue_durable():
+    """Keep a test that installs the restart copy from leaking into the next test."""
+    from agentcore.runtime.turn.durable import reset_turn_queue_durable
+
+    reset_turn_queue_durable()
+    yield
+    reset_turn_queue_durable()
 
 
 @pytest.fixture(autouse=True)

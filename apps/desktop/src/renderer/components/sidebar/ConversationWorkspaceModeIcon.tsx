@@ -24,7 +24,7 @@ export function GroupWorkspaceModeIcon({ isLocal }: { isLocal: boolean }) {
       <Icon
         size={14}
         aria-label={label}
-        className="shrink-0 text-sidebar-foreground/40"
+        className="shrink-0 text-sidebar-muted"
       />
     </SimpleTooltip>
   );

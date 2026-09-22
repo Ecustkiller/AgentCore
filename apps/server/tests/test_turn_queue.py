@@ -40,6 +40,50 @@ def test_resolve_client_turn_ids_keeps_desktop_and_fills_missing():
     assert len(hyphen[2]) == 32
 
 
+def test_reorder_requires_full_permutation_and_move_to_front():
+    q = TurnQueue()
+    a = new_queued_turn(content="a", user_id="u")
+    b = new_queued_turn(content="b", user_id="u")
+    c = new_queued_turn(content="c", user_id="u")
+    q.enqueue("c1", a)
+    q.enqueue("c1", b)
+    q.enqueue("c1", c)
+    assert q.reorder("c1", [a.queue_id]) is False
+    assert [item.queue_id for item in q.list_pending("c1")] == [
+        a.queue_id,
+        b.queue_id,
+        c.queue_id,
+    ]
+    assert q.reorder("c1", [c.queue_id, a.queue_id, b.queue_id]) is True
+    assert [item.queue_id for item in q.list_pending("c1")] == [
+        c.queue_id,
+        a.queue_id,
+        b.queue_id,
+    ]
+    front = q.move_to_front("c1", b.queue_id)
+    assert front is b
+    assert [item.queue_id for item in q.list_pending("c1")] == [
+        b.queue_id,
+        c.queue_id,
+        a.queue_id,
+    ]
+    assert q.move_to_front("c1", "missing") is None
+
+
+def test_edit_request_rejects_blank_without_attachments():
+    from pydantic import ValidationError
+
+    from agentcore.api.schemas.messages import EditQueuedTurnRequest
+
+    with pytest.raises(ValidationError):
+        EditQueuedTurnRequest(content="  ")
+    kept = EditQueuedTurnRequest(
+        content="  ",
+        attachments=[{"name": "a.txt", "path": "a.txt"}],
+    )
+    assert kept.attachments[0].name == "a.txt"
+
+
 def test_enqueue_reports_visible_position_and_depth():
     q = TurnQueue()
     a = new_queued_turn(content="first", user_id="u")
@@ -402,7 +446,14 @@ def test_account_snapshot_empty_table_is_still_a_frame():
 
 def test_account_snapshot_is_one_frame_for_this_users_queues():
     q = TurnQueue()
-    q.enqueue("c1", new_queued_turn(content="a", user_id="u1"))
+    q.enqueue(
+        "c1",
+        new_queued_turn(
+            content="a",
+            user_id="u1",
+            user_message_id="11111111-1111-4111-8111-111111111111",
+        ),
+    )
     q.enqueue("c2", new_queued_turn(content="b", user_id="u1"))
     q.enqueue("c3", new_queued_turn(content="other", user_id="u2"))
     frame = q.account_snapshot_frame("u1")
@@ -410,4 +461,160 @@ def test_account_snapshot_is_one_frame_for_this_users_queues():
     queues = frame["payload"]["queues"]
     assert {row["conversation_id"] for row in queues} == {"c1", "c2"}
     assert all(isinstance(row["items"], list) and row["items"] for row in queues)
+    c1 = next(row for row in queues if row["conversation_id"] == "c1")
+    c2 = next(row for row in queues if row["conversation_id"] == "c2")
+    assert c1["items"][0]["user_message_id"] == "11111111-1111-4111-8111-111111111111"
+    assert "user_message_id" not in c2["items"][0]
     assert frame["type"] != "turn_queue_snapshot"
+
+
+async def test_edit_queued_item_updates_memory_only_after_row_write(monkeypatch):
+    from agentcore.runtime.turn.delivery import edit_queued_item
+
+    cid = "c-edit-queue"
+    turn_queue.clear(cid)
+    creds = {"token": "keep"}
+    item = new_queued_turn(
+        content="旧句子",
+        user_id="u",
+        user_message_id="11111111-1111-4111-8111-111111111111",
+        llm_credentials=creds,
+        interjection_id="ij-1",
+        table_selection=["row-1"],
+        attachments=[{"name": "a.txt", "path": "a.txt", "text": "a"}],
+        agent_mentions=[{"agent_id": "ag", "role": "审"}],
+    )
+    other = new_queued_turn(content="后面", user_id="u")
+    turn_queue.enqueue(cid, item)
+    turn_queue.enqueue(cid, other)
+    calls: list[dict] = []
+
+    async def _wrote(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "agentcore.conversation.midflight_persist.update_midflight_user_message",
+        _wrote,
+    )
+    try:
+        edited = await edit_queued_item(
+            cid,
+            item.queue_id,
+            content="新句子",
+            attachments=[{"name": "b.txt", "path": "b.txt", "text": "b"}],
+            agent_mentions=[],
+        )
+        assert edited is item
+        assert item.content == "新句子"
+        assert item.attachments == [{"name": "b.txt", "path": "b.txt", "text": "b"}]
+        assert item.agent_mentions == []
+        assert item.llm_credentials is creds
+        assert item.interjection_id == "ij-1"
+        assert item.table_selection == ["row-1"]
+        assert item.user_message_id == "11111111-1111-4111-8111-111111111111"
+        assert [row.queue_id for row in turn_queue.list_pending(cid)] == [
+            item.queue_id,
+            other.queue_id,
+        ]
+        assert calls[0]["content"] == "新句子"
+        assert calls[0]["user_message_id"] == item.user_message_id
+    finally:
+        turn_queue.clear(cid)
+
+
+async def test_edit_queued_item_leaves_memory_when_row_write_fails(monkeypatch):
+    from agentcore.runtime.turn.delivery import edit_queued_item
+
+    cid = "c-edit-queue-fail"
+    turn_queue.clear(cid)
+    item = new_queued_turn(
+        content="旧句子",
+        user_id="u",
+        user_message_id="22222222-2222-4222-8222-222222222222",
+    )
+    turn_queue.enqueue(cid, item)
+
+    async def _miss(**kwargs):
+        return False
+
+    monkeypatch.setattr(
+        "agentcore.conversation.midflight_persist.update_midflight_user_message",
+        _miss,
+    )
+    try:
+        assert (
+            await edit_queued_item(
+                cid,
+                item.queue_id,
+                content="新句子",
+                attachments=[],
+                agent_mentions=[],
+            )
+            is None
+        )
+        assert item.content == "旧句子"
+        assert await edit_queued_item(
+            cid,
+            "missing",
+            content="新句子",
+            attachments=[],
+            agent_mentions=[],
+        ) is None
+    finally:
+        turn_queue.clear(cid)
+
+
+async def test_edit_holds_drain_until_the_row_write_finishes(monkeypatch):
+    from agentcore.runtime.turn.delivery import edit_queued_item
+    from agentcore.runtime.turn.queue import reset_queue_starter, set_queue_starter
+
+    cid = "c-edit-queue-lock"
+    turn_queue.clear(cid)
+    item = new_queued_turn(
+        content="旧句子",
+        user_id="u",
+        user_message_id="33333333-3333-4333-8333-333333333333",
+    )
+    turn_queue.enqueue(cid, item)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    seen: list[str] = []
+
+    async def _slow(**kwargs):
+        started.set()
+        await release.wait()
+        return True
+
+    async def _starter(_cid: str, queued) -> None:
+        seen.append(queued.content)
+
+    monkeypatch.setattr(
+        "agentcore.conversation.midflight_persist.update_midflight_user_message",
+        _slow,
+    )
+    set_queue_starter(_starter)
+    edit_task = asyncio.create_task(
+        edit_queued_item(
+            cid,
+            item.queue_id,
+            content="新句子",
+            attachments=[],
+            agent_mentions=[],
+        )
+    )
+    try:
+        await started.wait()
+        drain_task = asyncio.create_task(turn_queue._drain(cid))
+        await asyncio.sleep(0)
+        assert turn_queue.depth(cid) == 1
+        assert seen == []
+        release.set()
+        assert (await edit_task) is item
+        await drain_task
+        assert seen == ["新句子"]
+        assert turn_queue.depth(cid) == 0
+    finally:
+        release.set()
+        reset_queue_starter()
+        turn_queue.clear(cid)

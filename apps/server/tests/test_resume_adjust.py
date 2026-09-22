@@ -39,7 +39,7 @@ async def test_resume_plan_adjust_still_steers():
 @pytest.mark.asyncio
 async def test_auto_grant_before_workers_does_not_hang_a_card():
     """command=auto 只记 silent grant，不挂卡、不跑 worker。"""
-    from agentcore.core.types import AutonomyPolicy
+    from agentcore.core.types import WorkspaceBoundary
     from agentcore.runtime.delegate.worker_grant import maybe_auto_grant_before_workers
     from tests.delegate.conftest import Provider, tool
 
@@ -47,7 +47,7 @@ async def test_auto_grant_before_workers_does_not_hang_a_card():
     real = tool(provider)
     real._depth = 0
     real._pending_pause = False
-    real._permission_axes = AutonomyPolicy.LESS_INTERRUPT
+    real._permission_axes = WorkspaceBoundary.FOLDER
 
     await maybe_auto_grant_before_workers(
         real,

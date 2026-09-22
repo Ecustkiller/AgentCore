@@ -318,6 +318,38 @@ async def _check_safety_and_approval_gates(
     # skip below — because it used to be private to ``ApprovalGate.authorize`` and
     # anything short-circuiting earlier silently published to the remote.
     always_confirm = isinstance(args, dict) and requires_always_confirm(name, args)
+    if approval_gate is not None:
+        from agentcore.runtime.sandbox_approval import boundary_block_message
+
+        blocked = boundary_block_message(approval_gate.permission_axes, name)
+        if blocked:
+            sink.emit(
+                tool_use_end(
+                    tc.id,
+                    name,
+                    success=False,
+                    output=blocked,
+                    failure=tool_failure_fields(code="boundary", product_message=blocked),
+                    run_id=event_run_id,
+                )
+            )
+            logger.info(
+                "tool.execute_end",
+                tool=name,
+                status="boundary_denied",
+                duration_ms=0,
+                **_shell_observe_log_fields(name, args),
+            )
+            return _ToolGateDenied(
+                message=_failed_tool_message(tc.id, blocked),
+                attempt=ToolAttempt(
+                    fingerprint,
+                    name,
+                    success=False,
+                    policy_failure=True,
+                    meta=_attempt_meta_with_landing_path(name, args),
+                ),
+            )
     # 「这个工具要不要审批」必须先独立算完，**不得**以「有没有 gate 对象」为判据——否则
     # 一个漏传 gate 的调用点连问都不问就放行（fail-open），而漏传恰恰看不出来。有没有人
     # 可问是下一个问题（见下方 ``approval_gate is None`` 分支）。
@@ -333,9 +365,8 @@ async def _check_safety_and_approval_gates(
 
         if browser_action_name(args if isinstance(args, dict) else None) != "screenshot":
             needs_approval = False
-    # Cloud *workers* historically ungated for server-sandbox tools (MCP/Host
-    # still gated). ``file_write=ask`` overrides that ungate for the
-    # file-mutation class so 谨慎 prompts reversible writes on cloud too.
+    # Cloud *workers* historically ungated for in-boundary server-sandbox tools
+    # (MCP still gated). ``read`` denies file mutations instead of prompting.
     # CEO / captain always keep full GRANTABLE gating — do not key off
     # backend.location alone.
     if needs_approval and not force_breaker and role == "worker":

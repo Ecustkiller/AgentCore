@@ -18,7 +18,7 @@ from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.folders.desk import caller_is_desk_member, resolve_folder_owner_user_id
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles
-from agentcore.memory import assemble_turn_rules
+from agentcore.memory import load_turn_rule_view
 from agentcore.runtime.context import (
     build_workspace_context,
     detect_workspace_git,
@@ -331,7 +331,7 @@ async def prepare_fresh_turn(
     # presence budget. Chat-path ``run`` never waits this. Air bubble uses
     # ``desk_provision_wait`` (preparing-cloud), not empty Thinking…
     (
-        rules_markdown,
+        rule_view,
         desk_folder_label,
         llm,
         mcp_discover,
@@ -340,7 +340,7 @@ async def prepare_fresh_turn(
     ) = await _gather_cancel_on_fail(
         _timed_phase(
             "rules",
-            assemble_turn_rules(
+            load_turn_rule_view(
                 memory_store,
                 user_id,
                 folder_id=folder_id,
@@ -385,7 +385,8 @@ async def prepare_fresh_turn(
         desk_visibly_empty=desk_visibly_empty,
     )
     system_prompt = assemble_system_prompt(
-        rules_markdown=rules_markdown,
+        rules_markdown=rule_view.settings,
+        path_index=rule_view.path_index,
     )
     # Resolve whether this turn's main model can take image parts before
     # attachment context so resident images go native multimodal (or honest note).
@@ -471,6 +472,18 @@ async def prepare_fresh_turn(
         attachment_slim,
     )
     attachment_context = attachment_context or ""
+    from agentcore.documents.path_rules import (
+        attachment_rel_paths,
+        path_rules_note_for_paths,
+    )
+
+    path_note = path_rules_note_for_paths(
+        rule_view.path_rules, attachment_rel_paths(attachments)
+    )
+    if path_note:
+        attachment_context = (
+            f"{attachment_context}\n{path_note}" if attachment_context else path_note
+        )
     # Workers hold no CEO hints; frozen system is shared base + ``<按需目录>``.
     # Date / workspace / attachments ride ``worker_envelope`` (opening user).
     worker_base_prompt = compose_worker_base_prompt(
@@ -524,6 +537,7 @@ async def prepare_fresh_turn(
         folder_local_root_id=folder_local_root_id,
         folder_local_subpath=folder_local_subpath or None,
         on_file_landed=invalidate_verify_cache_for_execution,
+        path_rules=rule_view.path_rules,
     )
     if auto_desk_folder_id:
         base_tool_context.turn_target_desk.note_folder(auto_desk_folder_id)

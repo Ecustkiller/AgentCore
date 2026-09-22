@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
+
 /**
- * 终稿路径可点必须接到时间线：多 Agent / 有 process 的回合不走 AssistantMessage
- * 的无 process Markdown 分支。
+ * 时间线正文与气泡正文同一套排版：路径不因「像文件」变成可点蓝链。
  */
 import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
 import type { ProcessStep } from "@/types/events";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/stores/disclosure", () => ({
@@ -19,11 +19,7 @@ const emptyCards = {
   checkpoints: [] as never[],
 };
 
-function renderTimeline(
-  process: ProcessStep[],
-  fallbackContent: string,
-  onOpen: (path: string) => void,
-) {
+function renderTimeline(process: ProcessStep[], fallbackContent: string) {
   return render(
     <ProcessTimeline
       process={process}
@@ -32,15 +28,13 @@ function renderTimeline(
       composingTool={null}
       fallbackContent={fallbackContent}
       conversationId="c1"
-      onOpenWorkspacePath={onOpen}
       {...emptyCards}
     />,
   );
 }
 
-describe("ProcessTimeline workspace paths", () => {
-  it("opens a content-step path when the opener is wired", () => {
-    const onOpen = vi.fn();
+describe("ProcessTimeline body paths", () => {
+  it("leaves a content-step path as text", () => {
     renderTimeline(
       [
         {
@@ -49,22 +43,15 @@ describe("ProcessTimeline workspace paths", () => {
         },
       ],
       "",
-      onOpen,
     );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "打开 AgentCore/文档/工作稿/白板PRD.md",
-      }),
-    );
-    expect(onOpen).toHaveBeenCalledWith("AgentCore/文档/工作稿/白板PRD.md");
+    expect(screen.queryByRole("button", { name: /打开 / })).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(document.body.textContent).toContain("白板PRD.md");
   });
 
-  it("opens a fallbackContent path when there is no content step", () => {
-    const onOpen = vi.fn();
-    renderTimeline([], "见 `src/auth/login.ts`", onOpen);
-    fireEvent.click(
-      screen.getByRole("button", { name: "打开 src/auth/login.ts" }),
-    );
-    expect(onOpen).toHaveBeenCalledWith("src/auth/login.ts");
+  it("keeps a fallbackContent code path as code", () => {
+    renderTimeline([], "见 `src/auth/login.ts`");
+    expect(screen.getByText("src/auth/login.ts").tagName).toBe("CODE");
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

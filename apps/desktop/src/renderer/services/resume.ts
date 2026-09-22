@@ -89,7 +89,7 @@ function hydrateSidecarQueuedTurns(
         interjectionId: item.interjectionId,
         degradedFrom:
           item.degradedFrom === "steer" ? "steer" : prev?.degradedFrom,
-        messageId: prev?.messageId,
+        messageId: item.userMessageId || prev?.messageId,
         attachments: item.attachments?.length
           ? item.attachments.map((a) => ({
               name: a.name,

@@ -524,6 +524,8 @@ class ToolContext:
     # to birth ``folder_id`` / sidebar / memory. When set, CEO file tools + overview
     # sit on this Folder while affiliation stays 裸聊. Never auto-promote.
     auto_desk_folder_id: str | None = None
+    # Bounded path rules for this desk. Full bodies attach on a real path.
+    path_rules: tuple[Any, ...] = ()
 
     @classmethod
     def create(

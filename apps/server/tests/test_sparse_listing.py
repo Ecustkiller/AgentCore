@@ -21,7 +21,6 @@ from agentcore.workspace._paths import (
 from agentcore.workspace.server import ServerWorkspace
 from agentcore.workspace.sparse_listing import (
     collect_turn_material_paths,
-    format_remaining_summary,
     is_ai_list_hidden_file,
     is_attachment_path,
     partition_sparse_paths,
@@ -161,7 +160,6 @@ def test_partition_project_keeps_attachments_and_collapses_rest():
     )
     assert rows == [("attachments/x.md", "附件·含历轮")]
     assert remaining == 8
-    assert "file_list" in format_remaining_summary(remaining)
 
 
 def test_is_attachment_path():

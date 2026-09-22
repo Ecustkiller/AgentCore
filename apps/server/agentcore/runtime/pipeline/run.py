@@ -8,13 +8,14 @@ import time
 
 from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.logging import get_logger
-from agentcore.core.types import PermissionAxes, new_id
+from agentcore.core.types import WorkspaceBoundary, new_id
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles as ProfileSet
 from agentcore.llm.profiles import turn_profiles_for_turn
 from agentcore.memory import default_memory_store  # noqa: F401 — test seam
 from agentcore.runtime.audit.hooks import bind_recorder
 from agentcore.runtime.events import EventSink, message_start
+from agentcore.runtime.events.chat import reused_user_row_from_events
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import (
     TurnFactLog,
@@ -66,7 +67,7 @@ async def run_chat_pipeline(
     table_selection: list[str] | None = None,
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
-    permission_axes: PermissionAxes | None = None,
+    permission_axes: WorkspaceBoundary | None = None,
     profile_set: ProfileSet | None = None,
     llm_credentials: LLMCredentials | None = None,
     session_saver: SessionSaver | None = None,
@@ -292,7 +293,15 @@ async def run_chat_pipeline(
         chat_envelope = assembled.chat_envelope
 
         # --- Phase 3: Execute ---
-        sink.emit(message_start(message_id, conversation_id=conversation_id))
+        # Queue drain already recorded turn_queue_started on this sink. Idle / resume
+        # sinks have no such frame, so the head stays bare and is not a dequeue.
+        sink.emit(
+            message_start(
+                message_id,
+                conversation_id=conversation_id,
+                **reused_user_row_from_events(sink.history_snapshot()),
+            )
+        )
 
         from agentcore.runtime.captain_profile import apply_captain_max_rounds
 

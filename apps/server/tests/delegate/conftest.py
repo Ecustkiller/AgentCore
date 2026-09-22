@@ -303,7 +303,7 @@ def tool_durable(
 ):
     # Pin CAUTIOUS: keeps command=ask / file_write=ask for approval-path tests.
     # (DEFAULT 少打断 now uses team_kickoff=rules and would also show the card.)
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     return DelegateTool(
         llm=provider,
@@ -323,7 +323,7 @@ def tool_durable(
         suspension_deleter=deleter,
         captain_run_id="CEO",
         folder_id=folder_id,
-        permission_axes=recipe_to_axes(AutonomyPolicy.CAUTIOUS),
+        permission_axes=WorkspaceBoundary.FOLDER,
     )
 
 

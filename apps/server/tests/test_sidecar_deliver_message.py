@@ -473,6 +473,47 @@ async def test_list_and_cancel_queued_turn_rpc(tmp_path):
         turn_queue.clear(cid)
 
 
+async def test_edit_queued_turn_rpc_updates_content(tmp_path):
+    lines, write_line = _recorder()
+    server = SidecarServer(write_line)
+    await _init_sidecar(server, tmp_path)
+    cid = "c-sidecar-edit"
+    turn_queue.clear(cid)
+    item = new_queued_turn(content="旧句子", user_id="u")
+    turn_queue.enqueue(cid, item)
+    try:
+        await server.handle_line(
+            _req(
+                2,
+                "editQueuedTurn",
+                {"conversationId": cid, "queueId": item.queue_id, "content": "新句子"},
+            )
+        )
+        assert _reply(lines, 2)["result"]["ok"] is True
+        assert turn_queue.find_pending(cid, item.queue_id).content == "新句子"
+
+        await server.handle_line(
+            _req(
+                3,
+                "editQueuedTurn",
+                {"conversationId": cid, "queueId": item.queue_id, "content": "  "},
+            )
+        )
+        assert _reply(lines, 3)["error"]["code"] != 0
+        assert turn_queue.find_pending(cid, item.queue_id).content == "新句子"
+
+        await server.handle_line(
+            _req(
+                4,
+                "editQueuedTurn",
+                {"conversationId": cid, "queueId": "missing", "content": "另一句"},
+            )
+        )
+        assert _reply(lines, 4)["error"]["code"] == QUEUED_TURN_NOT_FOUND
+    finally:
+        turn_queue.clear(cid)
+
+
 async def test_sidecar_queue_id_emits_started_with_content(tmp_path, monkeypatch):
     """Sidecar dequeue path: ``turn_queue_started`` carries item content (入场帧)."""
     lines, write_line = _recorder()
@@ -518,6 +559,10 @@ async def test_sidecar_queue_id_emits_started_with_content(tmp_path, monkeypatch
         assert first["type"] == "turn_queue_started"
         assert first["payload"]["queue_id"] == "q-side"
         assert first["payload"]["content"] == "next"
+        assert (
+            first["payload"]["user_message_id"]
+            == "11111111-1111-4111-8111-111111111111"
+        )
         assert first["payload"]["attachments"] == [att]
         assert first["payload"]["agent_mentions"] == [
             {"agent_id": "a1", "role": "研究员"}

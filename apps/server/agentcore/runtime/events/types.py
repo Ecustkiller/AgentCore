@@ -119,9 +119,10 @@ class EventType(StrEnum):
     # 同对话 FIFO 排队（D9 · 发送即有流）：in-flight 时 POST …/messages 立即在响应 SSE 上
     # 发射；队列 drain 启动该回合后**同一连接**续流。EPHEMERAL——传输态排队提示，不落 journal。
     TURN_QUEUED = "turn_queued"
-    # 同对话 FIFO 出队开跑（D9）：pop_next 之后、stream_chat 之前，作为**新回合 EventSink 首帧**
-    #（先于 message_start）。自描述时间线入场（正文在帧上）；客户端据此清 queue_id 轻态并插用户泡。
-    # EPHEMERAL——不落 journal；reload 靠 REST。禁靠 message_start 猜出队。
+    # 同对话 FIFO 出队开跑（D9）：pop_next 之后、stream_chat 之前，作为新回合 EventSink 首帧
+    #（先于 message_start）。已经拿到该帧的连接提前插入同一用户行。入场权威是段首
+    # message_start 点名（仅这次开跑复用已落库用户行时）；裸 message_start 不得清条。
+    # EPHEMERAL——不落 journal；reload 靠 REST。
     TURN_QUEUE_STARTED = "turn_queue_started"
     # 同对话排队项取消（同对话再发 P0）：POST …/queued-turns/{queue_id}/cancel 成功后发射；
     # 多端清 UI。EPHEMERAL——不落 journal。

@@ -54,6 +54,34 @@ async def persist_midflight_user_message(
     return pinned
 
 
+async def update_midflight_user_message(
+    *,
+    conversation_id: str,
+    user_message_id: str | None,
+    content: str,
+    attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
+) -> bool:
+    """Rewrite a queued user row in place. Missing row → False (do not invent one)."""
+    mid = (user_message_id or "").strip()
+    if not is_uuid_id(mid):
+        return False
+    stored_mentions = to_stored_agent_mentions(agent_mentions)
+    stored_atts = to_stored_metadata(attachments or [])
+    async with async_session_factory() as session:
+        repo = MessageRepository(session)
+        existing = await repo.get_by_id(mid, conversation_id=conversation_id)
+        if existing is None or getattr(existing, "role", None) != "user":
+            return False
+        await repo.update_content(
+            mid,
+            content,
+            attachments=stored_atts,
+            agent_mentions=stored_mentions or [],
+        )
+    return True
+
+
 async def delete_midflight_user_message(
     conversation_id: str, user_message_id: str | None
 ) -> bool:

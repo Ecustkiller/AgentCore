@@ -25,6 +25,7 @@ describe("formatSupportDiagnosticText", () => {
         `trace_id: ${trace}`,
         "execution_id: exec-1",
         `uv run python scripts/log_timeline.py --trace ${trace}`,
+        "只执行上面这一条。",
       ].join("\n"),
     );
   });
@@ -43,6 +44,7 @@ describe("formatSupportDiagnosticText", () => {
         "message_id: msg-1",
         "execution_id: exec-1",
         "uv run python scripts/log_timeline.py conv-1",
+        "只执行上面这一条。",
       ].join("\n"),
     );
   });
@@ -95,6 +97,7 @@ describe("formatSupportDiagnosticText", () => {
         "base_url: https://api.zdc.mom",
         "stream: true",
         "uv run python scripts/log_timeline.py conv-1",
+        "只执行上面这一条。",
       ].join("\n"),
     );
   });
@@ -130,6 +133,7 @@ describe("formatSupportDiagnosticText", () => {
         "user_message_id: user-persisted",
         "message_id: asst-client-uuid",
         "uv run python scripts/log_timeline.py conv-1",
+        "只执行上面这一条。",
       ].join("\n"),
     );
   });
@@ -163,6 +167,7 @@ describe("formatSupportDiagnosticText", () => {
         "upstream_status: 400",
         'upstream_body_preview: {"error":{"message":"Invalid schema for function x"}}',
         "uv run python scripts/log_timeline.py conv-1",
+        "只执行上面这一条。",
       ].join("\n"),
     );
   });

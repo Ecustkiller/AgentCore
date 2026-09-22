@@ -46,7 +46,7 @@ export type PromptCatalogItem =
       description: string;
       content: string;
       version: string;
-      applyMode: "always" | "on_demand";
+      applyMode: "always" | "on_demand" | "paths";
       aiMaintained: boolean;
       listable: boolean;
       disputed: boolean;
@@ -198,7 +198,7 @@ export interface AccountScopeEntry {
   id: string;
   name: string;
   description: string;
-  applyMode: "always" | "on_demand";
+  applyMode: "always" | "on_demand" | "paths";
   aiMaintained: boolean;
   disputedAt: string | null;
   alwaysChars: number | null;
@@ -211,7 +211,7 @@ export interface MineCatalogRow {
   description: string;
   content: string;
   version: string;
-  applyMode: "always" | "on_demand";
+  applyMode: "always" | "on_demand" | "paths";
   aiMaintained: boolean;
   listable: boolean;
   disputed: boolean;
@@ -226,7 +226,7 @@ function displayName(name: string): string {
 }
 
 function isListableEntry(entry: {
-  applyMode: "always" | "on_demand";
+  applyMode: "always" | "on_demand" | "paths";
   aiMaintained: boolean;
   disputed: boolean;
 }): boolean {
@@ -329,6 +329,8 @@ export interface PromptRail {
   constitution: PromptCatalogItem[];
   /** User-written always files; dragging to 按需 turns them on-demand. */
   alwaysMine: PromptCatalogItem[];
+  /** Bounded path rules. Not a 按需 folder and not a drop target. */
+  pathMine: PromptCatalogItem[];
   folders: PromptRailFolder[];
   official: PromptCatalogItem[];
   /** Factory tools stay on the rail for flatten/read; 官方栏「工具」铺 CatalogTile. */
@@ -355,6 +357,7 @@ export function onDemandDropFolder(rail: PromptRail): PromptRailFolder {
 export function flattenPromptRail(rail: PromptRail): PromptCatalogItem[] {
   return [
     ...promptRailAlways(rail),
+    ...rail.pathMine,
     ...rail.folders.flatMap((folder) => folder.items),
     ...rail.official,
     ...rail.tools,
@@ -384,7 +387,10 @@ export function buildPromptRail(
   const alwaysMine = visible
     .filter((row) => row.applyMode === "always")
     .map(toMineCatalogItem);
-  const onDemandMine = visible.filter((row) => row.applyMode !== "always");
+  const pathMine = visible
+    .filter((row) => row.applyMode === "paths")
+    .map(toMineCatalogItem);
+  const onDemandMine = visible.filter((row) => row.applyMode === "on_demand");
 
   const official: PromptCatalogItem[] = skills
     .filter(
@@ -442,6 +448,7 @@ export function buildPromptRail(
   return {
     constitution: standing,
     alwaysMine,
+    pathMine,
     folders: result,
     official,
     tools,

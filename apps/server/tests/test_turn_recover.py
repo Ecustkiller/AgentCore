@@ -1293,6 +1293,7 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
     from agentcore.conversation import crash_delegate as crash_mod
     from agentcore.conversation.crash_delegate import production_crash_delegate_factory
     from agentcore.runtime.facts import FactKind
+    from agentcore.memory.rules_injection import TurnRuleView
     from agentcore.runtime.resolve.prompt import rebuild as rebuild_mod
 
     captured: dict = {}
@@ -1355,7 +1356,7 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
         crash_mod, "suspension_callbacks", lambda: (AsyncMock(), AsyncMock())
     )
     monkeypatch.setattr(
-        rebuild_mod, "assemble_turn_rules", AsyncMock(return_value="")
+        rebuild_mod, "load_turn_rule_view", AsyncMock(return_value=TurnRuleView())
     )
     monkeypatch.setattr(
         rebuild_mod, "resolve_exec_languages", AsyncMock(return_value=())
@@ -1388,8 +1389,8 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
     prompt = captured["base_system_prompt"]
     assert "<按需目录>" in prompt
     # Worker catalog: 队员干活手册留下；主管手册与 product_help 都不列。
-    assert "- page_ui：" in prompt
-    assert "- product_help" not in prompt
+    assert 'consult("page_ui")' in prompt
+    assert "product_help" not in prompt
 
 
 async def test_orphan_turn_lease_keeps_row_for_sweeper(monkeypatch):

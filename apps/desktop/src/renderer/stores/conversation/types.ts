@@ -39,11 +39,9 @@ export interface Conversation {
   localRootId?: string | null;
   pinned?: boolean;
   archived?: boolean;
-  /** Session permission axes (file_write / command / host). */
+  /** Conversation boundary: read | folder | computer. */
   permissionAxes?: {
-    file_write: "ask" | "session";
-    command: "ask" | "auto";
-    host: "off" | "ask" | "session";
+    boundary: "read" | "folder" | "computer";
   };
   /**
    * 会话级模型组合 id：非空即本会话使用的组合（新建拍快照；改组合定义下一 turn 生效）。
@@ -180,7 +178,7 @@ export interface Message {
   durationMs?: number;
   /**
    * 各次 LLM 吐字时长之和 (ms)：live 自 message_end.generation_ms；
-   * 重载自 MessageDetail.generation_ms。缺省 = 旧记录，不在「更多」里编速度。
+   * 重载自 MessageDetail.generation_ms。缺省 = 旧记录，不在「用量」里编速度。
    */
   generationMs?: number;
   finishReason?: string;
@@ -224,10 +222,6 @@ export interface Message {
       retry_after?: number | null;
     };
   };
-  /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction rating on this assistant
-   * reply — `"up"` / `"down"`, or `null` / undefined for 未评价. Persisted (messages.feedback
-   * column) so a reloaded bubble replays the rating; toggled via the footer thumbs. */
-  feedback?: "up" | "down" | null;
   traceId?: string;
   /** Preflight soft gate when the configured model may lack tool calling (turn_warning SSE). */
   turnWarning?: string;

@@ -206,7 +206,7 @@ export function Sidebar({
                   active={active}
                   aria-label={item.label}
                   onClick={() => goNav(item.route)}
-                  className="relative h-8 justify-center px-0 font-medium"
+                  className="touch-row relative h-8 justify-center px-0 font-medium"
                 >
                   <item.icon size={16} className="shrink-0" />
                   {showBadge && (
@@ -224,9 +224,9 @@ export function Sidebar({
               key={item.route}
               active={active}
               onClick={() => goNav(item.route)}
-              // 与下方列表同高（h-8）——整条侧栏一个 34px 节奏；导航的层级由分隔线 +
-              // font-medium + 图标承担，不再靠行高撑。
-              className="relative h-8 font-medium"
+              // 宽屏与对话行同高（h-8）。窄屏 / 粗指针用 touch-row 抬到 44px，
+              // 与对话行同一热区；层级仍靠分隔线 + font-medium + 图标。
+              className="touch-row relative h-8 font-medium"
             >
               <item.icon size={16} className="shrink-0" />
               <span>{item.label}</span>

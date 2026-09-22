@@ -256,17 +256,8 @@ def _missing_tool_feedback(
 
     from agentcore.runtime.resolve.ceo_surface import COORDINATION_GATED_TOOLS
 
-    # 协调闸内工具（至少 wait）：未装配时勿 fuzzy 成 git 等无关工具。
+    # 协调闸内工具未装配时勿 fuzzy 成无关工具。
     if missing in COORDINATION_GATED_TOOLS:
-        if missing == "wait":
-            return (
-                (
-                    f"工具 '{missing}' 当前未装配到工具面。"
-                    "若团队协调已启动：请空响应等待下一批事件，勿改调其他工具占位。"
-                ),
-                "not_found",
-                False,
-            )
         return (
             (
                 f"工具 '{missing}' 当前未装配到工具面（仅协调期提供）。"

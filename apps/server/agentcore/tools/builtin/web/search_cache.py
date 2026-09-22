@@ -1,6 +1,6 @@
 """Conversation-scoped web_search result cache (案例1 #5: 检索去重 / 共享检索缓存).
 
-``web_search`` hits the network (SearXNG, or Tavily on fallback) on every call.
+``web_search`` hits the network (SearXNG) on every call.
 Within ONE conversation a research team — the CEO plus its delegated workers, which
 all share the conversation_id — frequently re-issues the SAME query: duplicate
 searches across parallel workers and across ReAct rounds, especially when a degraded

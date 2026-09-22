@@ -28,6 +28,6 @@ async def maybe_auto_grant_before_workers(
     if (
         local_gate
         and tool._approval_gate is not None
-        and axes.auto_executes
+        and axes.allows_execution
     ):
         tool._auto_grant_pending = True  # type: ignore[attr-defined]

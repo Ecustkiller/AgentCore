@@ -403,6 +403,9 @@ class UserInterjectionPayload(WirePayload):
     note: str | None = absent()
     attachments: list[UserInterjectionAttachment] | None = absent()
     agent_mentions: list[UserInterjectionAgentMention] | None = absent()
+    # Persisted user-row id. While status is ``received``, the timeline holds
+    # this row back (the waiting chip is the surface). Absent on older frames.
+    user_message_id: str | None = absent()
 
 
 class TurnQueuedPayload(WirePayload):
@@ -410,8 +413,10 @@ class TurnQueuedPayload(WirePayload):
 
     Replaces the retired HTTP 202 ``SendMessageQueuedResponse`` JSON. Same visibility
     fields; the waiting connection later continues with the drained turn on this stream.
-    ``degraded_from=steer`` when the client asked for steer but soft-insert was
-    unavailable (无 live accepting 窗口 / 回合已收口；协调插话路径不会带此字段).
+    ``degraded_from=steer`` when an accepted classic steer missed the next tool
+    step and was promoted at turn close. A steer that never entered the
+    accepting window is a normal queue and does not carry this field.
+    Coordination interjections do not set it.
     """
 
     queue_id: str
@@ -447,19 +452,22 @@ class AgentMention(WirePayload):
 
 
 class TurnQueueStartedPayload(WirePayload):
-    """FIFO dequeue → timeline user-bubble entrance (D9 · 发送即有流).
+    """FIFO dequeue, early timeline insert for connections that already have this frame.
 
     Emitted as the **first frame** of the drained turn's EventSink (after ``pop_next``,
-    before ``stream_chat`` / ``message_start``). ``content`` is the queued user text
-    (on the frame — not persist-first). Empty ``attachments`` / ``agent_mentions`` are
-    absent. ``remaining_depth`` is the queue length after this item left the FIFO.
-    EPHEMERAL — reload 靠 REST; 不落 journal.
+    before ``stream_chat`` / ``message_start``). ``content`` is the queued user text.
+    ``user_message_id`` is the persisted user row (same id as the queue snapshot).
+    The entrance authority is the same binding copied onto that turn's ``message_start``;
+    this frame is the early same insert, not a signal followers must replay.
+    Empty ``attachments`` / ``agent_mentions`` are absent. ``remaining_depth`` is the
+    queue length after this item left the FIFO. EPHEMERAL — reload 靠 REST; 不落 journal.
     """
 
     queue_id: str
     conversation_id: str
     remaining_depth: int
     content: str
+    user_message_id: str | None = absent()
     attachments: list[MessageAttachment] | None = absent()
     agent_mentions: list[AgentMention] | None = absent()
 

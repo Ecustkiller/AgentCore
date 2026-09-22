@@ -132,7 +132,7 @@ export function WorkspaceGroups({
                         });
                         onActivate?.();
                       }}
-                      className="h-8 px-2 text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground"
+                      className="h-8 px-2 text-xs text-sidebar-muted hover:text-sidebar-foreground"
                     >
                       <MoreHorizontal size={13} className="shrink-0" />
                       更多（{overflow}）
@@ -145,7 +145,7 @@ export function WorkspaceGroups({
         })}
         {sharedGroups.length > 0 && (
           <>
-            <div className="px-2 pb-0.5 pt-2 text-xs font-medium tracking-wide text-sidebar-foreground/40">
+            <div className="px-2 pb-0.5 pt-2 text-xs font-medium tracking-wide text-sidebar-muted">
               与我共享
             </div>
             {sharedGroups.map(({ folder, convs }) => {
@@ -187,7 +187,7 @@ export function WorkspaceGroups({
                             });
                             onActivate?.();
                           }}
-                          className="h-8 px-2 text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground"
+                          className="h-8 px-2 text-xs text-sidebar-muted hover:text-sidebar-foreground"
                         >
                           <MoreHorizontal size={13} className="shrink-0" />
                           更多（{overflow}）

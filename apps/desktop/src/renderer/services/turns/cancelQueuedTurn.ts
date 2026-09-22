@@ -1,5 +1,9 @@
 import { getConversations } from "@/hooks/useConversations";
 import { ApiError, api } from "@/services/api";
+import type {
+  OutgoingAgentMention,
+  OutgoingAttachment,
+} from "@/services/streamConversation";
 import {
   getActiveSidecarTarget,
   getLastSidecarTarget,
@@ -8,7 +12,6 @@ import {
 import { ignoresCloudTurnActivity } from "@/stores/aiTurnActivity";
 import { useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
-import { sendMidFlightMessage } from "./midFlight";
 import { clearQueuedTurnLocally } from "./queuedTurnLocal";
 
 export {
@@ -16,8 +19,11 @@ export {
   insertQueuedTurnUserBubble,
 } from "./queuedTurnLocal";
 
-/** cancel HTTP / sidecar RPC 结果：成功才可 steer 重发；404 仅清条。 */
+/** cancel HTTP / sidecar RPC 结果：成功才删泡；404 仅清条。 */
 export type CancelQueuedTurnOutcome = "cancelled" | "already_gone";
+
+/** 保存排队编辑：成功才留新正文；已开跑则回滚本地条。 */
+export type EditQueuedTurnOutcome = "saved" | "already_gone";
 
 function keepsLocalQueue(conversationId: string): boolean {
   const via =
@@ -58,10 +64,10 @@ function isSidecarQueueNotFound(err: unknown): boolean {
 /**
  * 按项取消 FIFO 排队。sidecar live（或本机队）走 RPC；否则
  * ``POST …/queued-turns/{queue_id}/cancel``。
- * 成功或 404 / ``not_found``（已不在队）→ 立刻本地清条。
+ * 成功 → 清条并删泡。404 / ``not_found``（已开跑）→ 只清条，不删泡。
  *
- * @returns ``cancelled`` = 确认取消（可 steer 重发）；
- *          ``already_gone`` = 竞态/已出队（只清条、勿重发）。
+ * @returns ``cancelled`` = 确认取消（并删泡）；
+ *          ``already_gone`` = 竞态/已出队（只清条、勿删泡）。
  */
 export async function cancelQueuedTurn(
   conversationId: string,
@@ -79,11 +85,15 @@ export async function cancelQueuedTurn(
         conversationId,
         queueId,
       });
-      clearQueuedTurnLocally(conversationId, queueId);
-      return ack.status === "not_found" ? "already_gone" : "cancelled";
+      const outcome: CancelQueuedTurnOutcome =
+        ack.status === "not_found" ? "already_gone" : "cancelled";
+      clearQueuedTurnLocally(conversationId, queueId, {
+        dropBubble: outcome === "cancelled",
+      });
+      return outcome;
     } catch (err) {
       if (isSidecarQueueNotFound(err)) {
-        clearQueuedTurnLocally(conversationId, queueId);
+        clearQueuedTurnLocally(conversationId, queueId, { dropBubble: false });
         return "already_gone";
       }
       throw err;
@@ -99,44 +109,162 @@ export async function cancelQueuedTurn(
     return "cancelled";
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
-      clearQueuedTurnLocally(conversationId, queueId);
+      clearQueuedTurnLocally(conversationId, queueId, { dropBubble: false });
       return "already_gone";
     }
     throw err;
   }
 }
 
+function snapshotQueue(conversationId: string) {
+  return useQueuedTurnsStore.getState().list(conversationId).map((entry) => ({
+    ...entry,
+  }));
+}
+
+function restoreQueue(
+  conversationId: string,
+  prev: ReturnType<typeof snapshotQueue>,
+): void {
+  useQueuedTurnsStore
+    .getState()
+    .replaceConversation(conversationId, prev);
+}
+
 /**
- * 排队项「立刻插队」：取消该项 + 同内容 ``delivery=steer`` 重发。
- * 仅 cancel 确认为 ``cancelled`` 时重发；404/已出队只清条。
- * steer 降级回排队由 midFlight + messageStream toast 呈现，此处不伪装「已插入」。
+ * 拖动改 FIFO。先改本地顺序，失败再回滚。id 列表必须是当前集合。
  */
-export async function steerQueuedTurn(
+export async function reorderQueuedTurns(
+  conversationId: string,
+  queueIds: string[],
+): Promise<void> {
+  const prev = snapshotQueue(conversationId);
+  useQueuedTurnsStore.getState().reorder(conversationId, queueIds);
+  try {
+    if (routesQueuedTurnToSidecar(conversationId)) {
+      const target = await resolveSidecarQueueTarget(conversationId);
+      if (!target) throw new Error("本地引擎未运行，无法调整排队顺序");
+      await window.sidecarApi.reorderQueuedTurns({
+        rootId: target.rootId,
+        subpath: target.subpath,
+        conversationId,
+        queueIds,
+      });
+      return;
+    }
+    await api.post(
+      `/v1/conversations/${conversationId}/queued-turns/reorder`,
+      { queue_ids: queueIds },
+    );
+  } catch (err) {
+    restoreQueue(conversationId, prev);
+    throw err;
+  }
+}
+
+/**
+ * 停止并发送：该条放到队首，再硬停当前回合。后面的排队留着。
+ */
+export async function stopAndSendQueuedTurn(
   conversationId: string,
   queueId: string,
 ): Promise<void> {
-  const entry = useQueuedTurnsStore
+  const prev = snapshotQueue(conversationId);
+  const ids = prev.map((entry) => entry.queueId);
+  if (!ids.includes(queueId)) return;
+  useQueuedTurnsStore
     .getState()
-    .list(conversationId)
-    .find((e) => e.queueId === queueId);
-  if (!entry) return;
+    .reorder(conversationId, [
+      queueId,
+      ...ids.filter((id) => id !== queueId),
+    ]);
+  try {
+    if (routesQueuedTurnToSidecar(conversationId)) {
+      const target = await resolveSidecarQueueTarget(conversationId);
+      if (!target) throw new Error("本地引擎未运行，无法停止并发送");
+      await window.sidecarApi.stopAndSendQueuedTurn({
+        rootId: target.rootId,
+        subpath: target.subpath,
+        conversationId,
+        queueId,
+      });
+      return;
+    }
+    await api.post(
+      `/v1/conversations/${conversationId}/queued-turns/${queueId}/stop-and-send`,
+      {},
+    );
+  } catch (err) {
+    restoreQueue(conversationId, prev);
+    throw err;
+  }
+}
 
-  const { content } = entry;
-  // 浅拷贝快照里的已收口载荷，保留 ``workspace_path`` 等驻留引用，不另造路径。
-  const attachments = entry.attachments?.length
-    ? entry.attachments.map((a) => ({ ...a }))
-    : undefined;
-  const agentMentions = entry.agentMentions?.length
-    ? entry.agentMentions.map((a) => ({ ...a }))
-    : undefined;
-  const outcome = await cancelQueuedTurn(conversationId, queueId);
-  if (outcome !== "cancelled") return;
+/**
+ * 就地改正文、附件、@。先改本地条，失败再回滚。
+ * 404 / ``not_found``（已开跑）回滚本地条并返回 ``already_gone``，不另排一条。
+ */
+export async function editQueuedTurn(
+  conversationId: string,
+  queueId: string,
+  payload: {
+    content: string;
+    attachments: OutgoingAttachment[];
+    agentMentions: OutgoingAgentMention[];
+  },
+): Promise<EditQueuedTurnOutcome> {
+  const previous = useQueuedTurnsStore
+    .getState()
+    .patchPayload(conversationId, queueId, {
+      content: payload.content,
+      attachments: payload.attachments,
+      agentMentions: payload.agentMentions,
+    });
+  if (!previous) return "already_gone";
 
-  await sendMidFlightMessage(
-    conversationId,
-    content,
-    attachments,
-    "steer",
-    agentMentions,
-  );
+  const restore = () => {
+    useQueuedTurnsStore.getState().patchPayload(conversationId, queueId, {
+      content: previous.content,
+      attachments: previous.attachments,
+      agentMentions: previous.agentMentions,
+    });
+  };
+
+  try {
+    if (routesQueuedTurnToSidecar(conversationId)) {
+      const target = await resolveSidecarQueueTarget(conversationId);
+      if (!target) throw new Error("本地引擎未运行，无法修改排队");
+      const ack = await window.sidecarApi.editQueuedTurn({
+        rootId: target.rootId,
+        subpath: target.subpath,
+        conversationId,
+        queueId,
+        content: payload.content,
+        ...(payload.attachments.length > 0
+          ? { attachments: payload.attachments }
+          : {}),
+        ...(payload.agentMentions.length > 0
+          ? { agentMentions: payload.agentMentions }
+          : {}),
+      });
+      if (ack.status === "not_found") {
+        restore();
+        return "already_gone";
+      }
+      return "saved";
+    }
+    await api.post(
+      `/v1/conversations/${conversationId}/queued-turns/${queueId}/edit`,
+      {
+        content: payload.content,
+        attachments: payload.attachments,
+        agent_mentions: payload.agentMentions,
+      },
+    );
+    return "saved";
+  } catch (err) {
+    restore();
+    if (isSidecarQueueNotFound(err)) return "already_gone";
+    throw err;
+  }
 }

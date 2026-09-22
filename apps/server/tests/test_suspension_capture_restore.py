@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import TurnFactLog, TurnStartedFact, current_fact_log
@@ -371,7 +371,7 @@ async def test_resume_chat_does_not_restore_after_settlement_on_error() -> None:
         patch.object(
             turns_mod,
             "resolve_permission_axes",
-            AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+            AsyncMock(return_value=WorkspaceBoundary.FOLDER),
         ),
         patch.object(turns_mod, "load_chat_context", AsyncMock(return_value=[])),
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
@@ -427,7 +427,7 @@ async def test_resume_chat_does_not_restore_on_success() -> None:
         patch.object(
             turns_mod,
             "resolve_permission_axes",
-            AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+            AsyncMock(return_value=WorkspaceBoundary.FOLDER),
         ),
         patch.object(turns_mod, "load_chat_context", AsyncMock(return_value=[])),
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),
@@ -507,7 +507,7 @@ async def test_resume_chat_does_not_restore_after_settlement_on_cancel() -> None
         patch.object(
             turns_mod,
             "resolve_permission_axes",
-            AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+            AsyncMock(return_value=WorkspaceBoundary.FOLDER),
         ),
         patch.object(turns_mod, "load_chat_context", AsyncMock(return_value=[])),
         patch.object(turns_mod, "build_turn_backend", return_value=MagicMock()),

@@ -78,7 +78,6 @@ const TOOL_LABEL: Record<string, string> = {
   cancel_worker: "Cancel worker",
   resolve_escalation: "Resolve escalate",
   queue_user_message: "Queue message",
-  wait: "Wait",
   handoff: "Handoff",
   docs_read: "Read doc",
   docs_write: "Write doc",
@@ -186,8 +185,6 @@ function gitExportDetail(args: Record<string, unknown>): string {
 }
 
 function toolDetail(args: Record<string, unknown>, toolName?: string): string {
-  // WaitTool.reason 仅记日志，复制稿同样不摆。
-  if (toolName === "wait") return "";
   if (toolName === "browser") {
     const browser = browserExportDetail(args);
     if (browser) return browser;

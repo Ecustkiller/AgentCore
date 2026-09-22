@@ -65,7 +65,7 @@ vi.mock("@/services/turns", () => ({ runRegenerate: vi.fn() }));
 vi.mock("../AssistantMessageFooter", () => ({
   AssistantMessageFooter: () => <div data-testid="assistant-footer" />,
   AssistantMessageMetaSummary: () => null,
-  MessageMoreMenu: () => null,
+  AssistantTurnInspect: () => null,
 }));
 
 vi.mock("@/components/chat/Markdown", () => ({

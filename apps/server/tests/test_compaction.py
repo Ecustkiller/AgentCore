@@ -24,24 +24,59 @@ from agentcore.conversation.compaction import (
     _summarize,
     _truncate_head_tail,
 )
+from agentcore.conversation.compact_prompt import (
+    IDENTITY_LEDGER_FENCE,
+    attach_identity_ledger,
+    render_identity_ledger,
+    strip_identity_ledger,
+)
 from agentcore.conversation.history import _summary_block
 from agentcore.llm import LLMMessage, LLMRequest, LLMResponse
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 
 
-def _msg(role: str, content: str, created_at: int = 0) -> SimpleNamespace:
+def _msg(role: str, content: str, created_at: int = 0, *, id: str | None = None) -> SimpleNamespace:
     """A Message stand-in: the compaction helpers only read role/content/created_at."""
-    return SimpleNamespace(role=role, content=content, created_at=created_at)
+    return SimpleNamespace(role=role, content=content, created_at=created_at, id=id)
+
+
+def _token_blob(tokens: int) -> str:
+    """ASCII blob whose ``estimate_text_tokens`` is exactly ``tokens`` (``(n+3)//4``)."""
+    return "x" * (4 * tokens)
+
+
+def _budget_turns(*turn_tokens: int) -> list[SimpleNamespace]:
+    """Alternating user/assistant turns whose combined estimate equals each ``turn_tokens``."""
+    batch: list[SimpleNamespace] = []
+    created = 0
+    for i, total in enumerate(turn_tokens):
+        user_tokens = max(1, total // 2)
+        asst_tokens = max(1, total - user_tokens)
+        batch.append(_msg("user", _token_blob(user_tokens), created, id=f"u{i}"))
+        created += 1
+        batch.append(_msg("assistant", _token_blob(asst_tokens), created, id=f"a{i}"))
+        created += 1
+    return batch
 
 
 # --- _select_fold (the fold-vs-keep decision, pure) ---
 
 
-def test_select_fold_keeps_recency_window():
-    batch = [_msg("user", f"m{i}", i) for i in range(30)]
-    fold = _select_fold(batch, recency=20, min_fold=4)
-    # 30 − 20 = 10 oldest fold; the newest 20 stay verbatim.
-    assert [m.content for m in fold] == [f"m{i}" for i in range(10)]
+def test_select_fold_noop_when_within_token_budget():
+    """Newest-back packing that fits the retain budget does not fold."""
+    batch = _budget_turns(3_000, 3_000, 3_000, 3_000)  # 12k < 24k
+    assert _select_fold(batch, token_budget=24_000, min_fold=4) == []
+
+
+def test_select_fold_folds_beyond_token_budget():
+    """Turns older than the packed 24k keep window fold; count 12 is not retain."""
+    # Four 12k turns: keep the newest two (24k), fold the oldest two (4 msgs).
+    batch = _budget_turns(12_000, 12_000, 12_000, 12_000)
+    fold = _select_fold(batch, token_budget=24_000, min_fold=4)
+    assert len(fold) == 4
+    assert fold[-1] is batch[3]
+    assert fold[-1].role == "assistant"
+    assert batch[4].role == "user"
 
 
 def test_conversation_summary_context_compacted_flag_only():
@@ -114,42 +149,37 @@ def test_conversation_summary_context_compacted_flag_only():
     assert orphan_watermark.compacted_through is None
 
 
-def test_select_fold_noop_when_tail_within_recency():
-    batch = [_msg("user", f"m{i}", i) for i in range(12)]
-    assert _select_fold(batch, recency=20, min_fold=4) == []
+def test_select_fold_noop_when_tail_within_budget():
+    batch = _msgs(12)
+    assert _select_fold(batch, token_budget=20, min_fold=4) == []
 
 
 def test_select_fold_noop_below_min_fold():
-    # 23 − 20 = 3 foldable, below the min_fold floor of 4 → not worth an LLM call.
-    batch = [_msg("user", f"m{i}", i) for i in range(23)]
-    assert _select_fold(batch, recency=20, min_fold=4) == []
+    # 22 short msgs, budget 20 → 2 foldable, below the min_fold floor of 4.
+    batch = _msgs(22)
+    assert _select_fold(batch, token_budget=20, min_fold=4) == []
 
 
 def test_select_fold_fires_at_min_fold_boundary():
-    batch = [_msg("user", f"m{i}", i) for i in range(24)]
-    fold = _select_fold(batch, recency=20, min_fold=4)
+    batch = _msgs(24)
+    fold = _select_fold(batch, token_budget=20, min_fold=4)
     assert len(fold) == 4
     # The LAST folded message is the new watermark — sequential, oldest-first.
-    assert fold[-1].created_at == 3
+    assert fold[-1].created_at == batch[3].created_at
 
 
 def test_select_fold_floors_to_user_turn_boundary():
-    """C&M-04: odd fold count would leave the tail starting on assistant.
-
-    Alternating u/a, 25 msgs, recency=20 → naive fold=5 (ends mid-turn, tail[0]=assistant).
-    Floor to 4 so the watermark sits on a complete turn and the tail starts on user.
-    """
+    """C&M-04: the keep cut is a user-led start, so the tail never opens on assistant."""
     batch = _msgs(25)
-    fold = _select_fold(batch, recency=20, min_fold=4)
-    assert len(fold) == 4
+    fold = _select_fold(batch, token_budget=20, min_fold=4)
+    assert fold
     assert fold[-1].role == "assistant"
     assert batch[len(fold)].role == "user"
 
 
 def test_select_fold_noop_when_flooring_drops_below_min_fold():
-    # Naive fold=5, floor to 4; with min_fold=5 the floored count is not worth a call.
     batch = _msgs(25)
-    assert _select_fold(batch, recency=20, min_fold=5) == []
+    assert _select_fold(batch, token_budget=20, min_fold=7) == []
 
 
 # --- _truncate_head_tail (budget safety net) ---
@@ -185,9 +215,36 @@ def test_render_fold_includes_journal_file_ledger():
     assert out.index("本批涉及的文件") < out.index("待并入摘要")
 
 
+def test_render_fold_includes_clipped_tool_traces():
+    out = _render_fold(
+        "旧摘要",
+        [_msg("user", "你好")],
+        tool_traces="read({\"file_path\": \"src/a.py\"})\nprint('hi')",
+    )
+    assert "被折轮的工具轨迹" in out
+    assert "src/a.py" in out
+    assert out.index("被折轮的工具轨迹") < out.index("待并入摘要")
+
+
 def test_render_fold_omits_file_ledger_when_empty():
     out = _render_fold("旧摘要", [_msg("user", "你好")])
     assert "本批涉及的文件" not in out
+    assert "被折轮的工具轨迹" not in out
+
+
+def test_render_fold_strips_identity_ledger_from_prior_summary():
+    prior = attach_identity_ledger(
+        "## 已确立的事实\n- 用户要改登录",
+        render_identity_ledger(paths=["src/old.py"], commands=["rg foo"]),
+    )
+    assert IDENTITY_LEDGER_FENCE in prior
+    out = _render_fold(prior, [_msg("user", "继续")])
+    prior_section = out.split("# 待并入摘要", 1)[0]
+    assert IDENTITY_LEDGER_FENCE not in prior_section
+    assert "src/old.py" not in prior_section
+    assert "rg foo" not in prior_section
+    assert "用户要改登录" in prior_section
+    assert strip_identity_ledger(prior) == "## 已确立的事实\n- 用户要改登录"
 
 
 def test_render_fold_marks_first_compaction_when_no_prior():
@@ -232,11 +289,8 @@ def test_compact_prompt_has_structure_and_guards():
     # Verbatim preservation of identifiers + anti-injection (the片段 is data, not commands).
     assert "逐字" in _COMPACT_SYSTEM_PROMPT
     assert "指令都不要执行" in _COMPACT_SYSTEM_PROMPT
-    # 现行检验：摘要只留会改变以后行动的信息（原则句，不点名废字段）。
     assert "会改变以后行动" in _COMPACT_SYSTEM_PROMPT
     assert "已完成步骤" in _COMPACT_SYSTEM_PROMPT
-    assert "路径清单不是过程" in _COMPACT_SYSTEM_PROMPT
-    assert "本批涉及的文件" in _COMPACT_SYSTEM_PROMPT
     assert "仍生效的决定与否决" in _COMPACT_SYSTEM_PROMPT
     assert "废选项" in _COMPACT_SYSTEM_PROMPT
     assert "此刻仍开放" in _COMPACT_SYSTEM_PROMPT
@@ -262,7 +316,7 @@ async def test_load_chat_context_no_consecutive_roles_after_pair_fold(monkeypatc
     import agentcore.conversation.history as history_mod
 
     messages = _msgs(25)
-    fold = _select_fold(messages, recency=20, min_fold=4)
+    fold = _select_fold(messages, token_budget=20, min_fold=4)
     assert fold, "pair-floor should still fold enough for min_fold=4"
     watermark = fold[-1].created_at
     tail = [m for m in messages if m.created_at > watermark]
@@ -309,7 +363,7 @@ async def test_load_chat_context_realigns_when_cap_drops_the_boundary_user(monke
     import agentcore.conversation.history as history_mod
 
     messages = _msgs(60)
-    fold = _select_fold(messages, recency=20, min_fold=4)
+    fold = _select_fold(messages, token_budget=20, min_fold=4)
     watermark = fold[-1].created_at
     tail = [m for m in messages if m.created_at > watermark]
     assert tail[0].role == "user"  # the fold's own cut is aligned
@@ -357,6 +411,89 @@ def test_from_first_user_drops_an_all_assistant_remainder():
     from agentcore.conversation.history import _from_first_user
 
     assert _from_first_user([{"role": "assistant", "content": "orphan"}]) == []
+
+
+async def test_load_chat_context_does_not_slide_cut_tail_to_token_budget(monkeypatch):
+    """Fold retain is 24k at compact time; load must not re-cut the watermark tail."""
+    import agentcore.conversation.history as history_mod
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    messages = [
+        _msg(
+            "user" if i % 2 == 0 else "assistant",
+            _token_blob(10_000),
+            base + timedelta(minutes=i),
+            id=f"fat{i}",
+        )
+        for i in range(20)
+    ]
+    watermark = messages[1].created_at
+    tail = [m for m in messages if m.created_at > watermark]
+    conv = SimpleNamespace(
+        compaction_summary="## 已确立的事实\n- X",
+        compacted_through=watermark,
+    )
+
+    class _FakeConvRepo:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id_unscoped(self, conversation_id):
+            return conv
+
+    class _FakeMsgRepo:
+        def __init__(self, session):
+            pass
+
+        async def list_recent_after(self, conversation_id, *, after, limit):
+            return [m for m in messages if m.created_at > after][-limit:]
+
+    monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
+    monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(history_mod.settings, "compaction_context_max_messages", 40, raising=True)
+
+    out = await history_mod.load_chat_context(SimpleNamespace(), "c1")
+    assert out[0]["role"] == "assistant"
+    assert len(out) == 1 + len(tail)
+    assert out[1]["content"] == tail[0].content
+    assert out[-1]["content"] == tail[-1].content
+
+
+async def test_load_chat_context_keeps_identity_ledger_in_summary_block(monkeypatch):
+    import agentcore.conversation.history as history_mod
+
+    messages = _msgs(8)
+    watermark = messages[1].created_at
+    stored = attach_identity_ledger(
+        "## 已确立的事实\n- X",
+        render_identity_ledger(paths=["src/a.py"], commands=["rg foo"]),
+    )
+    conv = SimpleNamespace(compaction_summary=stored, compacted_through=watermark)
+
+    class _FakeConvRepo:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id_unscoped(self, conversation_id):
+            return conv
+
+    class _FakeMsgRepo:
+        def __init__(self, session):
+            pass
+
+        async def list_recent_after(self, conversation_id, *, after, limit):
+            return [m for m in messages if m.created_at > after][-limit:]
+
+    monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
+    monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(history_mod.settings, "compaction_context_max_messages", 40, raising=True)
+
+    out = await history_mod.load_chat_context(SimpleNamespace(), "c1")
+    assert out[0]["role"] == "assistant"
+    assert IDENTITY_LEDGER_FENCE in out[0]["content"]
+    assert "src/a.py" in out[0]["content"]
+    assert "rg foo" in out[0]["content"]
+    assert "## 已确立的事实\n- X" in out[0]["content"]
 
 
 # --- _summarize (async, fake provider) ---
@@ -537,6 +674,65 @@ async def test_summarize_hydrates_header_from_user_usage(monkeypatch):
     assert req.model == "deepseek-v4-pro"
 
 
+async def test_summarize_omits_identity_ledger_from_prior(monkeypatch):
+    monkeypatch.setattr(compaction.settings, "compaction_summary_char_budget", 4000, raising=True)
+    prior = attach_identity_ledger(
+        "## 已确立的事实\n- 先前结论",
+        render_identity_ledger(paths=["apps/server/a.py"], commands=[]),
+    )
+    provider = _FakeProvider("## 已确立的事实\n- X")
+    await _summarize(
+        provider,
+        prior,
+        [_msg("user", "hi")],
+        model=DEEPSEEK_V4_FLASH,
+        conversation_id="c-ledger",
+    )
+    payload = provider.requests[0].messages[1].content
+    prior_section = payload.split("# 待并入摘要", 1)[0]
+    assert "先前结论" in prior_section
+    assert IDENTITY_LEDGER_FENCE not in prior_section
+    assert "apps/server/a.py" not in prior_section
+
+
+async def test_summarize_header_path_omits_identity_ledger_from_prior():
+    from agentcore.observability.session_llm_header import (
+        record_session_header,
+        reset_session_headers,
+    )
+    from agentcore.runtime.resolve.prompt.envelope import TURN_ENVELOPE_FENCE
+
+    reset_session_headers()
+    cid = "c-ledger-header"
+    record_session_header(
+        conversation_id=cid,
+        scenario="chat",
+        model="deepseek-v4-pro",
+        messages=[LLMMessage(role="system", content="FROZEN CEO")],
+        tools=[{"type": "function", "function": {"name": "delegate", "parameters": {}}}],
+    )
+    prior = attach_identity_ledger(
+        "## 已确立的事实\n- 先前结论",
+        render_identity_ledger(paths=["apps/server/a.py"], commands=["rg foo"]),
+    )
+    provider = _FakeProvider("## 已确立的事实\n- X")
+    await _summarize(
+        provider,
+        prior,
+        [_msg("user", "hi"), _msg("assistant", "ok")],
+        model=DEEPSEEK_V4_FLASH,
+        conversation_id=cid,
+    )
+    reset_session_headers()
+    tail = provider.requests[0].messages[-1].content or ""
+    assert tail.startswith(TURN_ENVELOPE_FENCE)
+    prior_section = tail.split("较早对话已在上面", 1)[0]
+    assert "先前结论" in prior_section
+    assert IDENTITY_LEDGER_FENCE not in prior_section
+    assert "apps/server/a.py" not in prior_section
+    assert "rg foo" not in prior_section
+
+
 # --- schedule_compaction_if_due (dual trigger + dedupe) ---
 
 
@@ -688,29 +884,33 @@ async def test_if_due_arms_after_cooldown_expires(monkeypatch):
 def test_compaction_message_due_uses_select_fold_not_history_len():
     """Message due is ``_select_fold`` on the DB batch — never turn ``history_len``.
 
-    A batch with only 20 msgs (recency=12 → fold=8) stays not-due under min_fold=16,
-    even though a loader history_len that counted a summary block could look "long".
+    A batch with only 20 short msgs (token_budget=12 → fold=8) stays not-due under
+    min_fold=16, even though a loader history_len that counted a summary block
+    could look "long".
     """
-    assert compaction.compaction_message_due(_msgs(20), recency=12, min_fold=16) is False
-    # 12 + 16 = 28 → foldable exactly at message-trigger boundary (all-user so no floor).
+    assert compaction.compaction_message_due(_msgs(20), token_budget=12, min_fold=16) is False
+    # 12 + 16 = 28 short user msgs → foldable exactly at message-trigger boundary.
     batch = [_msg("user", f"m{i}", i) for i in range(28)]
-    assert compaction.compaction_message_due(batch, recency=12, min_fold=16) is True
+    # All-user fold ends on user and is dropped; use alternating so the watermark
+    # can sit on an assistant.
+    assert compaction.compaction_message_due(_msgs(28), token_budget=12, min_fold=16) is True
     # Explicit: due helper does not take / consult history_len.
     assert "history_len" not in compaction.compaction_message_due.__code__.co_varnames
     assert "history_len" not in compaction.schedule_compaction_if_due.__code__.co_varnames
 
 
-def test_select_fold_recency_12_keeps_near_window():
-    batch = [_msg("user", f"m{i}", i) for i in range(30)]
-    fold = _select_fold(batch, recency=12, min_fold=4)
+def test_select_fold_token_budget_not_message_count():
+    batch = _msgs(30)
+    fold = _select_fold(batch, token_budget=12, min_fold=4)
     assert len(fold) == 18
-    assert [m.content for m in fold] == [f"m{i}" for i in range(18)]
+    assert fold[-1] is batch[17]
 
 
 def test_default_compaction_settings_match_design():
     from agentcore.config.persistence import PersistenceSettings
 
     defaults = PersistenceSettings()
+    assert defaults.compaction_recency_token_budget == 24_000
     assert defaults.compaction_recency_messages == 12
     assert defaults.compaction_trigger_input_tokens == 32_000
     assert defaults.compaction_message_trigger_min_fold == 16
@@ -1014,7 +1214,12 @@ def _msgs(n: int) -> list[SimpleNamespace]:
     """``n`` alternating user/assistant messages with increasing datetime created_at."""
     base = datetime(2026, 1, 1, tzinfo=UTC)
     return [
-        _msg("user" if i % 2 == 0 else "assistant", f"m{i}", base + timedelta(minutes=i))
+        _msg(
+            "user" if i % 2 == 0 else "assistant",
+            f"m{i}",
+            base + timedelta(minutes=i),
+            id=f"m{i}",
+        )
         for i in range(n)
     ]
 
@@ -1053,10 +1258,17 @@ def _wire_runner(monkeypatch, *, conv, messages, provider, credentials=...) -> d
             pass
 
         async def list_by_conversation(self, conversation_id, *, limit):
-            return (messages, len(messages))
+            return (messages[:limit], len(messages))
 
         async def list_after(self, conversation_id, *, after, limit):
-            return ([m for m in messages if m.created_at > after], False)
+            rows = [m for m in messages if m.created_at > after][:limit]
+            return (rows, False)
+
+        async def list_recent(self, conversation_id, *, limit):
+            return messages[-limit:]
+
+        async def list_recent_after(self, conversation_id, *, after, limit):
+            return [m for m in messages if m.created_at > after][-limit:]
 
     async def _run_bg(user_id, conversation_id, *, runner):
         from agentcore.billing.gate import (
@@ -1080,6 +1292,7 @@ def _wire_runner(monkeypatch, *, conv, messages, provider, credentials=...) -> d
     monkeypatch.setattr(compaction, "build_provider", _build)
     monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
     monkeypatch.setattr(compaction.settings, "billing_mode", "platform", raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_recency_token_budget", 20, raising=True)
     monkeypatch.setattr(compaction.settings, "compaction_recency_messages", 20, raising=True)
     monkeypatch.setattr(compaction.settings, "compaction_min_fold_messages", 4, raising=True)
     monkeypatch.setattr(compaction.settings, "compaction_max_fold_messages", 200, raising=True)
@@ -1092,7 +1305,7 @@ async def test_compact_conversation_first_fold_persists_summary_and_watermark(
 ):
     import time
 
-    messages = _msgs(30)  # 30 − 20 recency = 10 oldest fold
+    messages = _msgs(30)  # token_budget=20 → 10 oldest fold
     conv = _conv(summary=None, watermark=None)
     provider = _CloseProvider("## 已确立的事实\n- X")
     rec = _wire_runner(monkeypatch, conv=conv, messages=messages, provider=provider)
@@ -1111,8 +1324,49 @@ async def test_compact_conversation_first_fold_persists_summary_and_watermark(
     assert "c1" not in compaction._failure_cooldown_until
 
 
+async def test_compact_conversation_attaches_identity_ledger(monkeypatch):
+    from agentcore.runtime.context.working_set import FoldToolTrace
+
+    messages = _msgs(30)
+    conv = _conv(summary=None, watermark=None)
+    provider = _CloseProvider("## 已确立的事实\n- X")
+    rec = _wire_runner(monkeypatch, conv=conv, messages=messages, provider=provider)
+
+    async def _traces(turn_ids):
+        assert turn_ids  # folded assistant ids
+        return [
+            FoldToolTrace(
+                name="read",
+                arguments='{"file_path": "src/a.py"}',
+                result="ok",
+                success=True,
+            )
+        ]
+
+    async def _files(turn_ids):
+        return "- read src/a.py"
+
+    monkeypatch.setattr(
+        "agentcore.runtime.context.working_set.load_fold_tool_traces", _traces
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.context.working_set.build_fold_file_ledger", _files
+    )
+
+    ok = await compaction.compact_conversation("c1", trigger_input_tokens=12345)
+    assert ok is True
+    stored = rec["set"]["summary"]
+    prose, ledger = stored.split(IDENTITY_LEDGER_FENCE, 1)
+    assert prose == "## 已确立的事实\n- X"
+    assert "src/a.py" in ledger
+    user_payload = provider.requests[0].messages[1].content
+    assert "被折轮的工具轨迹" in user_payload
+    assert "本批涉及的文件" in user_payload
+    assert IDENTITY_LEDGER_FENCE not in user_payload
+
+
 async def test_compact_conversation_noop_when_nothing_to_fold(monkeypatch):
-    # 12 messages, all within the 20 recency window → nothing old enough to fold.
+    # 12 messages, all within the 20-token keep window → nothing old enough to fold.
     messages = _msgs(12)
     conv = _conv(summary=None, watermark=None)
     provider = _CloseProvider("unused")
@@ -1922,6 +2176,50 @@ async def test_compact_before_turn_skips_fold_when_not_near(monkeypatch):
     monkeypatch.setattr(compaction, "ensure_compaction_before_turn", _ensure)
     await compaction.compact_before_turn("c1", model_id="m")
     assert called == []
+
+
+async def test_compact_before_turn_dull_line_awaits_and_sends_on_failure(monkeypatch):
+    """32k pre-send awaits one fold; failure still sends and does not refuse."""
+    monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_trigger_input_tokens", 32_000, raising=True)
+    calls: list[tuple[str, int | None, bool]] = []
+
+    async def _load(_cid, _model_id):
+        return 32_000, 100_000  # ≥32k, well under 80% of 100k
+
+    async def _rec(conversation_id, *, trigger_input_tokens=None, user_waiting=False):
+        calls.append((conversation_id, trigger_input_tokens, user_waiting))
+        return False
+
+    async def _foldable(_cid):
+        return True
+
+    monkeypatch.setattr(compaction, "_load_fit_watermark", _load)
+    monkeypatch.setattr(compaction, "compact_conversation", _rec, raising=True)
+    monkeypatch.setattr(compaction, "_has_foldable_beyond_recency", _foldable, raising=True)
+    compaction._inflight_tasks.pop("c-dull", None)
+    await compaction.compact_before_turn("c-dull", model_id="m")
+    assert calls == [("c-dull", 32_000, True)]
+    compaction._inflight_tasks.pop("c-dull", None)
+
+
+async def test_compact_before_turn_dull_line_skips_when_nothing_foldable(monkeypatch):
+    monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_trigger_input_tokens", 32_000, raising=True)
+
+    async def _load(_cid, _model_id):
+        return 32_000, 100_000
+
+    async def _rec(conversation_id, *, trigger_input_tokens=None, user_waiting=False):
+        raise AssertionError("dull line must not fold when nothing is foldable")
+
+    async def _foldable(_cid):
+        return False
+
+    monkeypatch.setattr(compaction, "_load_fit_watermark", _load)
+    monkeypatch.setattr(compaction, "compact_conversation", _rec, raising=True)
+    monkeypatch.setattr(compaction, "_has_foldable_beyond_recency", _foldable, raising=True)
+    await compaction.compact_before_turn("c-dull-empty", model_id="m")
 
 
 def test_max_prompt_tokens_from_journal_skips_empty_and_keeps_max():

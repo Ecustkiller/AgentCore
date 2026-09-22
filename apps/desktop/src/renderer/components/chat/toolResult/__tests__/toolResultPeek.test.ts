@@ -444,38 +444,14 @@ describe("hasToolResultBody", () => {
     );
   });
 
-  it("successful wait has no expandable body (receipt-only)", () => {
-    expect(
-      hasToolResultBody(
-        data({
-          toolName: "wait",
-          result: "已等待队员回合结束。",
-        }),
-      ),
-    ).toBe(false);
-  });
-
-  it("failed wait stays expandable when a result is present", () => {
-    expect(
-      hasToolResultBody(
-        data({
-          toolName: "wait",
-          status: "error",
-          result: "等待队员超时。",
-          failure: { message: "等待队员超时。", code: "WAIT_TIMEOUT" },
-        }),
-      ),
-    ).toBe(true);
-  });
-
   it("is true for a specific failure face even when result is empty", () => {
     expect(
       hasToolResultBody(
         data({
-          toolName: "wait",
+          toolName: "replan",
           status: "error",
           result: "",
-          failure: { message: "等待队员超时。", code: "WAIT_TIMEOUT" },
+          failure: { message: "计划不合法。", code: "invalid_plan" },
         }),
       ),
     ).toBe(true);

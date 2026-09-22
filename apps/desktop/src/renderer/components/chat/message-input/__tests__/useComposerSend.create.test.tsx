@@ -39,11 +39,7 @@ vi.mock("@/services/conversations", () => ({
 vi.mock("@/services/messages", () => ({ loadLatestWindow: vi.fn() }));
 vi.mock("@/services/models", () => ({ getLastUsedProfileId: () => null }));
 vi.mock("@/services/permissionAxes", () => ({
-  resolveDefaultPermissionAxes: vi.fn(async () => ({
-    file_write: "session",
-    command: "auto",
-    host: "session",
-  })),
+  resolveDefaultPermissionAxes: vi.fn(async () => ({ boundary: "folder" })),
   setComposerDraftAxes: vi.fn(),
 }));
 vi.mock("@/services/defaultWorkspace", () => ({

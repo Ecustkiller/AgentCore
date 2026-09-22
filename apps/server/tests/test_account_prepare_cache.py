@@ -76,7 +76,9 @@ def _injectable_snapshot(*, degraded: bool = False) -> AccountPrepareSnapshot:
         rules_payload={
             "global_rules": [{"name": "用户规则.md", "content": "- 总是用中文回答"}],
             "project_rules": [{"name": "项目规则.md", "content": "- 项目规则"}],
-            "global_on_demand_rules": [{"name": "合规.md", "content": "- 合规摘要行\n"}],
+            "global_on_demand_rules": [
+                {"name": "合规.md", "content": "- 合规摘要行\n", "description": "查阅合规"}
+            ],
             "project_on_demand_rules": [],
         },
         memory_bodies={
@@ -145,7 +147,11 @@ async def test_seed_then_hit(account_creds):
                     {"name": "项目规则.md", "content": "- 项目规则"},
                 ],
                 "global_on_demand_rules": [
-                    {"name": "合规.md", "content": "- 合规摘要行\n更多"},
+                    {
+                        "name": "合规.md",
+                        "content": "- 合规摘要行\n更多",
+                        "description": "查阅合规",
+                    },
                 ],
                 "project_on_demand_rules": [],
             },
@@ -377,7 +383,7 @@ async def test_warm_rules_list_once_and_seeds(
             "global_rules": [{"name": "用户规则.md", "content": "- r"}],
             "project_rules": [],
             "global_on_demand_rules": [
-                {"name": "附录.md", "content": "- od\n"},
+                {"name": "附录.md", "content": "- od\n", "description": "查阅附录"},
             ],
             "project_on_demand_rules": [],
         }

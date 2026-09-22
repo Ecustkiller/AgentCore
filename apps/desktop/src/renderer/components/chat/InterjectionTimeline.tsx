@@ -13,6 +13,7 @@ import {
   UserChipTray,
   UserInlineBody,
 } from "@/components/chat/message-bubble/UserInlineBody";
+import { getConversations } from "@/hooks/useConversations";
 import { hasInlineMarkers } from "@/lib/inlineBody";
 import {
   type MessageAttachmentMeta,
@@ -20,8 +21,10 @@ import {
   assistantProjectionId,
   useConversationStore,
 } from "@/stores/conversation";
+import { ignoresCloudTurnActivity } from "@/stores/aiTurnActivity";
 import type { UserInterjection } from "@/stores/execution";
 import { useExecutionStore } from "@/stores/execution";
+import { useInterjectionQueueWithdrawn } from "@/stores/queuedTurns";
 
 /**
  * 插话主时间线单条（经典 steer + 协调共用）——挂在 process `user_interjection`
@@ -73,7 +76,26 @@ export function InterjectionTimeline({
     return false;
   });
 
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const localQueue = useConversationStore((s) => {
+    const id = s.currentConversationId;
+    if (!id) return false;
+    const via = s.byId[id]?.executionVia ?? null;
+    const localContainerRootId =
+      getConversations().find((c) => c.id === id)?.localContainerRootId ??
+      null;
+    return ignoresCloudTurnActivity(via, localContainerRootId);
+  });
+  const queueWithdrawn = useInterjectionQueueWithdrawn(
+    conversationId,
+    interjectionId,
+    localQueue,
+  );
+
   if (!item) return null;
+  // 快照对账后队里已没有这条：等待徽章和「将在下一条回复处理」都不画。
+  // 日记里的 queued 仍在；不新增协议态。
+  if (item.status === "queued" && queueWithdrawn) return null;
   return folded ? (
     <InterjectionQueuedAnchor item={item} />
   ) : (

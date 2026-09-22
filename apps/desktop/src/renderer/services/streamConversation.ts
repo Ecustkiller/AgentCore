@@ -297,7 +297,6 @@ export async function pumpSseBody(
 export function foldAttachSegment(
   conversationId: string,
   segment: SSEEvent[],
-  extras?: { skipQueuedTurnUserBubble?: boolean },
 ): void {
   const head = segment.find((e) => e.type === "message_start");
   const fullReplay =
@@ -323,7 +322,6 @@ export function foldAttachSegment(
         conversationId,
         source: "server",
         replay: true,
-        skipQueuedTurnUserBubble: extras?.skipQueuedTurnUserBubble,
       });
     }
     flushPendingContent(conversationId);

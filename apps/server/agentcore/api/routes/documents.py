@@ -30,7 +30,6 @@ from agentcore.documents.description import maybe_schedule_description_fill
 from agentcore.documents.frontmatter import (
     FrontmatterEditError,
     FrontmatterError,
-    ParsedFrontmatter,
     frontmatter_error_message,
     parse_entry_frontmatter,
     set_entry_frontmatter,
@@ -47,7 +46,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 DocKind = Literal["folder", "document"]
 DocRole = Literal["rule", "general"]
-DocApplyMode = Literal["always", "on_demand"]
+DocApplyMode = Literal["always", "on_demand", "paths"]
 
 
 class DocumentNodeView(BaseModel):
@@ -208,12 +207,17 @@ async def _preview_create_body(
     """Return (body_as_stored, is_always_rule) for quota projection before create."""
     if kind != "document" or role != "rule":
         return content, False
+    from agentcore.memory.rule_resolve import counts_as_always_content
+
     mode = _resolve_create_apply_mode(role=role, kind=kind, apply_mode=apply_mode)
     try:
         body = set_entry_frontmatter(content, apply=mode)  # type: ignore[arg-type]
     except FrontmatterEditError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return body, mode == "always"
+    parsed = parse_entry_frontmatter(body)
+    if isinstance(parsed, FrontmatterError):
+        raise HTTPException(status_code=400, detail=parsed.message)
+    return body, counts_as_always_content(body)
 
 
 @router.get("/always-quota", response_model=AlwaysQuotaView)
@@ -348,15 +352,12 @@ async def update_document_content(
 
     quota_warning: str | None = None
     if doc.kind == "document" and doc.role == "rule" and not doc.ai_maintained:
-        parsed = parse_entry_frontmatter(body.content)
-        if isinstance(parsed, FrontmatterError):
-            new_is_always = False
-        elif isinstance(parsed, ParsedFrontmatter):
-            new_is_always = parsed.apply == "always"
-        else:
-            new_is_always = False
+        from agentcore.memory.rule_resolve import counts_as_always_content
 
-        editing_existing_always = doc.apply_mode == "always"
+        new_is_always = counts_as_always_content(body.content)
+        editing_existing_always = doc.apply_mode == "always" or counts_as_always_content(
+            doc.content or ""
+        )
         decision = await check_always_write(
             repo,
             user.user_id,
@@ -432,11 +433,18 @@ async def patch_document(
             raise HTTPException(
                 status_code=400, detail="apply_mode only applies to rule documents"
             )
-        if body.apply_mode == "always" and current.apply_mode != "always":
-            try:
-                preview = set_entry_frontmatter(current.content, apply="always")
-            except FrontmatterEditError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        from agentcore.memory.rule_resolve import counts_as_always_content
+
+        try:
+            preview = set_entry_frontmatter(current.content, apply=body.apply_mode)
+        except FrontmatterEditError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        preview_parsed = parse_entry_frontmatter(preview)
+        if isinstance(preview_parsed, FrontmatterError):
+            raise HTTPException(status_code=400, detail=preview_parsed.message)
+        if counts_as_always_content(preview) and not (
+            current.apply_mode == "always" or counts_as_always_content(current.content or "")
+        ):
             decision = await check_always_write(
                 repo,
                 user.user_id,

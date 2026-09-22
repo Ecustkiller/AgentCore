@@ -1,7 +1,7 @@
 """DeepSeek in-history extra system: live catalog/rules without rewriting node 0.
 
 ``messages[0]`` stays the frozen chat header. When this turn's compose differs
-only in ``<设定>`` / ``<按需目录>``, the extra system is those blocks (plus a
+only in ``<设定>`` / ``<路径约定>`` / ``<按需目录>``, the extra system is those blocks (plus a
 one-line replacement fact). Base / core / anything else still dumps the full
 current compose — same as before this delta.
 """
@@ -14,7 +14,7 @@ import re
 # 不写 messages[0]、不写禁止句。测试不钉这句字面。
 IN_HISTORY_REPLACE_LEAD = "以下替换此前同名块。"
 
-_REPLACEABLE_TAGS = ("设定", "按需目录")
+_REPLACEABLE_TAGS = ("设定", "路径约定", "按需目录")
 
 
 def _block_pattern(tag: str) -> re.Pattern[str]:

@@ -119,13 +119,11 @@ const PEEK_SUPPRESSED = new Set([
   "file_batch",
   "mkdir",
   // CEO 协调原语：标题已自解释（撤队员 / 裁决求助另挂角色名），peek 只是操作确认文案。
-  // wait 成功回执不是过程信息（无 peek / 无 chevron，见 hasToolResultBody）。
   "update_synthesis",
   "replan",
   "cancel_worker",
   "resolve_escalation",
   "queue_user_message",
-  "wait",
   // grep：标题已有 pattern；命中列表只在展开。折叠不挂计数 / 未匹配。
   "grep",
   // 本机 Host：标题已自解释；折叠不 peek。

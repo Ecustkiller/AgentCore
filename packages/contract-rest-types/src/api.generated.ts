@@ -210,7 +210,7 @@ export interface paths {
         put?: never;
         /**
          * List Account User Rules
-         * @description User rules for turn assembly: always → ``<设定>``; on_demand → catalog + consult.
+         * @description User rules for turn assembly: always → ``<设定>``; paths → index; on_demand → catalog.
          */
         post: operations["list_account_user_rules_v1_account_rules_list_post"];
         delete?: never;
@@ -2223,9 +2223,11 @@ export interface paths {
          *     - **协调活跃 + steer** → ``user_interjection``（短流确认）；CEO 可智能升格排队。
          *     - **协调活跃 + queue** → **强制** FIFO（绕过插话），立即 ``turn_queued``。
          *     - **经典 in-flight + queue** → FIFO ``turn_queued``，drain 后同连接续流。
-         *     - **经典 in-flight + steer** → 挂到 live turn 进程内 pending（DURABLE
-         *       ``user_interjection(received)``；步顶注入后再发 ``injected``）；
-         *       无 accepting 窗口 / 回合已收口 → 回落 FIFO（``turn_queued.degraded_from=steer``）。
+         *     - **经典 in-flight + steer** → 队长循环还在接受时挂到进程内 pending（DURABLE
+         *       ``user_interjection(received)``；下一工具步顶再发 ``injected``）。散文收口
+         *       不为未读插话多留一轮；赶不上下一步的 leftover 升成下一回合
+         *       （``queued`` + ``turn_queued.degraded_from=steer``）。无 accepting 窗口 →
+         *       普通 FIFO，不标 ``degraded_from``。
          *     - **热路 pending**（approval / escalation / …）仍 409。
          *
          *     Gated before the stream starts (成本配额与计费.md §一) so a refused turn gets a
@@ -2345,31 +2347,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/v1/conversations/{conversation_id}/messages/{message_id}/feedback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Set Message Feedback
-         * @description Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈).
-         *
-         *     Owner-scoped like delete (prove conversation ownership first, then update only within
-         *     it, so a guessed cross-user ``message_id`` can't be rated — IDOR-safe). ``feedback`` is
-         *     ``"up"`` / ``"down"`` to rate, or ``null`` to clear the rating (toggling the same side
-         *     off). 404 when the message isn't in this conversation.
-         */
-        patch: operations["set_message_feedback_v1_conversations__conversation_id__messages__message_id__feedback_patch"];
         trace?: never;
     };
     "/v1/conversations/{conversation_id}/messages/{message_id}/files/diff": {
@@ -2533,6 +2510,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/queued-turns/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reorder Queued Turns
+         * @description Permute the process-local FIFO. The id list must be the current set.
+         */
+        post: operations["reorder_queued_turns_v1_conversations__conversation_id__queued_turns_reorder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/cancel": {
         parameters: {
             query?: never;
@@ -2556,6 +2553,54 @@ export interface paths {
          *     now cancelling in that window told the other端 nothing.
          */
         post: operations["cancel_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Queued Turn
+         * @description Replace one queued turn's text, attachments, and mentions before drain.
+         *
+         *     Same ``queue_id`` and persisted user row. Position, credentials,
+         *     ``interjection_id``, and table selection stay as captured at enqueue.
+         *     Already started / unknown id / missing user row → 404. Blank text with no
+         *     attachments → 422.
+         */
+        post: operations["edit_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/stop-and-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop And Send Queued Turn
+         * @description Move this queued item to the front, then hard-stop the live turn.
+         *
+         *     The next drain starts this item. Items that were ahead of it stay behind.
+         *     Stop still does not clear the rest of the FIFO.
+         */
+        post: operations["stop_and_send_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__stop_and_send_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4068,7 +4113,7 @@ export interface paths {
         put?: never;
         /**
          * Sidecar cloud web search
-         * @description Run server-side web search for a sidecar turn (SearXNG→Tavily; no client keys).
+         * @description Run server-side web search for a sidecar turn (SearXNG; no client keys).
          */
         post: operations["inference_web_search_v1_inference_web_search_post"];
         delete?: never;
@@ -5878,7 +5923,7 @@ export interface components {
         /** AccountRuleWriteRequest */
         AccountRuleWriteRequest: {
             /** Apply */
-            apply?: ("always" | "on_demand") | null;
+            apply?: ("always" | "on_demand" | "paths") | null;
             /** Content */
             content: string;
             /** Description */
@@ -5898,7 +5943,7 @@ export interface components {
         };
         /**
          * AccountRulesListResponse
-         * @description Always rules for ``<设定>`` plus on_demand bodies for 规则目录 / ``consult``.
+         * @description Always rules for ``<设定>``, path rules for ``<路径约定>``, on_demand for consult.
          *
          *     ``ancestor_*`` carry the enclosing folders' layers, outermost-first, and
          *     ``folder_chain`` is that same chain by id with the current folder last: the engine may
@@ -5908,16 +5953,22 @@ export interface components {
         AccountRulesListResponse: {
             /** Ancestor On Demand Rules */
             ancestor_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
+            /** Ancestor Path Rules */
+            ancestor_path_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Ancestor Rules */
             ancestor_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Folder Chain */
             folder_chain?: string[];
             /** Global On Demand Rules */
             global_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
+            /** Global Path Rules */
+            global_path_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Global Rules */
             global_rules: components["schemas"]["AccountRuleDoc"][];
             /** Project On Demand Rules */
             project_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
+            /** Project Path Rules */
+            project_path_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Project Rules */
             project_rules: components["schemas"]["AccountRuleDoc"][];
         };
@@ -6956,24 +7007,15 @@ export interface components {
             /** Title */
             title: string;
         };
-        /**
-         * AutonomyPolicy
-         * @description User-global *default recipe* for new conversations (seeds :class:`PermissionAxes`).
-         *
-         *     Runtime gates read the conversation's ``permission_axes`` — not this column.
-         *     Stored on ``users.autonomy_policy`` (设置页「新会话默认权限配方」).
-         * @enum {string}
-         */
-        AutonomyPolicy: "cautious" | "less_interrupt" | "managed";
         /** AutonomyUpdate */
         AutonomyUpdate: {
-            /** @description New-session default recipe: cautious | less_interrupt | managed */
-            policy: components["schemas"]["AutonomyPolicy"];
+            /** @description New-session default boundary: read | folder | computer */
+            policy: components["schemas"]["WorkspaceBoundary"];
         };
         /** AutonomyView */
         AutonomyView: {
-            /** @default less_interrupt */
-            policy: components["schemas"]["AutonomyPolicy"];
+            /** @default folder */
+            policy: components["schemas"]["WorkspaceBoundary"];
         };
         /**
          * BeginLocalTurnRequest
@@ -7551,12 +7593,6 @@ export interface components {
             /** Path */
             path: string;
         };
-        /**
-         * CommandAxis
-         * @description How execution-class tools (code / terminal / test) are authorized.
-         * @enum {string}
-         */
-        CommandAxis: "ask" | "auto";
         /**
          * ContextGapModel
          * @description 早期对话没能进摘要、也已滑出原文窗口——这一轮 AI 确实读不到它们。
@@ -8599,7 +8635,7 @@ export interface components {
              * @default always
              * @enum {string}
              */
-            apply_mode: "always" | "on_demand";
+            apply_mode: "always" | "on_demand" | "paths";
             /**
              * Content
              * @default
@@ -8716,7 +8752,7 @@ export interface components {
          */
         DocumentPatchRequest: {
             /** Apply Mode */
-            apply_mode?: ("always" | "on_demand") | null;
+            apply_mode?: ("always" | "on_demand" | "paths") | null;
             /** Disputed */
             disputed?: boolean | null;
             /** Name */
@@ -8765,6 +8801,22 @@ export interface components {
          *     service. Only the sender within 15 minutes may edit.
          */
         EditChatMessageRequest: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * EditQueuedTurnRequest
+         * @description Replace one queued turn's payload. Identity and order stay on the server.
+         *
+         *     Same emptiness rule as send: blank text is allowed only when attachments
+         *     remain. Credentials, ``interjection_id``, and table selection are not fields
+         *     here — enqueue already captured them.
+         */
+        EditQueuedTurnRequest: {
+            /** Agent Mentions */
+            agent_mentions?: components["schemas"]["AgentMention"][];
+            /** Attachments */
+            attachments?: components["schemas"]["MessageAttachment"][];
             /** Content */
             content: string;
         };
@@ -8949,12 +9001,6 @@ export interface components {
         ExternalGrantResponse: {
             grant: components["schemas"]["ExternalGrantItem"];
         };
-        /**
-         * FileWriteAxis
-         * @description Whether reversible file mutations need per-call approval.
-         * @enum {string}
-         */
-        FileWriteAxis: "ask" | "session";
         /**
          * FolderGroup
          * @description A project plus the conversations it holds (grouped sidebar payload).
@@ -9311,12 +9357,6 @@ export interface components {
              */
             updated_at: string;
         };
-        /**
-         * HostAxis
-         * @description 本机 Host 面授权（与 ``command`` 正交；不挂 execution_class / 不吃 delegation 静默授）。
-         * @enum {string}
-         */
-        HostAxis: "off" | "ask" | "session";
         /**
          * InferenceTokenRequest
          * @description Optional mint body — scopes returned ``model`` to a conversation main slot.
@@ -9826,8 +9866,6 @@ export interface components {
             duration_ms?: number | null;
             /** Evidence Ledger */
             evidence_ledger?: components["schemas"]["EvidenceLedgerEntryRest"][];
-            /** Feedback */
-            feedback?: string | null;
             /** Followups */
             followups?: string[];
             /** Generation Ms */
@@ -10344,15 +10382,11 @@ export interface components {
         };
         /**
          * PermissionAxesModel
-         * @description Session permission axes (运行时单一真相源 · file_write/command/host).
+         * @description Conversation boundary (运行时单一真相源).
          */
         PermissionAxesModel: {
-            /** @default auto */
-            command: components["schemas"]["CommandAxis"];
-            /** @default session */
-            file_write: components["schemas"]["FileWriteAxis"];
-            /** @default session */
-            host: components["schemas"]["HostAxis"];
+            /** @default folder */
+            boundary: components["schemas"]["WorkspaceBoundary"];
         };
         /**
          * PermissionAxesUpdate
@@ -10483,6 +10517,8 @@ export interface components {
          *     frame), not a change-only ping.
          *     ``interjection_id`` is set when the entry was promoted from a user interjection
          *     (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
+         *     ``user_message_id`` is the persisted user-row id (cancel deletes it; drain
+         *     reuses it). Optional additive — old clients ignore. Omitted / null when unset.
          *     ``position`` is 1-based FIFO index.
          *     ``attachments`` / ``agent_mentions`` are the same fields drain forwards to
          *     ``stream_chat`` (optional additive — old clients ignore).
@@ -10500,6 +10536,8 @@ export interface components {
             position: number;
             /** Queue Id */
             queue_id: string;
+            /** User Message Id */
+            user_message_id?: string | null;
         };
         /**
          * QueuedTurnListResponse
@@ -10711,6 +10749,14 @@ export interface components {
             display_name?: string | null;
             /** Email */
             email: string;
+        };
+        /**
+         * ReorderQueuedTurnsRequest
+         * @description Exact permutation of the conversation's current queued-turn ids.
+         */
+        ReorderQueuedTurnsRequest: {
+            /** Queue Ids */
+            queue_ids: string[];
         };
         /**
          * ReplayConversation
@@ -11285,19 +11331,6 @@ export interface components {
              * @description User combination id or system preset id
              */
             profile_id: string;
-        };
-        /**
-         * SetMessageFeedbackRequest
-         * @description Set or clear the user's 点赞/点踩 on an assistant message (回复反馈).
-         *
-         *     ``feedback`` is ``"up"`` / ``"down"`` to rate the reply, or ``null`` to clear the
-         *     rating back to 未评价 (toggling the same side off). The route does not restrict by
-         *     role — rating is only meaningful on assistant replies, but a value on any row is a
-         *     harmless store.
-         */
-        SetMessageFeedbackRequest: {
-            /** Feedback */
-            feedback?: ("up" | "down") | null;
         };
         /** ShareListResponse */
         ShareListResponse: {
@@ -11957,10 +11990,10 @@ export interface components {
          * ToolApproval
          * @description Tool approval requirement levels (可逆性 × 副作用).
          *
-         *     Two live levels: ``NEVER`` (silent) and ``GRANTABLE`` (first-grant / per-call
-         *     via session permission axes). The former ``ALWAYS`` (every call, no turn grant)
-         *     had no consumers and was removed — irreversible external tools are not in the
-         *     MVP set.
+         *     Two live levels: ``NEVER`` (silent) and ``GRANTABLE`` (may still prompt for
+         *     irreversible shapes). Boundary decides whether the tool is assembled;
+         *     in-boundary writes and ``run`` do not prompt. Irreversible external
+         *     actions stay on the always-confirm / breaker path.
          * @enum {string}
          */
         ToolApproval: "never" | "grantable";
@@ -12629,6 +12662,17 @@ export interface components {
             /** Source */
             source?: ("explicit" | "container") | null;
         };
+        /**
+         * WorkspaceBoundary
+         * @description What this conversation may do. One value, not three axes.
+         *
+         *     ``read`` — look only. ``folder`` — change this folder and run inside it
+         *     (default). ``computer`` — folder plus the local Host face. Stored as
+         *     ``permission_axes.boundary``. Checkpoints, breakers, and always-confirm
+         *     commands are orthogonal.
+         * @enum {string}
+         */
+        WorkspaceBoundary: "read" | "folder" | "computer";
         /**
          * WorkspaceEditDoc
          * @description Full text of a cloud workspace file for in-panel editing, plus CAS baseline.
@@ -16886,46 +16930,6 @@ export interface operations {
             };
         };
     };
-    set_message_feedback_v1_conversations__conversation_id__messages__message_id__feedback_patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                conversation_id: string;
-                message_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetMessageFeedbackRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_turn_files_diff_v1_conversations__conversation_id__messages__message_id__files_diff_get: {
         parameters: {
             query?: never;
@@ -17154,7 +17158,122 @@ export interface operations {
             };
         };
     };
+    reorder_queued_turns_v1_conversations__conversation_id__queued_turns_reorder_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderQueuedTurnsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cancel_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                queue_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__edit_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                queue_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditQueuedTurnRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_and_send_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__stop_and_send_post: {
         parameters: {
             query?: never;
             header?: {

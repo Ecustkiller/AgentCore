@@ -1,4 +1,4 @@
-"""Permission axes (会话级权限 · file_write / command / host)."""
+"""Conversation boundary: read | folder | computer."""
 
 from __future__ import annotations
 
@@ -6,21 +6,15 @@ import pytest
 from pydantic import ValidationError
 
 from agentcore.api.schemas.conversations import PermissionAxesModel, PermissionAxesUpdate
-from agentcore.core.types import (
-    DEFAULT_PERMISSION_AXES,
-    AutonomyPolicy,
-    CommandAxis,
-    FileWriteAxis,
-    HostAxis,
-    PermissionAxes,
-    recipe_to_axes,
-    validate_permission_axes,
-)
+from agentcore.conversation.common import parse_permission_axes
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary
+from agentcore.runtime.context.workspace_context import build_workspace_context
 from agentcore.runtime.sandbox_approval import (
+    boundary_block_message,
     cloud_worker_skips_per_call_gate,
     execution_tool_auto_passes,
 )
-from agentcore.tools.builtin import build_worker_registry
+from agentcore.tools.builtin import build_worker_registry, execution_class_enabled_for
 
 
 def _gaps(ctx: str) -> set[str]:
@@ -28,6 +22,15 @@ def _gaps(ctx: str) -> set[str]:
         if line.startswith("缺口："):
             return {p.strip() for p in line.removeprefix("缺口：").split("、") if p.strip()}
     return set()
+
+
+def _names(boundary: WorkspaceBoundary) -> set[str]:
+    return {
+        s.name
+        for s in build_worker_registry(
+            backend=_LocalBackend(), permission_axes=boundary
+        ).list_all()
+    }
 
 
 class _LocalBackend:
@@ -38,260 +41,136 @@ class _ServerBackend:
     location = "server"
 
 
-_FILE_OP_CLASS = frozenset(
-    {"write", "edit", "git"}
-)
+def test_default_boundary_is_folder():
+    assert DEFAULT_PERMISSION_AXES is WorkspaceBoundary.FOLDER
+    assert DEFAULT_PERMISSION_AXES.allows_write is True
+    assert DEFAULT_PERMISSION_AXES.allows_execution is True
+    assert DEFAULT_PERMISSION_AXES.allows_host is False
+    assert DEFAULT_PERMISSION_AXES.to_dict() == {"boundary": "folder"}
 
 
-def test_default_axes_are_less_interrupt():
-    assert PermissionAxes(
-        FileWriteAxis.SESSION,
-        CommandAxis.AUTO,
-        HostAxis.SESSION,
-    ) == DEFAULT_PERMISSION_AXES
-    assert recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT) == DEFAULT_PERMISSION_AXES
-    assert DEFAULT_PERMISSION_AXES.host is HostAxis.SESSION
-
-
-def test_builtin_recipes():
-    assert recipe_to_axes(AutonomyPolicy.CAUTIOUS) == PermissionAxes(
-        FileWriteAxis.ASK,
-        CommandAxis.ASK,
-        HostAxis.OFF,
-    )
-    assert recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT) == PermissionAxes(
-        FileWriteAxis.SESSION,
-        CommandAxis.AUTO,
-        HostAxis.SESSION,
-    )
-    assert recipe_to_axes(AutonomyPolicy.MANAGED) == PermissionAxes(
-        FileWriteAxis.SESSION,
-        CommandAxis.AUTO,
-        HostAxis.SESSION,
-    )
-    assert recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT) == recipe_to_axes(
-        AutonomyPolicy.MANAGED
-    )
-
-
-def test_from_mapping_roundtrip_and_retired_kickoff():
-    axes = recipe_to_axes(AutonomyPolicy.MANAGED)
-    assert PermissionAxes.from_mapping(axes.to_dict()) == axes
-    assert "team_kickoff" not in axes.to_dict()
-    assert "kickoff" not in axes.to_dict().values()
-
-    # Extra team_kickoff dropped; command=kickoff is not merged to auto/ask.
-    leftover_session = PermissionAxes.from_mapping(
-        {"file_write": "session", "command": "kickoff", "team_kickoff": "rules"}
-    )
-    assert leftover_session == DEFAULT_PERMISSION_AXES
-
-    leftover_ask = PermissionAxes.from_mapping(
-        {"file_write": "ask", "command": "kickoff", "team_kickoff": "always"}
-    )
-    assert leftover_ask == DEFAULT_PERMISSION_AXES
-    assert leftover_ask.file_write is not FileWriteAxis.ASK
-    assert leftover_ask.command is not CommandAxis.ASK
-
-    cautious = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
-    assert cautious.host is HostAxis.OFF
-    assert PermissionAxes.from_mapping(cautious.to_dict()).host is HostAxis.OFF
-
-
-def test_permission_axes_model_rejects_command_kickoff():
-    with pytest.raises(ValidationError):
-        PermissionAxesModel.model_validate(
-            {"file_write": "session", "command": "kickoff", "team_kickoff": "skip"}
+def test_from_mapping_requires_boundary():
+    assert WorkspaceBoundary.from_mapping({"boundary": "read"}) is WorkspaceBoundary.READ
+    assert WorkspaceBoundary.from_mapping({"boundary": "computer"}) is WorkspaceBoundary.COMPUTER
+    with pytest.raises(ValueError):
+        WorkspaceBoundary.from_mapping(None)
+    with pytest.raises(ValueError):
+        WorkspaceBoundary.from_mapping({})
+    with pytest.raises(ValueError):
+        WorkspaceBoundary.from_mapping(
+            {"file_write": "ask", "command": "ask", "host": "off"}
         )
-    with pytest.raises(ValidationError):
-        PermissionAxesModel.model_validate(
-            {"file_write": "ask", "command": "kickoff", "team_kickoff": "rules"}
-        )
+    with pytest.raises(ValueError):
+        WorkspaceBoundary.from_mapping({"boundary": "managed"})
+
+
+def test_parse_permission_axes_falls_back_to_folder():
+    assert parse_permission_axes({"boundary": "read"}) is WorkspaceBoundary.READ
+    assert parse_permission_axes(None) is WorkspaceBoundary.FOLDER
+    assert (
+        parse_permission_axes({"file_write": "session", "command": "auto"})
+        is WorkspaceBoundary.FOLDER
+    )
+
+
+def test_schema_accepts_only_boundary():
+    model = PermissionAxesModel.model_validate({"boundary": "computer"})
+    assert model.to_axes() is WorkspaceBoundary.COMPUTER
+    assert model.to_axes().to_dict() == {"boundary": "computer"}
     dropped = PermissionAxesModel.model_validate(
-        {"file_write": "session", "command": "auto", "team_kickoff": "rules"}
+        {"boundary": "folder", "file_write": "ask", "command": "auto"}
     )
-    assert dropped.command is CommandAxis.AUTO
-    assert "team_kickoff" not in dropped.model_dump()
-
-
-def test_validate_permission_axes_rejects_command_kickoff():
-    with pytest.raises(ValueError):
-        validate_permission_axes(file_write="session", command="kickoff")
-    with pytest.raises(ValueError):
-        validate_permission_axes(file_write="ask", command="kickoff")
-
-
-def test_illegal_command_auto_with_file_write_ask():
-    with pytest.raises(ValueError, match="illegal"):
-        PermissionAxes(
-            file_write=FileWriteAxis.ASK,
-            command=CommandAxis.AUTO,
-            host=HostAxis.ASK,
-        )
-    with pytest.raises(ValueError, match="illegal"):
-        validate_permission_axes(file_write="ask", command="auto", host="ask")
+    assert dropped.boundary is WorkspaceBoundary.FOLDER
     with pytest.raises(ValidationError):
-        PermissionAxesModel(file_write="ask", command="auto", host="ask")
-    with pytest.raises(ValidationError):
-        PermissionAxesUpdate(
-            permission_axes={
-                "file_write": "ask",
-                "command": "auto",
-                "host": "ask",
-            }
-        )
+        PermissionAxesModel(boundary="cautious")
+    legacy = PermissionAxesUpdate(permission_axes={"file_write": "ask"})
+    assert legacy.permission_axes.boundary is WorkspaceBoundary.FOLDER
 
 
-def test_command_ask_withholds_execution_tools():
-    axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
-    names = {
-        s.name
-        for s in build_worker_registry(
-            backend=_LocalBackend(), permission_axes=axes
-        ).list_all()
-    }
+def test_read_omits_writes_and_execution():
+    names = _names(WorkspaceBoundary.READ)
     assert "run" not in names
-    assert "code_execute" not in names
-    assert "test_run" not in names
-    assert "terminal" not in names
-    assert "write" in names
+    assert "write" not in names
+    assert "host" not in names
     assert "web_search" in names
-
-
-def test_command_ask_capability_line_matches_registry():
-    """案 20260803-docx-office-exec-capability-lie A：能力行与 registry 同一谓词（含 ask）。"""
-    from agentcore.runtime.context.workspace_context import build_workspace_context
-    from agentcore.tools.builtin import execution_class_enabled_for
-
-    axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
-    backend = _LocalBackend()
-    assert execution_class_enabled_for(backend, axes) is False
+    assert execution_class_enabled_for(_LocalBackend(), WorkspaceBoundary.READ) is False
     out = build_workspace_context(
-        backend, desktop_online=True, permission_axes=axes
+        _LocalBackend(),
+        desktop_online=True,
+        permission_axes=WorkspaceBoundary.READ,
     )
-    assert "run" in _gaps(out)
-    assert "code_execute=" not in out
-    assert "terminal=" not in out
-    assert "run" not in _gaps(build_workspace_context(backend, desktop_online=True))
+    assert "边界：只看" in out
+    assert "run" not in _gaps(out)
+    assert "host" not in _gaps(out)
+    assert boundary_block_message(WorkspaceBoundary.READ, "write")
+    assert boundary_block_message(WorkspaceBoundary.READ, "run")
+    assert boundary_block_message(WorkspaceBoundary.FOLDER, "run") is None
 
 
-def test_command_auto_skips_kickoff_and_local_exec_auto_pass():
-    axes = recipe_to_axes(AutonomyPolicy.MANAGED)
+def test_folder_includes_execution_not_host():
+    names = _names(WorkspaceBoundary.FOLDER)
+    assert "run" in names
+    assert "write" in names
+    assert "host" not in names
+    out = build_workspace_context(
+        _LocalBackend(),
+        desktop_online=True,
+        permission_axes=WorkspaceBoundary.FOLDER,
+    )
+    assert "边界：这个文件夹" in out
+    assert "run" not in _gaps(out)
+    assert "host" not in _gaps(out)
     assert (
         execution_tool_auto_passes(
-            _LocalBackend(), "run", permission_axes=axes
+            _LocalBackend(), "run", permission_axes=WorkspaceBoundary.FOLDER
         )
         is True
     )
     assert (
         execution_tool_auto_passes(
-            _LocalBackend(), "browser", permission_axes=axes,
-        )
-        is True
-    )
-    # Host / MCP never ride command=auto silent pass.
-    assert (
-        execution_tool_auto_passes(
-            _LocalBackend(), "host", permission_axes=axes
+            _LocalBackend(), "run", permission_axes=WorkspaceBoundary.READ
         )
         is False
     )
     assert (
         execution_tool_auto_passes(
-            _LocalBackend(), "mcp_filesystem_read", permission_axes=axes
+            _LocalBackend(), "host", permission_axes=WorkspaceBoundary.COMPUTER
         )
         is False
     )
 
 
-def test_less_interrupt_and_managed_same_axes():
-    """少打断 = 托管: session/auto/session — 静默执行、不蕴含深度研究自治、host=session."""
-    axes = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
-    assert axes == DEFAULT_PERMISSION_AXES
-    assert axes == recipe_to_axes(AutonomyPolicy.MANAGED)
-    assert axes.auto_executes is True
-    assert not hasattr(axes, "implies_deep_research_auto")
-    assert axes.host is HostAxis.SESSION
-    for tool in (
-        "run",
-        "browser",
-    ):
-        assert (
-            execution_tool_auto_passes(
-                _LocalBackend(), tool, permission_axes=axes
-            )
-            is True
-        )
+def test_computer_includes_host_and_names_the_boundary():
+    names = _names(WorkspaceBoundary.COMPUTER)
+    assert "host" in names
+    assert "run" in names
+    out = build_workspace_context(
+        _LocalBackend(),
+        desktop_online=False,
+        permission_axes=WorkspaceBoundary.COMPUTER,
+    )
+    assert "边界：这台电脑" in out
+    assert "host" in _gaps(out)
+    assert boundary_block_message(WorkspaceBoundary.FOLDER, "host")
+    assert boundary_block_message(WorkspaceBoundary.COMPUTER, "host") is None
 
 
-def test_command_ask_no_execution_auto_pass():
-    """谨慎档 command=ask：execution_class 仍需审批卡。"""
-    axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
-    for tool in (
-        "run",
-        "browser",
-    ):
-        assert (
-            execution_tool_auto_passes(
-                _LocalBackend(), tool, permission_axes=axes
-            )
-            is False
-        )
-
-
-def test_command_ask_no_capability_auth():
-    axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
-    assert axes.host_disabled is True
-
-
-def test_cloud_worker_honors_file_write_ask():
-    """云端 worker：file_write=ask 仍弹写文件类；session 仍免逐次卡。"""
-    cautious = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
-    session = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
-    cloud = _ServerBackend()
-
+def test_cloud_read_does_not_skip_file_ops():
     assert (
         cloud_worker_skips_per_call_gate(
-            cloud,
+            _ServerBackend(),
             "write",
-            permission_axes=cautious,
-            file_op_tools=_FILE_OP_CLASS,
+            permission_axes=WorkspaceBoundary.READ,
+            file_op_tools=frozenset({"write"}),
         )
         is False
     )
     assert (
         cloud_worker_skips_per_call_gate(
-            cloud,
+            _ServerBackend(),
             "write",
-            permission_axes=session,
-            file_op_tools=_FILE_OP_CLASS,
+            permission_axes=WorkspaceBoundary.FOLDER,
+            file_op_tools=frozenset({"write"}),
         )
         is True
-    )
-    assert (
-        cloud_worker_skips_per_call_gate(
-            cloud,
-            "web_search",
-            permission_axes=cautious,
-            file_op_tools=_FILE_OP_CLASS,
-        )
-        is True
-    )
-    assert (
-        cloud_worker_skips_per_call_gate(
-            _LocalBackend(),
-            "write",
-            permission_axes=cautious,
-            file_op_tools=_FILE_OP_CLASS,
-        )
-        is False
-    )
-    assert (
-        cloud_worker_skips_per_call_gate(
-            cloud,
-            "mcp_filesystem_write",
-            permission_axes=session,
-            file_op_tools=_FILE_OP_CLASS,
-        )
-        is False
     )

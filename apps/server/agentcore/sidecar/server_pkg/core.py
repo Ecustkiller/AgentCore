@@ -11,7 +11,7 @@ from typing import Any, Literal
 from agentcore.account.credentials import AccountCredentials
 from agentcore.conversation.store.outbox import OutboxStore
 from agentcore.core.logging import get_logger
-from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes
+from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary
 from agentcore.folders.credentials import FoldersCredentials
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
@@ -86,8 +86,8 @@ class SidecarServer(HandlerMixin, DeliveryMixin, TurnExecutionMixin):
         self._approvals_enabled = True
         # Initialize-seeded default. Per-turn refresh writes ``_permission_axes_by_conv``
         # so harvest reads this conversation, not the process-level last write.
-        self._permission_axes: PermissionAxes = DEFAULT_PERMISSION_AXES
-        self._permission_axes_by_conv: dict[str, PermissionAxes] = {}
+        self._permission_axes: WorkspaceBoundary = DEFAULT_PERMISSION_AXES
+        self._permission_axes_by_conv: dict[str, WorkspaceBoundary] = {}
         # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.
         self._paused_store: LocalPausedTurnStore | None = None
@@ -312,7 +312,7 @@ class SidecarServer(HandlerMixin, DeliveryMixin, TurnExecutionMixin):
             return None
         return list(self._turn_history[cid])
 
-    def permission_axes_for(self, conversation_id: str) -> PermissionAxes:
+    def permission_axes_for(self, conversation_id: str) -> WorkspaceBoundary:
         """Per-conversation axes, else the initialize default (never another conv's last)."""
         cid = (conversation_id or "").strip()
         if cid:
@@ -446,6 +446,12 @@ class SidecarServer(HandlerMixin, DeliveryMixin, TurnExecutionMixin):
             await self._on_cancel_queued_turn(request_id, params)
         elif method == "listQueuedTurns":
             await self._on_list_queued_turns(request_id, params)
+        elif method == "reorderQueuedTurns":
+            await self._on_reorder_queued_turns(request_id, params)
+        elif method == "stopAndSendQueuedTurn":
+            await self._on_stop_and_send_queued_turn(request_id, params)
+        elif method == "editQueuedTurn":
+            await self._on_edit_queued_turn(request_id, params)
         elif method == "runRedirect":
             await self._on_run_redirect(request_id, params)
         elif method == "runStop":

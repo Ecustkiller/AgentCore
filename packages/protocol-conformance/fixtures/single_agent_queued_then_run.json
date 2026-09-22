@@ -18,7 +18,8 @@
         "queue_id": "q1",
         "conversation_id": "conv_demo",
         "remaining_depth": 0,
-        "content": "next"
+        "content": "next",
+        "user_message_id": "u-next"
       },
       "timestamp": "2026-01-01T00:00:00.002Z"
     },

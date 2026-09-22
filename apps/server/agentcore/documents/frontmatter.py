@@ -1,4 +1,4 @@
-"""Strict md-entry frontmatter: ``apply`` + ``description`` + optional ``offers_tools``.
+"""Strict md-entry frontmatter: ``apply`` + ``description`` + optional ``paths`` / ``offers_tools``.
 
 Known keys are parsed as ``key: value`` lines. Unknown keys / comment lines / blank
 lines stay opaque text. Write-back is **text-level minimal edit** — never
@@ -14,12 +14,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-ApplyMode = Literal["always", "on_demand"]
+from agentcore.documents.path_rules import parse_path_patterns
 
-_VALID_APPLY: frozenset[str] = frozenset({"always", "on_demand"})
+ApplyMode = Literal["always", "on_demand", "paths"]
+
+_VALID_APPLY: frozenset[str] = frozenset({"always", "on_demand", "paths"})
 _FENCE = "---"
 _KNOWN_LINE = re.compile(
-    r"^(\s*)(apply|description|offers_tools)(\s*:\s*)(.*)$",
+    r"^(\s*)(apply|description|offers_tools|paths)(\s*:\s*)(.*)$",
     re.IGNORECASE,
 )
 _OFFER_SPLIT = re.compile(r"[,，、]")
@@ -38,6 +40,8 @@ class ParsedFrontmatter:
     description_present: bool
     offers_tools: tuple[str, ...] = ()
     offers_tools_present: bool = False
+    paths: tuple[str, ...] = ()
+    paths_present: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,9 +112,11 @@ def parse_entry_frontmatter(content: str) -> ParsedFrontmatter | FrontmatterErro
     apply: ApplyMode = "on_demand"
     description = ""
     offers_tools: tuple[str, ...] = ()
+    paths: tuple[str, ...] = ()
     apply_present = False
     description_present = False
     offers_tools_present = False
+    paths_present = False
     for line in split.fm_lines:
         raw = line.rstrip("\r\n")
         m = _KNOWN_LINE.match(raw)
@@ -130,6 +136,12 @@ def parse_entry_frontmatter(content: str) -> ParsedFrontmatter | FrontmatterErro
         elif key == "offers_tools":
             offers_tools_present = True
             offers_tools = parse_offers_tools_tokens(value)
+        elif key == "paths":
+            paths_present = True
+            paths = parse_path_patterns(value)
+
+    if apply == "paths" and not paths:
+        return FrontmatterError(message="paths apply requires a paths pattern")
 
     return ParsedFrontmatter(
         apply=apply,
@@ -140,6 +152,8 @@ def parse_entry_frontmatter(content: str) -> ParsedFrontmatter | FrontmatterErro
         description_present=description_present,
         offers_tools=offers_tools,
         offers_tools_present=offers_tools_present,
+        paths=paths,
+        paths_present=paths_present,
     )
 
 
@@ -149,15 +163,16 @@ def set_entry_frontmatter(
     apply: ApplyMode | None = None,
     description: str | None = None,
     offers_tools: Sequence[str] | None = None,
+    paths: Sequence[str] | None = None,
 ) -> str:
     """Text-level minimal edit of known keys. ``None`` = leave that key untouched.
 
     Preserves unknown keys, ``#`` comment lines, blank lines, and existing key order.
     New keys are appended just before the closing fence (or in a new block when absent).
-    ``offers_tools=()`` removes the key. Raises :class:`FrontmatterEditError` on
-    unclosed frontmatter (no auto-repair).
+    ``offers_tools=()`` / ``paths=()`` removes that key. Raises
+    :class:`FrontmatterEditError` on unclosed frontmatter (no auto-repair).
     """
-    if apply is None and description is None and offers_tools is None:
+    if apply is None and description is None and offers_tools is None and paths is None:
         return content
 
     split = _split_frontmatter(content)
@@ -167,7 +182,10 @@ def set_entry_frontmatter(
         return (
             split.bom
             + _render_new_block(
-                apply=apply, description=description, offers_tools=offers_tools
+                apply=apply,
+                description=description,
+                offers_tools=offers_tools,
+                paths=paths,
             )
             + split.text
         )
@@ -175,10 +193,12 @@ def set_entry_frontmatter(
     offers_value = (
         None if offers_tools is None else _format_offers_tools(offers_tools)
     )
+    paths_value = None if paths is None else _format_paths(paths)
     updated = list(split.fm_lines)
     seen_apply = False
     seen_description = False
     seen_offers = False
+    seen_paths = False
     drop: set[int] = set()
     for i, line in enumerate(updated):
         raw = line.rstrip("\r\n")
@@ -205,6 +225,13 @@ def set_entry_frontmatter(
             else:
                 key_token = m.group(2)
                 updated[i] = f"{indent}{key_token}{colon}{offers_value}{comment}{ending}"
+        elif key == "paths" and paths is not None:
+            seen_paths = True
+            if paths_value is None:
+                drop.add(i)
+            else:
+                key_token = m.group(2)
+                updated[i] = f"{indent}{key_token}{colon}{paths_value}{comment}{ending}"
 
     if drop:
         updated = [line for i, line in enumerate(updated) if i not in drop]
@@ -217,6 +244,8 @@ def set_entry_frontmatter(
         to_append.append(f"description: {description}{nl}")
     if offers_value is not None and not seen_offers:
         to_append.append(f"offers_tools: {offers_value}{nl}")
+    if paths_value is not None and not seen_paths:
+        to_append.append(f"paths: {paths_value}{nl}")
 
     return (
         split.bom
@@ -372,11 +401,19 @@ def _format_offers_tools(names: Sequence[str]) -> str | None:
     return ", ".join(tokens)
 
 
+def _format_paths(patterns: Sequence[str]) -> str | None:
+    tokens = parse_path_patterns(",".join(patterns))
+    if not tokens:
+        return None
+    return ", ".join(tokens)
+
+
 def _render_new_block(
     *,
     apply: ApplyMode | None,
     description: str | None,
     offers_tools: Sequence[str] | None = None,
+    paths: Sequence[str] | None = None,
 ) -> str:
     lines = [_FENCE]
     if apply is not None:
@@ -386,5 +423,8 @@ def _render_new_block(
     formatted = None if offers_tools is None else _format_offers_tools(offers_tools)
     if formatted is not None:
         lines.append(f"offers_tools: {formatted}")
+    formatted_paths = None if paths is None else _format_paths(paths)
+    if formatted_paths is not None:
+        lines.append(f"paths: {formatted_paths}")
     lines.append(_FENCE)
     return "\n".join(lines) + "\n"

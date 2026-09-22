@@ -31,7 +31,7 @@ export default function BrandMark({
         style={{ left: inset, top: inset, width: box, height: box }}
       />
       <span
-        className="absolute block rounded-[1px] bg-brand-2/75"
+        className="absolute block rounded-[1px] bg-blue-2/75"
         style={{ right: inset, top: inset, width: box, height: box }}
       />
       <span

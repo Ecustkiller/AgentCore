@@ -133,7 +133,7 @@ describe("ManualReference", () => {
     expect(screen.getAllByText("画布").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("白板")).toBeNull();
     expect(screen.getAllByText("文档").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("自主度").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("对话边界").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("工作流")).toBeNull();
     expect(screen.queryByText("系统任务")).toBeNull();
     expect(screen.queryByText("收件箱")).toBeNull();

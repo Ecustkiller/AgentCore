@@ -90,7 +90,7 @@ export function interjectionStatusTone(
 export const INTERJECTION_TONE_CLASS: Record<InterjectionStatusTone, string> = {
   // 失败：唯一红
   failed: "border-destructive/40 bg-destructive/10 text-destructive",
-  // 已看到：品牌蓝（非成功绿）
+  // 已看到：primary 蓝（非成功绿）
   injected: "border-primary/35 bg-primary/10 text-primary",
   // 纳入合成：实心底+正文色（克制收束，勿假绿）
   addressed: "border-border bg-muted text-foreground",

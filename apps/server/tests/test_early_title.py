@@ -529,12 +529,12 @@ async def test_stream_chat_schedules_title_before_turn(monkeypatch):
     monkeypatch.setattr(turns_mod, "resolve_local_binding", AsyncMock(return_value=None))
     monkeypatch.setattr(turns_mod, "resolve_profile_set", AsyncMock(return_value=None))
 
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     monkeypatch.setattr(
         turns_mod,
         "resolve_permission_axes",
-        AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+        AsyncMock(return_value=WorkspaceBoundary.FOLDER),
     )
     monkeypatch.setattr(
         turns_mod,
@@ -612,12 +612,12 @@ async def test_stream_chat_skips_title_when_already_named(monkeypatch):
     monkeypatch.setattr(turns_mod, "resolve_local_binding", AsyncMock(return_value=None))
     monkeypatch.setattr(turns_mod, "resolve_profile_set", AsyncMock(return_value=None))
 
-    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
     monkeypatch.setattr(
         turns_mod,
         "resolve_permission_axes",
-        AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+        AsyncMock(return_value=WorkspaceBoundary.FOLDER),
     )
     monkeypatch.setattr(
         turns_mod,

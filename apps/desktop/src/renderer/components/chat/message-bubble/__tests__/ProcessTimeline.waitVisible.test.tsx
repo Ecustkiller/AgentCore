@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 /**
- * CEO bubble (collapseProcessSteps default true) must show wait tool rows and
- * wait-idle reasoning — omitCoordinationIdleSteps is no longer applied here.
+ * Thinking tail around team markers. A settled tool does not suppress it.
  */
 import {
   ProcessTimeline,
@@ -36,44 +35,7 @@ function renderTimeline(process: ProcessStep[], isStreaming: boolean) {
   );
 }
 
-describe("ProcessTimeline · wait visibility (CEO bubble)", () => {
-  it("shows wait tool and wait-idle reasoning under default collapse", () => {
-    const process: ProcessStep[] = [
-      { kind: "reasoning", text: "空等听团" },
-      {
-        kind: "tool",
-        id: "w1",
-        tool_name: "wait",
-        arguments: {},
-        result: null,
-        status: "success",
-      },
-      { kind: "reasoning", text: "仍在听" },
-      { kind: "content", text: "对用户说一句" },
-    ];
-    renderTimeline(process, false);
-    expect(screen.getByText("Wait")).toBeTruthy();
-    expect(screen.getByText("空等听团")).toBeTruthy();
-    expect(screen.getByText("仍在听")).toBeTruthy();
-    expect(screen.getByText("对用户说一句")).toBeTruthy();
-  });
-
-  it("does not paint Thinking tail after a settled wait while streaming", () => {
-    const process: ProcessStep[] = [
-      {
-        kind: "tool",
-        id: "w1",
-        tool_name: "wait",
-        arguments: {},
-        result: null,
-        status: "success",
-      },
-    ];
-    renderTimeline(process, true);
-    expect(screen.getByText("Wait")).toBeTruthy();
-    expect(screen.queryByText(/Thinking/i)).toBeNull();
-  });
-
+describe("ProcessTimeline · team tail", () => {
   it("paints Thinking tail after a team marker when the graph is not visible", () => {
     renderTimeline([{ kind: "team", execution_id: "e1" }], true);
     expect(screen.getByText("Thinking…")).toBeTruthy();
@@ -104,7 +66,6 @@ describe("shouldShowThinkingTail", () => {
     status: "success",
   };
   const toolRunning: ProcessStep = { ...toolDone, status: "running" };
-  const waitDone: ProcessStep = { ...toolDone, tool_name: "wait" };
   const team: ProcessStep = { kind: "team", execution_id: "e1" };
   const leftoverPlanReview = {
     kind: "plan_review",
@@ -118,10 +79,9 @@ describe("shouldShowThinkingTail", () => {
     pendingUserGate: false,
   };
 
-  it("keeps the completed-tool tail and wait S4", () => {
+  it("keeps the completed-tool tail and hides a running tool", () => {
     expect(shouldShowThinkingTail({ ...live, last: toolDone })).toBe(true);
     expect(shouldShowThinkingTail({ ...live, last: toolRunning })).toBe(false);
-    expect(shouldShowThinkingTail({ ...live, last: waitDone })).toBe(false);
   });
 
   it("treats marker tails as no-live-node (orchestration stand-in)", () => {

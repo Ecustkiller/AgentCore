@@ -1,4 +1,5 @@
 import { useConversations } from "@/hooks/useConversations";
+import { heldUserMessageIds } from "@/lib/pendingUserMessage";
 import {
   useBackgroundTasks,
   useBackgroundTasksSync,
@@ -9,6 +10,8 @@ import {
   useActiveMessages,
   useConversationStore,
 } from "@/stores/conversation";
+import { useExecutionStore } from "@/stores/execution";
+import { useQueuedTurns } from "@/stores/queuedTurns";
 import {
   usePermissionChanges,
   usePermissionChangesSync,
@@ -31,6 +34,28 @@ export function MessageList() {
       null)
     : null;
   const messages = useActiveMessages();
+  const queued = useQueuedTurns(conversationId);
+  const executionById = useExecutionStore((s) => s.byId);
+  const visibleMessages = useMemo(() => {
+    const receivedUserMessageIds: string[] = [];
+    for (const runtime of Object.values(executionById)) {
+      for (const item of runtime.userInterjections ?? []) {
+        if (item.status === "received" && item.userMessageId) {
+          receivedUserMessageIds.push(item.userMessageId);
+        }
+      }
+    }
+    const held = heldUserMessageIds(
+      queued
+        .map((entry) => entry.messageId)
+        .filter((id): id is string => Boolean(id)),
+      receivedUserMessageIds,
+    );
+    if (held.size === 0) return messages;
+    return messages.filter(
+      (message) => message.role !== "user" || !held.has(message.id),
+    );
+  }, [messages, queued, executionById]);
   // 后台云端任务（交接「方案 B」）：本地模式对话才同步，按时间戳并入时间线，故卡片
   // 与消息一同**原位**渲染、随对话重开重放（数据源是后端持久化的 handoff jobs）。
   useBackgroundTasksSync(conversationId);
@@ -54,13 +79,13 @@ export function MessageList() {
   const items = useMemo(
     () =>
       mergeTimeline(
-        messages,
+        visibleMessages,
         tasks,
         memoryUpdates,
         presetChanges,
         compactedThrough,
       ),
-    [messages, tasks, memoryUpdates, presetChanges, compactedThrough],
+    [visibleMessages, tasks, memoryUpdates, presetChanges, compactedThrough],
   );
 
   return (

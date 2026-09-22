@@ -20,6 +20,10 @@ def message_start(
     conversation_id: str,
     trace_id: str | None = None,
     full_replay: bool = False,
+    user_message_id: str | None = None,
+    content: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
 ) -> SSEEvent:
     """Open (and stamp) an assistant bubble.
 
@@ -27,6 +31,10 @@ def message_start(
     client resets the local streaming state it holds for ``message_id`` before folding
     what follows (see :mod:`agentcore.runtime.events.attach_replay`). Live turns leave
     it off — the flag is only ever set by the replay builders.
+
+    ``user_message_id`` / ``content`` name the persisted user row this open reuses.
+    Only a queue drain sets them (see :func:`reused_user_row_from_events`). A frame
+    without them is not a dequeue.
     """
     payload: dict[str, Any] = {
         "message_id": message_id,
@@ -37,7 +45,43 @@ def message_start(
         payload["trace_id"] = tid
     if full_replay:
         payload["full_replay"] = True
+    umid = (user_message_id or "").strip()
+    if umid:
+        payload["user_message_id"] = umid
+        payload["content"] = "" if content is None else str(content)
+        if attachments:
+            payload["attachments"] = attachments
+        if agent_mentions:
+            payload["agent_mentions"] = agent_mentions
     return SSEEvent(type=EventType.MESSAGE_START, payload=payload)
+
+
+def reused_user_row_from_events(events: list[SSEEvent]) -> dict[str, Any]:
+    """User row this sink's queue drain already named, if any.
+
+    The only source is ``turn_queue_started`` on this sink. Idle, resume, and steer
+    never emit that frame, so the dict is empty and ``message_start`` stays bare.
+    Does not look at the conversation's last user row.
+    """
+    for event in events:
+        if event.type is not EventType.TURN_QUEUE_STARTED:
+            continue
+        raw = event.payload or {}
+        umid = str(raw.get("user_message_id") or "").strip()
+        if not umid:
+            continue
+        binding: dict[str, Any] = {
+            "user_message_id": umid,
+            "content": str(raw.get("content") or ""),
+        }
+        attachments = raw.get("attachments")
+        if attachments:
+            binding["attachments"] = attachments
+        mentions = raw.get("agent_mentions")
+        if mentions:
+            binding["agent_mentions"] = mentions
+        return binding
+    return {}
 
 
 def turn_warning(message: str) -> SSEEvent:

@@ -7,8 +7,8 @@
  * C 分类可用 warning，StatusTone 不恢复 warning 槽。
  */
 
-/** Brand shells for decision & checkpoint cards. */
-export type BrandTone = "primary";
+/** Primary-blue shells for decision & checkpoint cards. */
+export type PrimaryShellTone = "primary";
 
 /** Execution / outcome chips and resolved records. */
 export type StatusTone = "primary" | "success" | "destructive" | "muted";
@@ -16,12 +16,12 @@ export type StatusTone = "primary" | "success" | "destructive" | "muted";
 export type DecisionShellTone = "primary" | "neutral";
 
 /** Subtle card border + tinted background. */
-export const surfaceSubtle: Record<BrandTone, string> = {
+export const surfaceSubtle: Record<PrimaryShellTone, string> = {
   primary: "border-primary/30 bg-primary/5",
 };
 
 /** CTA footer bar on decision cards. */
-export const decisionCtaBar: Record<BrandTone, string> = {
+export const decisionCtaBar: Record<PrimaryShellTone, string> = {
   primary: "border-primary/15 bg-primary/10",
 };
 
@@ -93,9 +93,9 @@ export const roundLabelPill =
  * Debate round signal dot —— verdict-derived (clash → converge progression), NOT run
  * status (color-tokens.mdc: this is a debate-domain classification). Shared by the
  * narrative timeline rail and the convergence band so a round reads the same in both.
- *  - inflight  当前在飞那轮（尚未裁判）→ 品牌蓝脉动
+ *  - inflight  当前在飞那轮（尚未裁判）→ primary 蓝脉动
  *  - converged 收敛终点 → 成功绿
- *  - clash     有真交锋 → 品牌蓝实心
+ *  - clash     有真交锋 → primary 蓝实心
  *  - quiet     各说各话 / 无交锋 → 中性灰
  */
 export type DebateSignal = "inflight" | "converged" | "clash" | "quiet";

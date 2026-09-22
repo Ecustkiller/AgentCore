@@ -1476,55 +1476,6 @@ describe("ToolLine · handoff brief card", () => {
   });
 });
 
-describe("ToolLine · wait 一行收口", () => {
-  it("successful wait is one line: no peek, no chevron", () => {
-    const { container } = render(
-      <ToolLine
-        step={step({
-          tool_name: "wait",
-          arguments: {},
-          result: "已等待队员回合结束。",
-          status: "success",
-        })}
-      />,
-    );
-    expect(screen.getByText("Wait")).toBeTruthy();
-    expect(screen.queryByText(/已等待/)).toBeNull();
-    expect(collapsedSubline(container)).toBeNull();
-    expect(container.querySelector(".lucide-chevron-right")).toBeNull();
-    expect(container.querySelector(".lucide-chevron-down")).toBeNull();
-    fireEvent.click(screen.getByText("Wait"));
-    expect(screen.queryByText(/已等待/)).toBeNull();
-  });
-
-  it("failed wait stays one line; product copy is in the expanded detail", () => {
-    const { container } = renderWithTooltip(
-      <ToolLine
-        step={step({
-          tool_name: "wait",
-          arguments: {},
-          result: "WaitError: internal timeout",
-          status: "error",
-          failure: {
-            message: "等待队员超时。",
-            code: "WAIT_TIMEOUT",
-          },
-        })}
-      />,
-    );
-    expect(screen.getByText("Wait")).toBeTruthy();
-    expect(screen.queryByTestId("tool-fault-label")).toBeNull();
-    expect(screen.queryByText("未完成")).toBeNull();
-    expect(screen.queryByText("等待队员超时。")).toBeNull();
-    expect(screen.queryByText(/WaitError/)).toBeNull();
-    expect(collapsedSubline(container)).toBeNull();
-    fireEvent.click(screen.getByText("Wait"));
-    expect(screen.getByText("等待队员超时。")).toBeTruthy();
-    expect(screen.getByText(/WaitError/)).toBeTruthy();
-    expect(screen.queryByTestId("tool-error-detail-toggle")).toBeNull();
-  });
-});
-
 describe("ToolLine · ack 族成功无 peek", () => {
   it.each([
     {

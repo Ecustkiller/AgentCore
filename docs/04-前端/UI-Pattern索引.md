@@ -100,7 +100,7 @@ node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
 | 不变量 | 说明 |
 |---|---|
 | 两套行，禁止第三套 | 导航 / 树 = `SurfaceRow`；设置内容 = `SettingRow`。后者已收设置子页四种行，不并进 SurfaceRow。工具箱「我的」：必带矮卡（有条目不套外层卡，空为虚线井）、按需夹收进一张卡、卡内仍是 `SurfaceRow`；MCP 栏一张卡、卡内 `SurfaceRow`；「官方」提示词/工具 `CatalogTile`；点开居中 Dialog。市场货架仍走 `CatalogTile`
-| 认路选中 | 浅底 + 线框图标 `currentColor`：画布 `bg-accent text-accent-foreground`，侧栏 `bg-sidebar-accent text-sidebar-accent-foreground`。**否决**导航用 inverse（深底浅字）。inverse 只给 `IconButton` 停止生成。发送是实心键：可发 `primary`，空/不可发 `muted`（灰底）；**否决**发送走幽灵 `default`。＋/语音仍幽灵 |
+| 认路选中 | 浅底 + 线框图标 `currentColor`：画布 `bg-accent text-accent-foreground`，侧栏 `bg-sidebar-accent text-sidebar-accent-foreground`。**否决**导航用 inverse（深底浅字）。inverse 给停止生成，以及输入框可发送（浅色近黑、暗色近白，与停止同族）。发送是实心键：可发 `inverse`，空/不可发 `muted`（灰底）；**否决**可发送走品牌蓝 `primary` 或幽灵 `default`。＋/语音仍幽灵 |
 | 页头一行 | `PageHeader`：h1 单行 + 可选同行 meta / 动作；禁副标题。设置 / 枢纽页同一组件，用有没有 `back` 区分。工具箱不画可见标题：`SectionTabs` 在左（官方 / 我的 / MCP / 市场；无本机通道不画 MCP），搜索在右（「我的」同行「新建」，「MCP」同行「添加」），不可见 h1 留滚动锚；市场与目录同一行。画布深页走 `CanvasShell` → [页头层级](#页头层级) |
 | 列表空态同一骨架 | 标题 + 可选一句说明 + 可选主操作 = `EmptyHint`。`DraftEmptyState` 仍是对话草稿特例 |
 | 货架卡 | 工具箱**市场**与「官方」提示词/工具 = `CatalogTile`。禁止再手写第三套市场磁贴。身份行：左色板图标、右名称、可选副标题；右上 `accessory` 只放状态或唯一身份（已装 / 有更新 / 尚未开放 / 官方）。通栏两行简介（空也占位）。填槽由 `promptShelfTile`（市场卡 + 提示词读卡 + 官方货架）共用，禁止再按叶子手写一套。准则简介是固定句；官方 HOW 与出厂工具简介是 UI 专用句 `blurb`，不进模型目录。底栏 `tags` 放分类元数据（会用到工具的打 **工具**：快照写过工具名的我的/市场；市场提示词与装进目录的副本 / 已上架的我的 = 场景组名）。点卡 = 居中 Dialog。市场进场整库：库顶官方精选，下按场景组折行网格（不封顶、不挂查看全部）。格子宽随画布（min 240，1200 画布四列约 280）。提示词目录例外：必带矮卡（空为虚线井，有条目不套外层卡）、按需夹一张卡内 `SurfaceRow`，不走 `CatalogTile`。MCP 栏是一张卡里的行，不是货架卡。出厂工具与官方提示词（准则与教法）在「官方」走 `CatalogTile`，点开 Dialog |
@@ -110,7 +110,7 @@ node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
 | 状态 / 角色 / 所选胶囊 | 文字标签走 `Badge`（`pill`）。计数圆点、进度条、头像圈不是徽章 |
 | 动作底栏 | Decision / Dialog 右下锚点；不扫输入框、工具条、协作图干预 |
 | 新面先点名 L3 | 新页 / 新交付物须先说用哪套 Primitive / Pattern，禁止第三套壳。辩论室保持登记例外（控件仍用同一套按钮与徽章） |
-| 消息操作行 | 窄屏常显；md+ hover / focus-within。助手复制·克隆对话·重新生成、用户复制·编辑与发送时刻、IM 回复与 IM 时间共用 `MESSAGE_ACTION_REVEAL_CLASS`。用户复制·编辑与助手底栏同一套 `IconButton`（tooltip 标名）。用户气泡脚 md+ 叠在气泡右下沿、宽随动作、不钉气泡内容宽；闲置不占流。**否决**脚上铺「复制」「编辑」胶囊、把脚宽锁在短句气泡上。助手完成时刻常显 |
+| 消息操作行 | 窄屏常显；md+ hover / focus-within。助手复制·克隆对话·重新生成·收到的上下文·用量·复制排查包、用户复制·编辑与发送时刻、IM 回复与 IM 时间共用 `MESSAGE_ACTION_REVEAL_CLASS`。欠包的回合把「复制排查包」钉成常显。用户复制·编辑与助手底栏同一套 `IconButton`（tooltip 标名）。用户气泡脚 md+ 叠在气泡右下沿、宽随动作、不钉气泡内容宽；闲置不占流。**否决**脚上铺「复制」「编辑」胶囊、把脚宽锁在短句气泡上。助手完成时刻常显 |
 | 文档 tab 动作 | 内容撑宽横条（VS Code 编辑器 tab）：关闭/弹出 **overlay** 标题尾，闲置不占槽。活跃 tab 常显 × 并留右槽（避免压住末字）；弹出仅 hover / focus-within。未保存 = 标题前 primary 圆点（`dirty`），不改 ×。`TabChip`。**否决** Chrome 均分宽 + 流内占位（右坞不是均分条）；**否决** `opacity-0` 仍占 `size-5` |
 | 列表行动作 | 固定列宽（VS Code 资源管理器 / 对话行）：hover / focus-within 才进流，标题 truncate。**否决** 对流内槽 `opacity-0`（闲置仍吃标题宽）。对话行已是；文件夹头 / Git 悬停动作对齐。最近删除右侧由保留期 Badge 定宽，不套 overlay |
 | 品牌字体 | 仅 BrandMark Latin；正文系统栈 |
@@ -152,6 +152,10 @@ node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
 ## 布局规格（细节权威 = desktop-layout）
 
 宽度梯度、字号 4 级、圆角 3 级与禁令 → `desktop-layout.mdc`。豁免：对话/文件/设置/消息两栏壳、真全屏手册。
+
+### 窄屏热区
+
+宽屏图标按钮保持 28 / 32px。窄屏（<768px）或主指针为粗指针时，这些控件的可点区域至少 44px，字形不变：发送 / 停止、提问与审批的选项行和底栏、侧栏导航（新对话 / 文件 / 消息；窄屏不上工具箱）与对话行。文件树和过程行保持原密度。方形控件用 `touch-target`，通栏行用 `touch-row`。实现 → `globals.css`。
 
 ### 间距档
 

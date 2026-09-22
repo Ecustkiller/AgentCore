@@ -117,6 +117,9 @@ const sidecarApi: SidecarApi = {
   },
   cancelQueuedTurn: async () => ({ status: "not_found" as const }),
   listQueuedTurns: async () => ({ items: [] }),
+  reorderQueuedTurns: async () => undefined,
+  stopAndSendQueuedTurn: async () => undefined,
+  editQueuedTurn: async () => ({ status: "not_found" as const }),
   occupancy: async () => ({ occupied: false }),
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");
@@ -156,6 +159,7 @@ const sidecarApi: SidecarApi = {
     active_session_id: null,
   }),
   onEvent: () => noop,
+  onQueueNeedStart: () => noop,
   onFulfillFrame: () => noop,
   onStatus: () => noop,
 };

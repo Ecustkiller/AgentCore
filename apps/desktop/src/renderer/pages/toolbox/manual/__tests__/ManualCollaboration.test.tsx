@@ -45,7 +45,7 @@ describe("ManualCollaboration", () => {
     expect(sectionText("autonomy")).not.toMatch(/组团卡/);
     expect(sectionText("checkpoint")).not.toMatch(/组团卡/);
     expect(document.body.textContent).not.toMatch(/拒开工/);
-    expect(document.getElementById("autonomy")?.textContent).toMatch(/自主度/);
+    expect(document.getElementById("autonomy")?.textContent).toMatch(/对话边界/);
     expect(document.getElementById("control")?.textContent).toMatch(/中途插手/);
     expect(document.getElementById("checkpoint")?.textContent).toMatch(
       /检查点与审批/,
@@ -57,7 +57,7 @@ describe("ManualCollaboration", () => {
     expect(screen.queryByText(/后续规划/)).toBeNull();
     expect(screen.getByText(/角色由 CEO 临时分配/)).toBeTruthy();
     expect(screen.getAllByText(/带现场续派/).length).toBeGreaterThan(0);
-    expect(screen.getByText("全放行（推荐）")).toBeTruthy();
+    expect(screen.getByText("这个文件夹（推荐）")).toBeTruthy();
     expect(screen.getByText(/设为新会话默认/)).toBeTruthy();
     expect(screen.getByText("中途插手")).toBeTruthy();
     expect(screen.getByText("规矩与旧对话")).toBeTruthy();

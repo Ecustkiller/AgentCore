@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { inlineToken } from "@/lib/inlineBody";
 import { DRAFT_KEY, useConversationStore } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
+import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -12,6 +13,12 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  useQueuedTurnsStore.setState({
+    byConversation: {},
+    authoritativeIds: {},
+    staleIds: {},
+    cloudQueueReady: false,
+  });
   useExecutionStore.setState({ byId: {} });
   useConversationStore.setState({
     currentConversationId: null,
@@ -132,6 +139,99 @@ describe("InterjectionTimeline", () => {
     expect(note.textContent).toBe("可选备注");
     expect(note.className).toContain("border-t");
     expect(note.className).toContain("text-muted-foreground/70");
+  });
+
+  it("快照对账后队里没有这条，不再画将在下一条回复处理", () => {
+    const cid = "c-ij";
+    useConversationStore.setState((s) => ({
+      currentConversationId: cid,
+      byId: {
+        ...s.byId,
+        [cid]: {
+          ...s.byId[DRAFT_KEY],
+          turnPhase: "streaming",
+          messages: [
+            {
+              id: "m1",
+              role: "assistant",
+              content: "",
+              createdAt: new Date().toISOString(),
+              executionId: null,
+              isStreaming: true,
+            },
+          ],
+        },
+      },
+    }));
+    useQueuedTurnsStore.setState({
+      authoritativeIds: { [cid]: true },
+      staleIds: {},
+      cloudQueueReady: false,
+    });
+    useExecutionStore.setState({
+      byId: {
+        m1: {
+          userInterjections: [
+            {
+              interjectionId: "ij-q",
+              executionId: "e1",
+              content: "排队正文应完整气泡展示",
+              status: "queued",
+            },
+          ],
+        },
+      },
+    } as never);
+
+    render(<InterjectionTimeline messageId="m1" interjectionId="ij-q" />);
+    expect(screen.queryByText("将在下一条回复处理")).toBeNull();
+    expect(screen.queryByText("排队正文应完整气泡展示")).toBeNull();
+  });
+
+  it("turn_queued 尚未对上快照时仍画等待徽章", () => {
+    const cid = "c-ij";
+    useConversationStore.setState((s) => ({
+      currentConversationId: cid,
+      byId: {
+        ...s.byId,
+        [cid]: {
+          ...s.byId[DRAFT_KEY],
+          turnPhase: "streaming",
+          messages: [
+            {
+              id: "m1",
+              role: "assistant",
+              content: "",
+              createdAt: new Date().toISOString(),
+              executionId: null,
+              isStreaming: true,
+            },
+          ],
+        },
+      },
+    }));
+    useQueuedTurnsStore.setState({
+      authoritativeIds: { [cid]: true },
+      staleIds: { [cid]: true },
+      cloudQueueReady: false,
+    });
+    useExecutionStore.setState({
+      byId: {
+        m1: {
+          userInterjections: [
+            {
+              interjectionId: "ij-q",
+              executionId: "e1",
+              content: "排队正文应完整气泡展示",
+              status: "queued",
+            },
+          ],
+        },
+      },
+    } as never);
+
+    render(<InterjectionTimeline messageId="m1" interjectionId="ij-q" />);
+    expect(screen.getByText("将在下一条回复处理")).toBeTruthy();
   });
 
   it("folds queued into a one-line anchor that drops the duplicated body", () => {

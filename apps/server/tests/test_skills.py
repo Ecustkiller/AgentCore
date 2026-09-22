@@ -223,15 +223,15 @@ def test_directory_lists_only_available_skills_with_names_and_summaries():
         assert skill.summary in out
 
 
-def test_directory_groups_skills_under_chinese_subtitles():
-    """CEO 能力指引按交付/产品分组；空组不出现。"""
+def test_skill_directory_orders_by_decision_moment_without_subtitles():
+    """只一栏时不打栏名；决策时刻组只排序，不印子标题。"""
     ceo = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
-    for heading in ("交付：", "产品："):
-        assert heading in ceo
-    assert "编排：" not in ceo
-    assert "工作区：" not in ceo
-    assert "工具：" not in ceo
-    assert "- page_ui：" in ceo
+    assert "能力指引：" not in ceo
+    for heading in ("交付：", "产品：", "编排：", "工作区：", "工具："):
+        assert heading not in ceo
+    assert ceo.index('consult("data_file_landing")') < ceo.index('consult("page_ui")')
+    assert ceo.index('consult("page_ui")') < ceo.index('consult("product_help")')
+    assert 'consult("page_ui")' in ceo
     worker_src_names = {
         s.name
         for s in build_system_skill_registry().available(
@@ -254,8 +254,10 @@ def test_directory_groups_skills_under_chinese_subtitles():
         )
     ]
     worker = render_on_demand_directory(worker_entries, with_summaries=True)
+    assert "能力指引：" not in worker
+    assert "交付：" not in worker
     assert "编排：" not in worker
-    assert "- page_ui：" in worker
+    assert 'consult("page_ui")' in worker
     assert "工作区：" not in worker
     assert "产品：" not in worker
 
@@ -283,7 +285,7 @@ def test_product_help_consult_carved_out_and_owned_by_catalog():
 
     out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
     hint = _CEO_CORE_HINT
-    assert "- product_help：" in out
+    assert 'consult("product_help")' in out
     assert "product_help" not in hint
 
 
@@ -299,7 +301,7 @@ async def test_consult_product_help_section_hit():
     assert "#/toolbox/manual/" in result.output
     assert "s=workspace" in result.output
     directory = render_skill_directory(reg, _NO_LIVE_USER)
-    assert "- product_help：" in directory
+    assert 'consult("product_help")' in directory
     assert "product_help:workspace" not in directory
 
 
@@ -395,7 +397,7 @@ async def test_consult_product_help_hit():
     assert result.success
     assert result.output == skill.body
     directory = render_skill_directory(reg, _NO_LIVE_USER)
-    assert "- product_help：" in directory
+    assert 'consult("product_help")' in directory
 
 
 async def test_consult_degrades_on_unknown_name():

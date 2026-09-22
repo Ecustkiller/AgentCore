@@ -295,7 +295,7 @@ export function WorkspaceGroupHeader({
   );
 
   const rowActionClass =
-    "size-6 text-sidebar-foreground/40 hover:text-sidebar-foreground";
+    "size-6 text-sidebar-muted hover:text-sidebar-foreground";
   const { className: sortableClassName, ...sortableRest } = sortable ?? {};
 
   return (
@@ -331,7 +331,7 @@ export function WorkspaceGroupHeader({
                 <ChevronRight
                   size={14}
                   aria-hidden
-                  className={`absolute text-sidebar-foreground/40 opacity-0 transition-[opacity,transform] group-hover:opacity-100 ${
+                  className={`absolute text-sidebar-muted opacity-0 transition-[opacity,transform] group-hover:opacity-100 ${
                     expanded ? "rotate-90" : ""
                   }`}
                 />
@@ -346,7 +346,7 @@ export function WorkspaceGroupHeader({
                   )}
                 </span>
                 {ancestorLabel && (
-                  <span className="truncate text-xs leading-tight text-sidebar-foreground/40">
+                  <span className="truncate text-xs leading-tight text-sidebar-muted">
                     {ancestorLabel}
                   </span>
                 )}

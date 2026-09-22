@@ -299,8 +299,8 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         expect_action="DIRECT",
         expect_max_recon_rounds=1,
     ),
-    # 同一讨论的多个切面 ≠ N 个对比对象；先不成文仍派，人数跟缝走（不钉死恰好 1 人）。
-    # max=2 只打「三切面三人」；点名对比三对象走 compare_three_js_frameworks（≥3）。
+    # 同一讨论的多个侧面不是独立件；先不成文仍派，人数跟缝走（不钉死恰好 1 人）。
+    # max=2 只打「三侧面三人」；三框架对照走 compare_three_js_frameworks（拆开仍成立 → ≥3）。
     RoutingScenario(
         key="discuss_arch_bug_maintain_facets",
         phrasing="colloquial",
@@ -315,6 +315,18 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         expect_min_workers=1,
         expect_max_workers=2,
     ),
+    # 同一话题的多目录是切面，不是拆开仍成立的对照。直答或 1 人；
+    # 按子系统并行超过 1 人即过重。措辞保持这次口语，不改去追结果。
+    RoutingScenario(
+        key="discuss_tool_prompt_one_topic",
+        phrasing="colloquial",
+        category="research_brief",
+        expect_playbook="",
+        user_message="讨论优化委派工具的提示词",
+        workspace="codebase",
+        expect_action="DIRECT|DELEGATE",
+        expect_max_workers=1,
+    ),
     RoutingScenario(
         key="identity_who_are_you",
         phrasing="colloquial",
@@ -324,7 +336,7 @@ SCENARIOS: tuple[RoutingScenario, ...] = (
         workspace="empty",
         expect_action="DIRECT|ASK",
     ),
-    # 第 19 步：点名对比 N 个对象 → tasks 至少 N 人。
+    # 三框架各自「适不适合」拆开仍成立 → tasks 至少 3 人。不钉「点名即 N 人」。
     RoutingScenario(
         key="compare_three_js_frameworks",
         phrasing="colloquial",

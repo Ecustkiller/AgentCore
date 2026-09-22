@@ -16,12 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from agentcore.core.logging import get_logger
-from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import DocumentRepository
-from agentcore.memory.rules_injection import (
-    lookup_on_demand_rule_body_from_cloud,
-    rule_consult_name,
-)
+from agentcore.memory.rules_injection import rule_consult_name
 from agentcore.runtime.context.consultable import ConsultDirectoryEntry
 from agentcore.runtime.skills.product_help import (
     PRODUCT_HELP_NAME,
@@ -204,47 +199,14 @@ class RuleConsultSource:
         ]
 
     async def fetch_by_name(self, user_id: str, name: str) -> str | None:
+        from agentcore.memory.rules_injection import lookup_on_demand_rule_body
+
         key = rule_consult_name(name)
         if not key or key in set(self.skip_names):
             return None
-        try:
-            from agentcore.account.credentials import get_account_credentials
-            from agentcore.memory.account_prepare_cache import (
-                get_account_rules_memory_snapshot,
-            )
-
-            if get_account_credentials() is not None:
-                snap = get_account_rules_memory_snapshot(user_id, self.folder_id)
-                if snap is None:
-                    return None
-                return lookup_on_demand_rule_body_from_cloud(
-                    snap.rules_payload, folder_id=self.folder_id, name=key
-                )
-            async with async_session_factory() as session:
-                from agentcore.memory.scope_chain import db_scope_chain
-
-                repo = DocumentRepository(session)
-                chain = await db_scope_chain(user_id, self.folder_id, session=session)
-                for scope in reversed(chain):
-                    body = await self._load_named(repo, user_id, scope, key)
-                    if body is not None:
-                        return body
-                return await self._load_named(repo, user_id, None, key)
-        except Exception as e:  # noqa: BLE001 — never break consult over rules IO
-            logger.warning(
-                "consult.rule_fetch_failed", user_id=user_id, name=key, error=str(e)
-            )
-            return None
-
-    @staticmethod
-    async def _load_named(
-        repo: DocumentRepository, user_id: str, folder_id: str | None, key: str
-    ) -> str | None:
-        for doc in await repo.list_on_demand_user_rules(user_id, folder_id):
-            if rule_consult_name(doc.name) == key:
-                body = doc.content or ""
-                return body if body.strip() else None
-        return None
+        return await lookup_on_demand_rule_body(
+            user_id, folder_id=self.folder_id, name=key
+        )
 
 
 @dataclass

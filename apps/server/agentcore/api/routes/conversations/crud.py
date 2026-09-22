@@ -714,6 +714,11 @@ async def delete_conversation(
     from agentcore.workspace import grant_store
 
     await grant_store.clear_conversation(conversation_id)
+    from agentcore.runtime.turn.durable import delete_durable_conversation
+    from agentcore.runtime.turn.queue import turn_queue
+
+    await delete_durable_conversation(conversation_id)
+    turn_queue.clear(conversation_id)
     # L3 team-browser: tear down any live sandbox session (no-op when none exists;
     # teardown errors are swallowed+logged inside the registry, never fail the delete).
     from agentcore.runtime.browser import default_browser_session_registry

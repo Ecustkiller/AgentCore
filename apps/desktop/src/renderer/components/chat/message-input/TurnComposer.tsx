@@ -1,6 +1,6 @@
 import { DraftWorkspaceAssignPrompt } from "@/components/chat/DraftWorkspaceAssignPrompt";
 import { MentionMenu } from "@/components/chat/MentionMenu";
-import { Button, IconButton } from "@/components/ui";
+import { IconButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
 import {
@@ -8,7 +8,8 @@ import {
   isContinuableAssistant,
 } from "@/lib/composerContinueHint";
 import {
-  useCoordinationActive,
+  resolveOccupiedShortcutDelivery,
+  useClassicToolStepOpen,
   useLiveCoordinatingTurn,
 } from "@/lib/composerDelivery";
 import { connectivityEscalationSuffix } from "@/lib/errors";
@@ -51,7 +52,7 @@ import {
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useServerHealthStore } from "@/stores/serverHealth";
-import { AtSign, ListPlus, Loader2, Send, Square, X } from "lucide-react";
+import { AtSign, Loader2, Send, Square, X } from "lucide-react";
 import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -159,8 +160,8 @@ export function TurnComposer({
     ? MIN_COMPOSER_HEIGHT_BAR
     : MIN_COMPOSER_HEIGHT_CARD;
   const isGenerating = useActiveGenerating();
-  const coordinationActive = useCoordinationActive();
   const teamLive = useLiveCoordinatingTurn();
+  const toolStepOpen = useClassicToolStepOpen();
   const liveDebate = useLiveDebateSteer();
   const turnPhase = useActiveTurnPhase();
   const isStopping = turnPhase === "stopping";
@@ -636,14 +637,15 @@ export function TurnComposer({
 
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      // 辩论进行中一律 continue。经典生成中 = 插队；协调空窗生成中 = 排队。
+      // 辩论进行中一律 continue。
+      // 生成中：队还在或工具步还在执行才 steer；散文与 Enter 相同，排队。
       // 空闲与 Enter 同路径（默认 steer），勿伪装传 queue。
       if (sendBlocked) return;
       if (liveDebate) {
         void handleSend();
       } else if (deskOccupied) {
         void handleSend({
-          delivery: coordinationActive ? "queue" : "steer",
+          delivery: resolveOccupiedShortcutDelivery(conversationId),
         });
       } else {
         void handleSend();
@@ -655,7 +657,7 @@ export function TurnComposer({
       e.preventDefault();
       // 离线 / 只读协作桌硬禁用（与发送按钮一致；handleSend 仍有兜底）。
       if (sendBlocked) return;
-      // 辩论进行中 continue。其余不传 delivery：空闲/协调空窗默认 steer；经典生成中默认 queue。
+      // 辩论进行中 continue。其余不传 delivery：空闲默认 steer；生成中默认 queue。
       void handleSend();
     }
   };
@@ -690,18 +692,19 @@ export function TurnComposer({
     </>
   );
 
-  // 生成中：停止常显。经典：有草稿时「插队」次级 +「排队」主键。
-  // 协调空窗：有草稿时复用空闲「发送」主键（默认立刻给主 Agent）+ 次级「排队」。
-  // 辩论进行中：发送=continue；隐藏排队/插队；收场靠裁判收敛，不在此露出结论。
+  // 生成中：停止常显。有草稿时复用空闲「发送」钮（Enter = 排队，挂在输入框上方）。
+  // 停止并发送在排队挂件上。Ctrl/Cmd+Enter 只在队还在或工具步还在执行时送进当前回合。
+  // 辩论进行中：发送=continue；隐藏排队；收场靠裁判收敛，不在此露出结论。
   // 离线 / 只读协作桌硬禁用发送（按钮 disabled + title；键盘走 handleKeyDown）。
   // 辩论进行中主框是「对这场说话」：发送只看正文。@ 入口已藏，mention 芯片不得单独点亮发送。
   const hasDraft = liveDebate
     ? Boolean(plainText(value).trim())
     : composerHasSendableDraft(value, attachments, agentMentions);
-  const queueDisabled = !hasDraft || sendBlocked || isSending;
   const sendReady = !sendBlocked && (hasDraft || isSending);
-  const midFlightLabel = "排队发送";
-  const midFlightHint = "排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 插队";
+  const midFlightHint =
+    teamLive || toolStepOpen
+      ? "排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 送进当前回合"
+      : "排队至本回合结束后发送";
   const stopLabel = isStopping ? "停止中…" : "停止生成";
   const stopButton = (
     <IconButton
@@ -711,7 +714,7 @@ export function TurnComposer({
       aria-label={stopLabel}
       title={stopLabel}
       aria-busy={isStopping || undefined}
-      className={isStopping ? "opacity-75" : undefined}
+      className={isStopping ? "touch-target opacity-75" : "touch-target"}
     >
       {isStopping ? (
         <Loader2 size={16} className="animate-spin" aria-hidden />
@@ -720,16 +723,19 @@ export function TurnComposer({
       )}
     </IconButton>
   );
-  const primarySendButton = (
+  const sendButton = (readyTitle?: string) => (
     <IconButton
       size="md"
-      tone={sendReady ? "primary" : "muted"}
+      tone={sendReady ? "inverse" : "muted"}
       onClick={() => void handleSend()}
       disabled={!hasDraft || sendBlocked || isSending}
       aria-label="发送"
       aria-busy={isSending || undefined}
       data-sending={isSending ? "true" : undefined}
-      title={sendBlocked ? sendBlockedTitle : isSending ? "发送中…" : undefined}
+      className="touch-target"
+      title={
+        sendBlocked ? sendBlockedTitle : isSending ? "发送中…" : readyTitle
+      }
     >
       {isSending ? (
         <Loader2 size={16} className="animate-spin" aria-hidden />
@@ -738,50 +744,10 @@ export function TurnComposer({
       )}
     </IconButton>
   );
+  const primarySendButton = sendButton();
   const classicMidFlightSend = (
     <div className="flex items-center gap-1.5">
-      <Button
-        variant="neutral"
-        size="md"
-        className="border-border text-foreground"
-        onClick={() => void handleSend({ delivery: "steer" })}
-        disabled={queueDisabled}
-        aria-label="插队"
-        title={
-          sendBlocked ? sendBlockedTitle : "插队：下一步生效（Ctrl/Cmd+Enter）"
-        }
-        data-testid="composer-steer-link"
-      >
-        插队
-      </Button>
-      <Button
-        variant="primary"
-        size="md"
-        icon={<ListPlus size={14} aria-hidden />}
-        onClick={() => void handleSend()}
-        disabled={queueDisabled}
-        aria-label={midFlightLabel}
-        title={sendBlocked ? sendBlockedTitle : midFlightHint}
-      >
-        排队
-      </Button>
-      {stopButton}
-    </div>
-  );
-  const coordinationMidFlightSend = (
-    <div className="flex items-center gap-1.5">
-      <Button
-        variant="neutral"
-        size="md"
-        className="border-border text-foreground"
-        onClick={() => void handleSend({ delivery: "queue" })}
-        disabled={queueDisabled}
-        aria-label="排队"
-        title={sendBlocked ? sendBlockedTitle : "等团队收工后再说"}
-      >
-        排队
-      </Button>
-      {primarySendButton}
+      {sendButton(midFlightHint)}
       {stopButton}
     </div>
   );
@@ -793,11 +759,7 @@ export function TurnComposer({
     </div>
   ) : deskOccupied ? (
     hasDraft ? (
-      coordinationActive ? (
-        coordinationMidFlightSend
-      ) : (
-        classicMidFlightSend
-      )
+      classicMidFlightSend
     ) : (
       stopButton
     )
@@ -1024,7 +986,7 @@ function ComposerMentionButton({
       type="button"
       onClick={onClick}
       aria-label="@ 引用"
-      className="inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+      className="inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
       <AtSign size={14} className="shrink-0" aria-hidden />
       <span>引用</span>

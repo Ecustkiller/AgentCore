@@ -6,6 +6,7 @@ import {
 } from "@/components/files/fileTreeActions";
 import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { IconButton } from "@/components/files/parts";
+import { DeleteFolderDialog } from "@/components/folders/DeleteFolderDialog";
 import { FolderCollabMark } from "@/components/folders/FolderCollabMark";
 import { FolderMembersDialog } from "@/components/folders/FolderMembersDialog";
 import { Button, ConfirmDialog } from "@/components/ui";
@@ -17,18 +18,26 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
+  getConversations,
   useDeleteConversation,
   useRenameConversation,
   useRestoreConversation,
 } from "@/hooks/useConversations";
-import { getFolders, useUpdateFolder } from "@/hooks/useFolders";
+import {
+  getFolders,
+  releaseFolderConversations,
+  useDeleteFolder,
+  usePermanentDeleteFolder,
+  useRestoreFolder,
+  useUpdateFolder,
+} from "@/hooks/useFolders";
 import { removeConversationScratch } from "@/hooks/useWorkspaces";
 import { notifyConversationDeleted } from "@/lib/conversationDeleteCopy";
 import { useConversationLocationId } from "@/lib/conversationLocation";
 import type { FileSource } from "@/lib/fileSource";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
-import { notifyActionError, notifyError } from "@/lib/toast";
+import { notifyActionError, notifyError, notifyInfo } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   canShareFolder,
@@ -78,8 +87,9 @@ import {
  * Folders (`folder:<id>`) may also render nested folder rows (`nested`) and
  * folder-scope entries inside the tree's ``.agentcore`` row (`renderWorkroomLead`).
  *
- * - `folder:<id>` 文件夹：右键可重命名（与侧栏 {@link WorkspaceGroupHeader}
- *   同构）。本机 `conv:` 有用户可见文件时进「本机文件夹」（改名=对话标题，删除=删对话）；云端 `conv:` 不列。
+ * - `folder:<id>` 文件夹：右键可重命名，所有者另有「删除文件夹…」（与侧栏
+ *   {@link WorkspaceGroupHeader} 同一确认；树内「删除」仍是工作区软删，不是删整夹）。
+ *   本机 `conv:` 有用户可见文件时进「本机文件夹」（改名=对话标题，删除=删对话）；云端 `conv:` 不列。
  */
 export function WorkspaceSection({
   ws,
@@ -151,8 +161,12 @@ export function WorkspaceSection({
   const clearPendingRename = useFoldersStore((s) => s.clearPendingRename);
   const [draft, setDraft] = useState(ws.name);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [deleteFolderOpen, setDeleteFolderOpen] = useState(false);
 
   const deleteMutation = useDeleteConversation();
+  const deleteFolderMutation = useDeleteFolder();
+  const permanentDeleteFolderMutation = usePermanentDeleteFolder();
+  const restoreFolderMutation = useRestoreFolder();
   const restoreConversationMutation = useRestoreConversation();
   const renameMutation = useRenameConversation();
   const renameFolderMutation = useUpdateFolder();
@@ -180,6 +194,10 @@ export function WorkspaceSection({
   // Missing cache row is not "I own this" — members would otherwise see owner-only rename.
   const folderOwner = Boolean(folder && isFolderOwner(folder));
   const folderRole = folder ? folderMyRole(folder) : "owner";
+  /** 删的是文件夹这个容器，不是树里的一个文件。仅所有者；与侧栏同一道门。 */
+  const canDeleteFolder = Boolean(folder && folderOwner);
+  const memberConversations = () =>
+    folder ? getConversations().filter((c) => c.folderId === folder.id) : [];
 
   useEffect(() => {
     if (flashing) rootRef.current?.scrollIntoView({ block: "nearest" });
@@ -260,6 +278,43 @@ export function WorkspaceSection({
         { onError: (err) => notifyError(err, "重命名文件夹失败") },
       );
     }
+  };
+
+  const confirmDeleteFolder = async () => {
+    if (!folder) return;
+    const name = folder.name;
+    try {
+      await deleteFolderMutation.mutateAsync(folder.id);
+    } catch (err) {
+      notifyError(err, "删除文件夹失败");
+      return;
+    }
+    setDeleteFolderOpen(false);
+    const leftActive = releaseFolderConversations(folder.id, {
+      dropRuntime: dropConversationRuntime,
+      locationId,
+    });
+    if (leftActive) navigate("/");
+    notifyInfo("已删除文件夹", {
+      description: name,
+      duration: 8000,
+      action: {
+        label: "撤销",
+        onClick: () => restoreFolderMutation.mutate({ id: folder.id, name }),
+      },
+    });
+  };
+
+  const confirmPermanentDeleteFolder = () => {
+    if (!folder) return;
+    for (const { id } of memberConversations()) {
+      dropConversationRuntime(id);
+      if (id === locationId) navigate("/");
+    }
+    permanentDeleteFolderMutation.mutate(folder.id, {
+      onSuccess: () => setDeleteFolderOpen(false),
+      onError: (err) => notifyError(err, "彻底删除失败"),
+    });
   };
 
   const handleDeleteConversation = async () => {
@@ -539,6 +594,18 @@ export function WorkspaceSection({
                 <span className="flex-1 truncate">删除对话</span>
               </ContextMenuItem>
             )}
+            {canDeleteFolder && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  variant="danger"
+                  onSelect={() => setDeleteFolderOpen(true)}
+                >
+                  <Trash2 size={14} className="shrink-0" />
+                  <span className="flex-1 truncate">删除文件夹…</span>
+                </ContextMenuItem>
+              </>
+            )}
           </ContextMenuContent>
         </ContextMenu>
       )}
@@ -567,6 +634,17 @@ export function WorkspaceSection({
           tone="danger"
           busy={clearingScratch}
           onConfirm={() => void confirmClearScratch()}
+        />
+      )}
+      {canDeleteFolder && folder && (
+        <DeleteFolderDialog
+          open={deleteFolderOpen}
+          onOpenChange={setDeleteFolderOpen}
+          name={folder.name}
+          liveConvCount={memberConversations().length}
+          isLocal={isLocal}
+          onConfirm={() => void confirmDeleteFolder()}
+          onPermanentConfirm={confirmPermanentDeleteFolder}
         />
       )}
       {canClone && (

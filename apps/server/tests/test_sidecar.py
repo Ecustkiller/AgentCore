@@ -955,9 +955,9 @@ def test_sidecar_threads_permission_axes_per_turn(tmp_path, monkeypatch):
     a per-turn ``permissionAxes`` refreshes them, and an absent param keeps the
     current value — never a silent reset to the default.
     """
-    from agentcore.core.types import AutonomyPolicy, PermissionAxes, recipe_to_axes
+    from agentcore.core.types import WorkspaceBoundary
 
-    captured: list[PermissionAxes] = []
+    captured: list[WorkspaceBoundary] = []
 
     async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
         captured.append(kwargs["permission_axes"])
@@ -988,8 +988,8 @@ def test_sidecar_threads_permission_axes_per_turn(tmp_path, monkeypatch):
         )
         await asyncio.gather(*list(server._turns.values()))
 
-    managed = recipe_to_axes(AutonomyPolicy.MANAGED)
-    cautious = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+    managed = WorkspaceBoundary.FOLDER
+    cautious = WorkspaceBoundary.READ
 
     async def drive() -> None:
         await server.handle_line(

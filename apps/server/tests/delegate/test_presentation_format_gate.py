@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentcore.core.types import (
-    CommandAxis,
-    FileWriteAxis,
-    HostAxis,
-    PermissionAxes,
-)
+from agentcore.core.types import WorkspaceBoundary
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.presentation_format import (
     clear_format_confirmation,
@@ -21,11 +16,7 @@ from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.registry import ToolRegistry
 from tests.delegate.conftest import Provider, ctx, local_ctx
 
-_KICKOFF_RULES = PermissionAxes(
-    FileWriteAxis.SESSION,
-    CommandAxis.AUTO,
-    HostAxis.ASK,
-)
+_KICKOFF_RULES = WorkspaceBoundary.FOLDER
 
 
 def _delegate(
@@ -33,7 +24,7 @@ def _delegate(
     user_message: str,
     conversation_id: str,
     base_ctx,
-    permission_axes: PermissionAxes | None = None,
+    permission_axes: WorkspaceBoundary | None = None,
 ) -> DelegateTool:
     return DelegateTool(
         llm=Provider(["X"]),

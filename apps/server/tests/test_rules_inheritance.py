@@ -1,8 +1,7 @@
 """规则 / 记忆沿文件夹树由外向里继承（双模式工作区 §5.4）。
 
-外层文件夹定的约定，里层自动适用；**近的覆盖远的**。注入没有硬覆盖结构——「近」由
-两件事表达：更近的层排在后面，且层标签明说以更近的为准。所以这里断言的主要是**顺序
-与标签**，那就是模型实际读到的全部。
+外层文件夹定的约定，里层自动适用。同名条目只留最近的一份；不同名按外层到内层
+排列。层标签只说明位置。
 
 存储不搬家：条目仍按 ``folder_id`` 分区，这里覆盖的只有读侧（本机 DB 路 + account 票
 的云载荷 / 快照路）。
@@ -70,6 +69,10 @@ class _FakeRuleRepo:
     async def list_on_demand_user_rules(self, user_id, folder_id):
         del user_id
         return list(self._on_demand.get(folder_id, []))
+
+    async def list_path_user_rules(self, user_id, folder_id):
+        del user_id
+        return []
 
 
 class _FakeMemoryStore:
@@ -170,10 +173,10 @@ async def test_an_unknown_folder_has_no_chain_at_all(monkeypatch):
 async def test_user_rules_inject_global_then_ancestors_then_current():
     repo = _FakeRuleRepo(
         always={
-            None: [_Doc("用户规则.md", "- 全局规则")],
-            OUTER: [_Doc("用户规则.md", "- 外层规则")],
-            MIDDLE: [_Doc("用户规则.md", "- 中层规则")],
-            CURRENT: [_Doc("用户规则.md", "- 当前规则")],
+            None: [_Doc("全局.md", "- 全局规则")],
+            OUTER: [_Doc("外层.md", "- 外层规则")],
+            MIDDLE: [_Doc("中层.md", "- 中层规则")],
+            CURRENT: [_Doc("当前.md", "- 当前规则")],
         }
     )
     md = compose_injected_rules(
@@ -185,13 +188,13 @@ async def test_user_rules_inject_global_then_ancestors_then_current():
     assert md.count(_FOLDER_SETTINGS_LABEL) == 1
 
 
-async def test_ancestor_layers_carry_the_nearer_wins_wording():
-    """没有硬覆盖结构：冲突靠措辞 + 就近，所以标签必须自己说清楚。"""
-    repo = _FakeRuleRepo(always={OUTER: [_Doc("用户规则.md", "- 外层规则")]})
+async def test_ancestor_layers_name_the_desk_not_a_wording_override():
+    """同名由解析丢掉远的那份。层标签只说这是上层文件夹。"""
+    repo = _FakeRuleRepo(always={OUTER: [_Doc("外层.md", "- 外层规则")]})
     md = compose_injected_rules(
         await _user_rule_fragments(repo, "u1", scope_chain=CHAIN)  # type: ignore[arg-type]
     )
-    assert "以更近的为准" in md
+    assert "以更近的为准" not in md
     assert md.index(_ANCESTOR_SETTINGS_LABEL) < md.index("外层规则")
 
 
@@ -219,8 +222,8 @@ async def test_ai_notes_do_not_inject_with_user_rules():
     assert "当前导航" not in md
 
 
-async def test_nearer_layer_is_injected_later_than_farther_one():
-    """「近覆盖远」在提示词里就是这个顺序事实——外层在前，当前层贴着任务。"""
+async def test_same_name_keeps_only_the_nearest_body():
+    """常驻同名：最近的桌子整份替换外层，不把两份正文拼在一起。"""
     repo = _FakeRuleRepo(
         always={
             OUTER: [_Doc("用户规则.md", "- 一律用英文写提交信息")],
@@ -234,15 +237,16 @@ async def test_nearer_layer_is_injected_later_than_farther_one():
         folder_id=CURRENT,
         scope_chain=(OUTER, CURRENT),
     )
-    assert md.index("一律用英文写提交信息") < md.index("本仓提交用中文")
+    assert "本仓提交用中文" in md
+    assert "一律用英文写提交信息" not in md
 
 
 async def test_assemble_layers_user_rules_by_scope():
     repo = _FakeRuleRepo(
         always={
-            None: [_Doc("用户规则.md", "- 全局规则")],
-            OUTER: [_Doc("用户规则.md", "- 外层规则")],
-            CURRENT: [_Doc("用户规则.md", "- 当前规则")],
+            None: [_Doc("全局.md", "- 全局规则")],
+            OUTER: [_Doc("外层.md", "- 外层规则")],
+            CURRENT: [_Doc("当前.md", "- 当前规则")],
         }
     )
     md = await assemble_injected_rules(
@@ -279,20 +283,20 @@ async def test_no_chain_means_current_layer_only():
 
 def test_cloud_rules_payload_labels_ancestors_ahead_of_current():
     payload = {
-        "global_rules": [{"name": "用户规则.md", "content": "- 全局规则"}],
+        "global_rules": [{"name": "全局.md", "content": "- 全局规则"}],
         "ancestor_rules": [
             {
-                "name": "用户规则.md",
+                "name": "外层.md",
                 "content": "- 外层规则",
                 "folder_id": OUTER,
             },
             {
-                "name": "用户规则.md",
+                "name": "中层.md",
                 "content": "- 中层规则",
                 "folder_id": MIDDLE,
             },
         ],
-        "project_rules": [{"name": "用户规则.md", "content": "- 当前规则"}],
+        "project_rules": [{"name": "当前.md", "content": "- 当前规则"}],
         "folder_chain": [OUTER, MIDDLE, CURRENT],
     }
     md = compose_injected_rules(
@@ -305,8 +309,8 @@ def test_cloud_rules_payload_labels_ancestors_ahead_of_current():
 
 def test_older_cloud_without_ancestor_keys_simply_does_not_inherit():
     payload = {
-        "global_rules": [{"name": "用户规则.md", "content": "- 全局规则"}],
-        "project_rules": [{"name": "用户规则.md", "content": "- 当前规则"}],
+        "global_rules": [{"name": "全局.md", "content": "- 全局规则"}],
+        "project_rules": [{"name": "当前.md", "content": "- 当前规则"}],
     }
     md = compose_injected_rules(
         _user_rule_fragments_from_cloud(payload, folder_id=CURRENT)
@@ -319,8 +323,8 @@ def test_cloud_untagged_ancestors_zip_when_counts_match():
     payload = {
         "global_rules": [],
         "ancestor_rules": [
-            {"name": "用户规则.md", "content": "- 外层规则"},
-            {"name": "用户规则.md", "content": "- 中层规则"},
+            {"name": "外层.md", "content": "- 外层规则"},
+            {"name": "中层.md", "content": "- 中层规则"},
         ],
         "project_rules": [],
         "folder_chain": [OUTER, MIDDLE, CURRENT],
@@ -336,9 +340,9 @@ def test_cloud_untagged_ancestors_bag_on_outermost_when_counts_differ():
     payload = {
         "global_rules": [],
         "ancestor_rules": [
-            {"name": "用户规则.md", "content": "- 规则甲"},
-            {"name": "用户规则.md", "content": "- 规则乙"},
-            {"name": "用户规则.md", "content": "- 规则丙"},
+            {"name": "甲.md", "content": "- 规则甲"},
+            {"name": "乙.md", "content": "- 规则乙"},
+            {"name": "丙.md", "content": "- 规则丙"},
         ],
         "project_rules": [],
         "folder_chain": [OUTER, MIDDLE, CURRENT],
@@ -346,14 +350,14 @@ def test_cloud_untagged_ancestors_bag_on_outermost_when_counts_differ():
     md = compose_injected_rules(
         _user_rule_fragments_from_cloud(payload, folder_id=CURRENT)
     )
-    assert md.index("规则甲") < md.index("规则乙") < md.index("规则丙")
+    assert "规则甲" in md and "规则乙" in md and "规则丙" in md
     assert md.count(_ANCESTOR_SETTINGS_LABEL) == 1
 
 
 def test_cloud_ancestor_rules_without_chain_dump_as_one_layer():
     payload = {
-        "ancestor_rules": [{"name": "用户规则.md", "content": "- 外层规则"}],
-        "project_rules": [{"name": "用户规则.md", "content": "- 当前规则"}],
+        "ancestor_rules": [{"name": "外层.md", "content": "- 外层规则"}],
+        "project_rules": [{"name": "当前.md", "content": "- 当前规则"}],
     }
     md = compose_injected_rules(
         _user_rule_fragments_from_cloud(payload, folder_id=CURRENT)
@@ -412,9 +416,15 @@ def test_snapshot_empty_folder_chain_skips_the_dead_desk():
 
 def test_on_demand_empty_folder_chain_is_global_only():
     payload = {
-        "global_on_demand_rules": [{"name": "合规.md", "content": "- 全局合规"}],
-        "ancestor_on_demand_rules": [{"name": "发布.md", "content": "- 外层发布"}],
-        "project_on_demand_rules": [{"name": "接口.md", "content": "- 当前接口"}],
+        "global_on_demand_rules": [
+            {"name": "合规.md", "content": "- 全局合规", "description": "查阅合规"}
+        ],
+        "ancestor_on_demand_rules": [
+            {"name": "发布.md", "content": "- 外层发布", "description": "查阅发布"}
+        ],
+        "project_on_demand_rules": [
+            {"name": "接口.md", "content": "- 当前接口", "description": "查阅接口"}
+        ],
         "folder_chain": [],
     }
     names = [r.name for r in on_demand_user_rules_from_cloud(payload, folder_id=CURRENT)]
@@ -500,9 +510,15 @@ async def test_ticketed_turn_skips_dead_desk_settings(account_creds):
 
 def test_on_demand_catalog_includes_ancestor_layers():
     payload = {
-        "global_on_demand_rules": [{"name": "合规.md", "content": "- 全局合规"}],
-        "ancestor_on_demand_rules": [{"name": "发布.md", "content": "- 外层发布流程"}],
-        "project_on_demand_rules": [{"name": "接口.md", "content": "- 当前接口约定"}],
+        "global_on_demand_rules": [
+            {"name": "合规.md", "content": "- 全局合规", "description": "查阅合规"}
+        ],
+        "ancestor_on_demand_rules": [
+            {"name": "发布.md", "content": "- 外层发布流程", "description": "查阅发布"}
+        ],
+        "project_on_demand_rules": [
+            {"name": "接口.md", "content": "- 当前接口约定", "description": "查阅接口"}
+        ],
     }
     names = [r.name for r in on_demand_user_rules_from_cloud(payload, folder_id=CURRENT)]
     assert set(names) == {"合规", "发布", "接口"}
@@ -510,12 +526,16 @@ def test_on_demand_catalog_includes_ancestor_layers():
 
 def test_consult_body_comes_from_the_nearest_layer_that_has_it():
     payload = {
-        "global_on_demand_rules": [{"name": "发布.md", "content": "- 全局发布"}],
-        "ancestor_on_demand_rules": [
-            {"name": "发布.md", "content": "- 外层发布"},
-            {"name": "发布.md", "content": "- 中层发布"},
+        "global_on_demand_rules": [
+            {"name": "发布.md", "content": "- 全局发布", "description": "查阅发布"}
         ],
-        "project_on_demand_rules": [{"name": "发布.md", "content": "- 当前发布"}],
+        "ancestor_on_demand_rules": [
+            {"name": "发布.md", "content": "- 外层发布", "description": "查阅发布"},
+            {"name": "发布.md", "content": "- 中层发布", "description": "查阅发布"},
+        ],
+        "project_on_demand_rules": [
+            {"name": "发布.md", "content": "- 当前发布", "description": "查阅发布"}
+        ],
     }
     assert (
         lookup_on_demand_rule_body_from_cloud(payload, folder_id=CURRENT, name="发布")
@@ -542,7 +562,11 @@ async def test_ticketed_on_demand_catalog_reads_the_snapshot(account_creds):
             rules_payload={
                 "global_on_demand_rules": [],
                 "ancestor_on_demand_rules": [
-                    {"name": "发布.md", "content": "- 外层发布流程"}
+                    {
+                        "name": "发布.md",
+                        "content": "- 外层发布流程",
+                        "description": "查阅发布",
+                    }
                 ],
                 "project_on_demand_rules": [],
                 "folder_chain": [OUTER, CURRENT],

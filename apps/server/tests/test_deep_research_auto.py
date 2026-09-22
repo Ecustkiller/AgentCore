@@ -5,15 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from agentcore.core.types import (
-    AutonomyPolicy,
-    CommandAxis,
-    FileWriteAxis,
-    HostAxis,
-    PermissionAxes,
-    ToolEffect,
-    recipe_to_axes,
-)
+from agentcore.core.types import ToolEffect, WorkspaceBoundary
 from agentcore.runtime.deep_research_auto import (
     AUTO_DEBATE_SESSION_LIMIT,
     deep_research_auto_active,
@@ -32,11 +24,7 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 from tests.delegate.conftest import Provider, tool
 
-_ASK_RULES = PermissionAxes(
-    FileWriteAxis.SESSION,
-    CommandAxis.ASK,
-    HostAxis.ASK,
-)
+_ASK_RULES = WorkspaceBoundary.READ
 
 
 def _valid_card() -> dict:
@@ -56,9 +44,9 @@ def _valid_card() -> dict:
 
 
 def test_helper_flag_only_no_recipe_implication():
-    managed = recipe_to_axes(AutonomyPolicy.MANAGED)
-    less_interrupt = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
-    cautious = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+    managed = WorkspaceBoundary.FOLDER
+    less_interrupt = WorkspaceBoundary.FOLDER
+    cautious = WorkspaceBoundary.READ
     assert deep_research_auto_active(deep_research_auto=True) is True
     assert deep_research_auto_active(permission_axes=managed) is False
     assert deep_research_auto_active(permission_axes=less_interrupt) is False
@@ -81,7 +69,7 @@ def test_helper_may_auto_debate_never_opens():
     )
     assert (
         may_auto_debate(
-            permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+            permission_axes=WorkspaceBoundary.FOLDER,
             auto_debate_count=0,
         )
         is False
@@ -131,7 +119,7 @@ def test_format_for_ceo_flag_over_cap_still_does_not_push_debate():
 
 def test_format_for_ceo_managed_axes_do_not_imply_auto_guidance():
     t = tool(Provider([]))
-    t._permission_axes = recipe_to_axes(AutonomyPolicy.MANAGED)
+    t._permission_axes = WorkspaceBoundary.FOLDER
     t._base_tool_context.deep_research_auto = False
     t._base_tool_context.deep_research_auto_debate_count = 0
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="汇总", role="汇总")])
@@ -267,7 +255,7 @@ async def test_debate_flag_opens_over_cap():
 async def test_debate_full_trust_still_skips_over_cap():
     """full_trust 不因计数上限开始挂卡（行为不回归）。"""
     tool, saved, _sink = _debate_tool(
-        permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED), debate_count=1
+        permission_axes=WorkspaceBoundary.FOLDER, debate_count=1
     )
 
     async def _fake_run(config, usage_metadata):

@@ -51,3 +51,23 @@ def clip_preview(text: str, limit: int) -> str:
     """
     collapsed = " ".join((text or "").split())
     return collapsed[:limit] + "…" if len(collapsed) > limit else collapsed
+
+
+def estimate_text_tokens(text: str) -> int:
+    """Fold-cut estimate only: ~1 token per CJK char, ~4 chars per other token.
+
+    Not a measured tokenizer. Do not feed this into the chat window / loader loop.
+    """
+    if not text:
+        return 0
+    cjk = 0
+    for char in text:
+        code = ord(char)
+        if (
+            0x3000 <= code <= 0x9FFF
+            or 0xF900 <= code <= 0xFAFF
+            or 0xFF00 <= code <= 0xFFEF
+        ):
+            cjk += 1
+    other = len(text) - cjk
+    return cjk + (other + 3) // 4

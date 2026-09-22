@@ -1,9 +1,9 @@
 /*
  * AgentCore semantic OKLCH tokens — single source for desktop and Capacitor
- * (same renderer; light :root only on phone). Hue 255 = brand blue.
+ * (same renderer; light :root only on phone). Hue 255 = primary blue.
  *
  * Dark = luminance stacking (Material 3 / Linear / GitHub Dark):
- *   near-neutral surfaces (chroma ≤0.006); brand hue 255 only on primary/status.
+ *   near-neutral surfaces (chroma ≤0.006); hue 255 only on primary/status.
  *   canvas < card < popover/muted < accent; sidebar darker than canvas.
  *   borders = white alpha ~12%; body text soft white (~0.93).
  *   Dark lift stays luminance; do not invent a heavier dark shadow.
@@ -13,9 +13,9 @@
  * so `shadow-raised` etc. are names, not a restyle. Focus width/offset are
  * contract only — do not remap --ring-width here (would restyle leftover ring-1).
  *
- * Brand migration (方案 3 · 分步)：
- * - Step 0 ✅ sidebar cool gray (hue 250)
- * - Step 1–2 ↩ reverted — do not retune primary chroma with a surface pass
+ * Primary chroma stays put:
+ * - Sidebar is cool gray (hue 250), distinct from primary blue 255
+ * - Do not retune primary chroma with a surface pass
  */
 :root {
   --background: oklch(1 0 0);
@@ -29,7 +29,9 @@
   --muted: oklch(0.97 0.006 255);
   --secondary: var(--muted);
   --secondary-foreground: var(--foreground);
-  --muted-foreground: oklch(0.55 0.02 255);
+  /* Secondary ink on light surfaces. L 0.48 clears 4.5:1 on white and on
+   * muted (0.97); 0.55 was 4.44:1 on muted, which fails 12px body text. */
+  --muted-foreground: oklch(0.48 0.02 255);
   --accent: oklch(0.96 0.012 255);
   --accent-foreground: oklch(0.25 0.03 255);
   --destructive: oklch(0.58 0.22 27);
@@ -45,7 +47,7 @@
   --scrollbar-thumb: oklch(0.8 0.012 255 / 0.8);
   --scrollbar-thumb-hover: oklch(0.62 0.02 255 / 0.9);
 
-  /* Sidebar chrome: cool gray (hue 250, low chroma) — distinct from brand blue 255. */
+  /* Sidebar chrome: cool gray (hue 250, low chroma) — distinct from primary blue 255. */
   --sidebar: oklch(0.97 0.004 250);
   --sidebar-foreground: oklch(0.18 0.006 250);
   --sidebar-primary: var(--primary);
@@ -54,6 +56,9 @@
   --sidebar-accent-foreground: oklch(0.5 0.17 255);
   --sidebar-border: oklch(0.9 0.005 250);
   --sidebar-ring: var(--primary);
+  /* Readable secondary ink on the sidebar (hotkey digits, overflow, empty).
+   * Solid, not foreground alpha: /50 and /40 fall under 4.5:1 on this surface. */
+  --sidebar-muted: oklch(0.45 0.012 250);
   --sidebar-gradient: linear-gradient(
     180deg,
     oklch(0.965 0.005 250),
@@ -129,7 +134,7 @@
 }
 
 .dark {
-  /* Near-neutral surfaces (chroma ≤0.006). Brand 255 stays on primary/status.
+  /* Near-neutral surfaces (chroma ≤0.006). Hue 255 stays on primary/status.
    * Elevation: canvas 0.13 → card +0.055 → popover/muted +0.095 → accent +0.14.
    * Sidebar darker than canvas (chat/IDE chrome). Borders 12% white. */
   --background: oklch(0.13 0.004 255);
@@ -168,6 +173,7 @@
   --sidebar-accent-foreground: oklch(0.78 0.13 255);
   --sidebar-border: oklch(1 0 0 / 0.10);
   --sidebar-ring: var(--primary);
+  --sidebar-muted: oklch(0.72 0.01 250);
   --sidebar-gradient: linear-gradient(
     180deg,
     oklch(0.115 0.003 250),

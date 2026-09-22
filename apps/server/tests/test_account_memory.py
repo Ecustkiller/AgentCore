@@ -432,9 +432,8 @@ def test_on_demand_user_rules_from_cloud_maps_catalog():
         },
         folder_id="F1",
     )
-    assert [r.name for r in rules] == ["出差报销", "合规附录"]
-    # The catalog summary is the retrieval description, not the rule's first line.
-    assert [r.summary for r in rules] == ["", "对外发布前查的合规口径"]
+    assert [r.name for r in rules] == ["合规附录"]
+    assert rules[0].summary == "对外发布前查的合规口径"
 
 
 def test_on_demand_from_cloud_empty_when_keys_absent():
@@ -452,10 +451,18 @@ def test_lookup_on_demand_body_project_then_global():
 
     payload = {
         "global_on_demand_rules": [
-            {"name": "合规附录.md", "content": "- global body\n"},
+            {
+                "name": "合规附录.md",
+                "content": "- global body\n",
+                "description": "查阅合规",
+            },
         ],
         "project_on_demand_rules": [
-            {"name": "合规附录.md", "content": "- project body\n"},
+            {
+                "name": "合规附录.md",
+                "content": "- project body\n",
+                "description": "查阅合规",
+            },
         ],
     }
     assert (
@@ -492,7 +499,11 @@ async def test_load_on_demand_uses_snapshot_when_ticketed(
                 "global_rules": [{"name": "用户规则.md", "content": "- always"}],
                 "project_rules": [],
                 "global_on_demand_rules": [
-                    {"name": "合规附录.md", "content": "- 对外须用中文\n"},
+                    {
+                        "name": "合规附录.md",
+                        "content": "- 对外须用中文\n",
+                        "description": "查阅合规",
+                    },
                 ],
                 "project_on_demand_rules": [],
             }
@@ -588,7 +599,9 @@ async def test_consult_ticketed_hit_uses_snapshot(
         "F1",
         AccountPrepareSnapshot(
             rules_payload={
-                "global_on_demand_rules": [{"name": "合规附录.md", "content": body}],
+                "global_on_demand_rules": [
+                    {"name": "合规附录.md", "content": body, "description": "查阅合规"}
+                ],
                 "project_on_demand_rules": [],
             }
         ),

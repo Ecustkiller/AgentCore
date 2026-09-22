@@ -169,7 +169,7 @@ async def test_captain_worker_gets_captain_identity_and_delegate_tool():
 
 
 async def test_captain_worker_opening_includes_replan():
-    """开场挂 delegate + companion replan；wait 仍是父图杠杆。"""
+    """开场挂 delegate + companion replan。"""
     provider = _RecordToolsProvider(["X"])
     plan = RunPlan()
     plan.add(_spec("d1", depth=1))
@@ -179,7 +179,6 @@ async def test_captain_worker_opening_includes_replan():
     opening = provider.tool_names[0]
     assert "delegate" in opening
     assert "replan" in opening
-    assert "wait" not in opening
 
 
 async def test_default_worker_is_captain_within_depth_cap():

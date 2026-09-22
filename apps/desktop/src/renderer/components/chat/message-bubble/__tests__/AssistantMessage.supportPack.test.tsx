@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Team-strip fail that is not the live last turn: 排查包挂气泡「更多」。
- * 横幅亮着时宿主在输入区；本测 mock 没有消息窗，所以落「更多」。
+ * Team-strip fail that is not the live last turn: 排查包挂气泡底栏。
+ * 横幅亮着时宿主不在横幅上；本测 mock 没有消息窗，所以落底栏按钮。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Message } from "@/stores/conversation";
@@ -69,9 +69,9 @@ vi.mock("@/services/turns/continuePaused", () => ({
 vi.mock("../AssistantMessageFooter", () => ({
   AssistantMessageFooter: () => <div data-testid="assistant-footer" />,
   AssistantMessageMetaSummary: () => null,
-  MessageMoreMenu: () => (
-    <button type="button" aria-label="更多">
-      更多
+  AssistantTurnInspect: () => (
+    <button type="button" aria-label="复制排查包">
+      复制排查包
     </button>
   ),
 }));
@@ -98,7 +98,7 @@ afterEach(() => {
 });
 
 describe("AssistantMessage team-strip support pack host", () => {
-  it("具名恢复关掉 footer 时仍露出更多，不画红卡上的复制排查包", () => {
+  it("具名恢复关掉 footer 时仍露出复制排查包，不画红卡", () => {
     execById.value = {
       "asst-1": { deliveryStatus: null, plan: { agents: [] } },
     };
@@ -116,8 +116,7 @@ describe("AssistantMessage team-strip support pack host", () => {
       },
     });
     expect(screen.queryByText("连接超时，请检查网络后重试。")).toBeNull();
-    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
     expect(screen.queryByTestId("assistant-footer")).toBeNull();
-    expect(screen.getByRole("button", { name: "更多" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "复制排查包" })).toHaveLength(1);
   });
 });

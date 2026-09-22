@@ -93,7 +93,7 @@ def format_hot_pending_hold_line(conversation_id: str | None) -> str:
         where = "有队员在等用户审批/授权"
     return (
         f"状态：等你允许（{where}）。队还在，不是收场。"
-        "向用户报告阻塞后可 wait 听团；禁止空 wait 假装推进；"
+        "先向用户报告阻塞，再空响应听团；"
         "禁止把团队说成已结束或调度中断。"
     )
 

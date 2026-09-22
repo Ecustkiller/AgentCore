@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * PermissionAxesBadge — 三配方默认面 +「设为新会话默认」；轴在「改某一条」后。
+ * PermissionAxesBadge — 三档边界；这台电脑仅本机引擎可见。
  */
 
 import {
@@ -20,22 +20,30 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
   notifyError: vi.fn(),
 }));
+vi.mock("@/lib/capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capabilities")>();
+  return {
+    ...actual,
+    hasLocalEngine: vi.fn(() => false),
+  };
+});
 vi.mock("@/services/permissionAxes", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/services/permissionAxes")>();
   return {
     ...actual,
-    resolveDefaultPermissionAxes: vi.fn(
-      async () => actual.RECIPE_AXES.less_interrupt,
-    ),
+    resolveDefaultPermissionAxes: vi.fn(async () => ({
+      boundary: "folder" as const,
+    })),
     setUserDefaultRecipe: vi.fn(async (p: string) => p),
     setConversationPermissionAxes: vi.fn(),
     setComposerDraftAxes: vi.fn(),
-    confirmAutoCommandIfNeeded: vi.fn(() => true),
+    confirmComputerIfNeeded: vi.fn(() => true),
   };
 });
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { hasLocalEngine } from "@/lib/capabilities";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { setUserDefaultRecipe } from "@/services/permissionAxes";
 import { useConversationStore } from "@/stores/conversation";
@@ -56,81 +64,49 @@ beforeEach(() => {
   setUserDefaultMock.mockClear();
   vi.mocked(notifySuccess).mockClear();
   vi.mocked(notifyError).mockClear();
+  vi.mocked(hasLocalEngine).mockReturnValue(false);
 });
 
 afterEach(cleanup);
 
 describe("PermissionAxesBadge", () => {
-  it("sets user default when current axes match a built-in recipe", async () => {
+  it("sets user default from the current boundary", async () => {
     renderBadge();
     await waitFor(() => {
-      expect(screen.getByLabelText("权限：全放行")).toBeTruthy();
+      expect(screen.getByLabelText("权限：这个文件夹")).toBeTruthy();
     });
-    fireEvent.click(screen.getByLabelText("权限：全放行"));
+    fireEvent.click(screen.getByLabelText("权限：这个文件夹"));
     const btn = screen.getByRole("button", { name: "设为新会话默认" });
     expect((btn as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(btn);
     await waitFor(() => {
-      expect(setUserDefaultMock).toHaveBeenCalledWith("less_interrupt");
+      expect(setUserDefaultMock).toHaveBeenCalledWith("folder");
       expect(notifySuccess).toHaveBeenCalledWith(
-        expect.stringContaining("全放行"),
+        expect.stringContaining("这个文件夹"),
       );
     });
   });
 
-  it("disables set-default when axes are custom", async () => {
-    const { resolveDefaultPermissionAxes } = await import(
-      "@/services/permissionAxes"
-    );
-    vi.mocked(resolveDefaultPermissionAxes).mockResolvedValueOnce({
-      file_write: "session",
-      command: "ask",
-      host: "ask",
-    });
+  it("web hides 这台电脑 and shows 只看 / 这个文件夹", async () => {
     renderBadge();
     await waitFor(() => {
-      expect(screen.getByLabelText(/权限：/)).toBeTruthy();
+      expect(screen.getByLabelText("权限：这个文件夹")).toBeTruthy();
     });
-    fireEvent.click(screen.getByLabelText(/权限：/));
-    const btn = screen.getByRole("button", { name: "设为新会话默认" });
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(btn);
-    expect(setUserDefaultMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("权限：这个文件夹"));
+    expect(screen.getByText("只看")).toBeTruthy();
+    expect(screen.getAllByText(/这个文件夹/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("这台电脑")).toBeNull();
+    expect(screen.queryByText("改某一条")).toBeNull();
+    expect(screen.queryByText("谨慎")).toBeNull();
   });
 
-  it("配方会话打开后只见三档，轴在「改某一条」之后", async () => {
+  it("desktop offers 这台电脑", async () => {
+    vi.mocked(hasLocalEngine).mockReturnValue(true);
     renderBadge();
     await waitFor(() => {
-      expect(screen.getByLabelText("权限：全放行")).toBeTruthy();
+      expect(screen.getByLabelText("权限：这个文件夹")).toBeTruthy();
     });
-    fireEvent.click(screen.getByLabelText("权限：全放行"));
-    expect(screen.getByText("谨慎")).toBeTruthy();
-    expect(screen.getByText("托管")).toBeTruthy();
-    expect(screen.queryByText("改文件")).toBeNull();
-    expect(screen.queryByText("执行命令")).toBeNull();
-    expect(screen.queryByText("本机 Host")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "改某一条" }));
-    expect(screen.getByText("改文件")).toBeTruthy();
-    expect(screen.getByText("执行命令")).toBeTruthy();
-    expect(screen.getByText("本机 Host")).toBeTruthy();
-  });
-
-  it("已经是自定义时，打开就看见轴", async () => {
-    const { resolveDefaultPermissionAxes } = await import(
-      "@/services/permissionAxes"
-    );
-    vi.mocked(resolveDefaultPermissionAxes).mockResolvedValueOnce({
-      file_write: "session",
-      command: "ask",
-      host: "ask",
-    });
-    renderBadge();
-    await waitFor(() => {
-      expect(screen.getByLabelText(/权限：/)).toBeTruthy();
-    });
-    fireEvent.click(screen.getByLabelText(/权限：/));
-    expect(screen.getByText("改文件")).toBeTruthy();
-    expect(screen.getByText("执行命令")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "改某一条" })).toBeNull();
+    fireEvent.click(screen.getByLabelText("权限：这个文件夹"));
+    expect(screen.getByText("这台电脑")).toBeTruthy();
   });
 });

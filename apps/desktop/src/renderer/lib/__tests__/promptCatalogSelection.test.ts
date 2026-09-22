@@ -153,6 +153,7 @@ describe("flattenVisibleMineItems", () => {
       },
     ],
     alwaysMine: [mine("pin", "置顶", "always", null)],
+    pathMine: [],
     folders: [
       {
         id: "folder:law",
