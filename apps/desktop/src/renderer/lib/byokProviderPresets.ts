@@ -16,6 +16,7 @@ export type ByokProviderId =
   | "doubao"
   | "hy"
   | "openrouter"
+  | "groq"
   | "opencode_zen"
   | "opencode_go"
   | "custom";
