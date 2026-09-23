@@ -100,8 +100,14 @@ def resolve_wave_budget_hooks(*, credential_source: str) -> Callable[[], bool]:
     """``should_stop`` for drive + drive_redirect: turn ceiling OR this drive's payer death."""
     from agentcore.llm.turn_auth_dead import is_turn_auth_dead
 
+    from agentcore.runtime.turn.cost_budget import is_turn_cost_ceiling_hit
+
     def _stop() -> bool:
-        return is_turn_token_ceiling_hit() or is_turn_auth_dead(credential_source)
+        return (
+            is_turn_token_ceiling_hit()
+            or is_turn_auth_dead(credential_source)
+            or is_turn_cost_ceiling_hit()
+        )
 
     return _stop
 
@@ -109,10 +115,11 @@ def resolve_wave_budget_hooks(*, credential_source: str) -> Callable[[], bool]:
 def should_materialise_turn_token_budget_skips(*, credential_source: str) -> bool:
     """Whether un-run tails should be materialised as SKIPPED after a wave."""
     from agentcore.llm.turn_auth_dead import is_turn_auth_dead
+    from agentcore.runtime.turn.cost_budget import is_turn_cost_ceiling_hit
 
     if is_turn_auth_dead(credential_source):
         return True
-    return is_turn_token_ceiling_hit()
+    return is_turn_token_ceiling_hit() or is_turn_cost_ceiling_hit()
 
 
 def budget_skip_warning_for_active_scope(*, credential_source: str) -> str:
@@ -121,11 +128,18 @@ def budget_skip_warning_for_active_scope(*, credential_source: str) -> str:
         is_turn_auth_dead,
         turn_auth_dead_reject_message,
     )
+    from agentcore.runtime.turn.cost_budget import (
+        TURN_COST_CEILING_WARNING,
+        is_turn_cost_ceiling_hit,
+    )
 
     if is_turn_auth_dead(credential_source):
         return turn_auth_dead_reject_message(credential_source) or (
             TURN_AUTH_DEAD_REJECT_MESSAGE
         )
+    # R-01 费用顶比 token 顶更紧的信号：两者同时命中时优先报费用文案。
+    if is_turn_cost_ceiling_hit():
+        return TURN_COST_CEILING_WARNING
     return TURN_TOKEN_CEILING_WARNING
 
 

@@ -50,6 +50,12 @@ def _materialise_turn_token_budget_skips(
         credential_source_from_llm,
         is_turn_auth_dead,
     )
+    from agentcore.runtime.turn.cost_budget import (
+        REASON_TURN_COST_BUDGET,
+        current_turn_cost_nano,
+        is_turn_cost_ceiling_hit,
+        resolve_turn_cost_ceiling_nano,
+    )
     from agentcore.runtime.turn.token_budget import (
         REASON_TURN_TOKEN_BUDGET,
         budget_skip_warning_for_active_scope,
@@ -60,9 +66,12 @@ def _materialise_turn_token_budget_skips(
     logger = get_logger(__name__)
     payer = credential_source_from_llm(getattr(tool, "_llm", None))
     warning = budget_skip_warning_for_active_scope(credential_source=payer)
-    skip_reason = (
-        REASON_TURN_AUTH_DEAD if is_turn_auth_dead(payer) else REASON_TURN_TOKEN_BUDGET
-    )
+    if is_turn_auth_dead(payer):
+        skip_reason = REASON_TURN_AUTH_DEAD
+    elif is_turn_cost_ceiling_hit():
+        skip_reason = REASON_TURN_COST_BUDGET
+    else:
+        skip_reason = REASON_TURN_TOKEN_BUDGET
     skipped_ids: list[str] = []
     for node in plan.nodes:
         if node.run_id in results:
@@ -88,7 +97,11 @@ def _materialise_turn_token_budget_skips(
             "ceiling": resolve_turn_token_ceiling(),
             "depth": getattr(tool, "_depth", None),
         }
-        if skip_reason == REASON_TURN_TOKEN_BUDGET:
+        if skip_reason == REASON_TURN_COST_BUDGET:
+            fields["cost_spent_nano"] = current_turn_cost_nano()
+            fields["cost_ceiling_nano"] = resolve_turn_cost_ceiling_nano()
+            logger.info("delegate.turn_cost_ceiling_skip", **fields)
+        elif skip_reason == REASON_TURN_TOKEN_BUDGET:
             logger.info("delegate.turn_token_ceiling_skip", **fields)
         else:
             logger.info("delegate.turn_auth_dead_skip", **fields)

@@ -91,6 +91,16 @@ class EngineSettings(BaseModel):
     # delegate / debate / 新波派发，在飞跑完不 cancel。与 per-worker 顶正交。≤0 关闭。
     # 默认 30M 保险丝：全队 backstop（约数个工人保险丝之和），不按嵌套预占倒推。
     engine_turn_token_ceiling: int = 30_000_000
+    # R-01 回合级 LLM 聚合成本护栏（费用硬顶，整数 nano-CNY）：与 token 顶正交，
+    # 计量的是「已计价 billable 费用」（platform/vendor 的 cost_total_nano；BYOK 估计值
+    # 单独累计、不入顶）。触顶后禁新 delegate/debate/新波派发，在飞跑完不 cancel。
+    # ≤0 关闭。默认 0（关）——成本顶需按部署计费档位标定后再放开，避免误伤长任务；
+    # 语义与 engine_turn_token_ceiling 完全对齐。→ runtime/turn/cost_budget.py
+    engine_turn_cost_ceiling_nano: int = 0
+    # R-01 成本交付预留：累计 billable 费用 ≥ ceiling − reserve 时只放行
+    # ``ceiling_priority`` 节点，次要节点软跳过。≤0 或 reserve ≥ ceiling 关闭（硬顶仍在）。
+    # 默认 0（关）。
+    engine_turn_cost_delivery_reserve_nano: int = 0
     # 预算收尾窗口：累计 fuse token ≥ ceiling − reserve 时强制进入落盘/handoff-only 轮，
     # 降低硬顶后 degraded_synth。收尾需要的空间是绝对量（写码一轮提示常见十几万），
     # 不该随 ceiling 缩放；过薄则硬切空交接。
