@@ -21,6 +21,23 @@
 （billable 权威账），触顶/跳过事件经 ``delegate.turn_cost_ceiling_skip`` / ``cost.*``
 日志可见。与 per-worker ``engine_worker_token_ceiling`` 正交；无 USD / tier 换算、无
 CEO override、不 cancel 在飞任务。
+
+.. note:: **0.9.34 移植态（硬顶 only）**
+
+   上游 0.9.34 删掉了 ``ceiling_priority`` 分档并把
+   :func:`agentcore.runtime.engine.governance.maybe_inject_turn_token_budget_gate`
+   退役为 no-op（"execute-layer reject copy is enough"）。因此本模块在 0.9.34 上：
+
+   * **已接线**：硬顶（:func:`is_turn_cost_ceiling_hit`）→ wave 停派
+     （``resolve_wave_budget_hooks``）+ 未跑节点落 SKIPPED
+     （``should_materialise_turn_token_budget_skips`` /
+     ``budget_skip_warning_for_active_scope`` 报费用文案）；
+   * **未接线（惰性）**：软闸（:func:`is_turn_cost_delivery_reserve_hit` /
+     ``TURN_COST_RESERVE_SKIP_WARNING``）与一次性 CEO steer
+     （:func:`turn_cost_budget_wrap_prompt` / :func:`turn_cost_ceiling_reject_message`）。
+
+   惰性部分保留是因为语义与本地版一致，待上游把分档 / 提示注入概念带回来即可接上；
+   在此之前它们不参与任何执行路径。
 """
 
 from __future__ import annotations
@@ -63,7 +80,9 @@ class TurnCostMeter:
 _meter: ContextVar[TurnCostMeter | None] = ContextVar("turn_cost_meter", default=None)
 
 
-def bind_turn_cost_meter(*, seed_billed: int = 0, seed_estimated: int = 0) -> Token[TurnCostMeter | None]:
+def bind_turn_cost_meter(
+    *, seed_billed: int = 0, seed_estimated: int = 0
+) -> Token[TurnCostMeter | None]:
     """Install a fresh cost meter for this user turn; returns reset token."""
     return _meter.set(
         TurnCostMeter(
@@ -155,7 +174,8 @@ def turn_cost_budget_wrap_prompt() -> str:
     ceiling = resolve_turn_cost_ceiling_nano()
     spent = current_turn_cost_nano()
     return (
-        f"[系统提示] 本回合累计费用已触顶（已计费 {_nano_cny(spent)} / 上限 {_nano_cny(ceiling)}）。"
+        "[系统提示] 本回合累计费用已触顶"
+        f"（已计费 {_nano_cny(spent)} / 上限 {_nano_cny(ceiling)}）。"
         "本回合禁止乱开新派单与新辩论；在飞任务结束后请立即基于已完成产出向用户收口——"
         "汇总已有结论与落盘文件，并显式标出未完成缺口"
         f"（gap 原因可用 `{REASON_TURN_COST_BUDGET}`）。"

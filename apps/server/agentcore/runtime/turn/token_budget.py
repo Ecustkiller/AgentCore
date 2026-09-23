@@ -99,7 +99,6 @@ def turn_token_ceiling_reject_message() -> str:
 def resolve_wave_budget_hooks(*, credential_source: str) -> Callable[[], bool]:
     """``should_stop`` for drive + drive_redirect: turn ceiling OR this drive's payer death."""
     from agentcore.llm.turn_auth_dead import is_turn_auth_dead
-
     from agentcore.runtime.turn.cost_budget import is_turn_cost_ceiling_hit
 
     def _stop() -> bool:

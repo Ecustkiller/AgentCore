@@ -90,6 +90,19 @@ class ClientRequestBridge(Protocol):
 
     def list_pending(self, conversation_id: str | None = None) -> list[InteractionRequest]: ...
 
+    def attach(
+        self,
+        request_id: str,
+        conversation_id: str,
+        *,
+        kind: InteractionKind,
+    ) -> asyncio.Future[Any] | None:
+        """R-16 同卡合并: add an extra waiter to an already-pending interaction.
+
+        Returns ``None`` when the card is unknown / already settled / conversation or
+        kind mismatched — caller then falls back to its own independent suspend.
+        """
+
 
 @runtime_checkable
 class Journal(Protocol):

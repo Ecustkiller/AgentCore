@@ -259,13 +259,39 @@ def test_wrap_prompt_is_explicit_close_not_fake_done(monkeypatch):
         reset_turn_cost_meter(token)
 
 
-def test_maybe_inject_turn_token_budget_gate_cost_ceiling(monkeypatch):
-    from agentcore.llm.provider.protocol import LLMMessage
-    from agentcore.runtime.engine.governance import (
-        create_loop_controller,
-        maybe_inject_turn_token_budget_gate,
-        should_turn_token_budget_gate,
+def test_budget_skip_warning_prefers_cost_ceiling(monkeypatch):
+    """0.9.34 retires the CEO prompt-injection steer (``maybe_inject_turn_token_budget_gate``
+    is a documented no-op: execute-layer reject copy is enough), so the cost ceiling
+    surfaces through the skip copy delivered to the caller instead."""
+    from agentcore.runtime.turn.cost_budget import TURN_COST_CEILING_WARNING
+    from agentcore.runtime.turn.token_budget import (
+        TURN_TOKEN_CEILING_WARNING,
+        budget_skip_warning_for_active_scope,
+        should_materialise_turn_token_budget_skips,
     )
+
+    monkeypatch.setattr(
+        "agentcore.runtime.turn.token_budget.resolve_turn_token_ceiling",
+        lambda: 0,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.turn.cost_budget.resolve_turn_cost_ceiling_nano",
+        lambda: 0,
+    )
+    idle = bind_turn_cost_meter(seed_billed=0, seed_estimated=0)
+    try:
+        assert is_turn_cost_ceiling_hit() is False
+        # ceiling off → plain token copy, and no SKIPPED materialisation.
+        assert (
+            budget_skip_warning_for_active_scope(credential_source="platform")
+            == TURN_TOKEN_CEILING_WARNING
+        )
+        assert (
+            should_materialise_turn_token_budget_skips(credential_source="platform")
+            is False
+        )
+    finally:
+        reset_turn_cost_meter(idle)
 
     monkeypatch.setattr(
         "agentcore.runtime.turn.cost_budget.resolve_turn_cost_ceiling_nano",
@@ -273,40 +299,13 @@ def test_maybe_inject_turn_token_budget_gate_cost_ceiling(monkeypatch):
     )
     token = bind_turn_cost_meter(seed_billed=50, seed_estimated=0)
     try:
-        controller = create_loop_controller(frozenset())
-        assert should_turn_token_budget_gate(controller, role="captain") is True
-        assert should_turn_token_budget_gate(controller, role="worker") is False
-
-        messages: list[LLMMessage] = []
-        assert (
-            maybe_inject_turn_token_budget_gate(
-                controller,
-                messages=messages,
-                run_id="r1",
-                round_idx=2,
-                role="captain",
-            )
-            is True
-        )
-        assert len(messages) == 1
-        content = messages[0].content or ""
-        assert "触顶" in content
-        assert REASON_TURN_COST_BUDGET in content
-        assert controller.turn_token_budget_gate_fired is True
-
-        # One-shot latch
-        assert should_turn_token_budget_gate(controller, role="captain") is False
-        assert (
-            maybe_inject_turn_token_budget_gate(
-                controller,
-                messages=messages,
-                run_id="r1",
-                round_idx=3,
-                role="captain",
-            )
-            is False
-        )
-        assert len(messages) == 1
+        assert is_turn_cost_ceiling_hit() is True
+        # R-01: cost ceiling outranks the token copy (tighter signal wins).
+        warning = budget_skip_warning_for_active_scope(credential_source="platform")
+        assert warning == TURN_COST_CEILING_WARNING
+        assert "触顶" in warning
+        assert "收口" in warning
+        assert should_materialise_turn_token_budget_skips(credential_source="platform") is True
     finally:
         reset_turn_cost_meter(token)
 
@@ -325,7 +324,7 @@ def test_wave_hooks_parent_stop_includes_cost_ceiling(monkeypatch):
     )
     token = bind_turn_cost_meter(seed_billed=100, seed_estimated=0)
     try:
-        should_stop, _priority = resolve_wave_budget_hooks()
+        should_stop = resolve_wave_budget_hooks(credential_source="platform")
         assert should_stop() is True
     finally:
         reset_turn_cost_meter(token)
