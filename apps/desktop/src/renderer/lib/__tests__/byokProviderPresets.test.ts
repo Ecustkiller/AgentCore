@@ -99,9 +99,9 @@ describe("resolveByokProviderFromConfig", () => {
   });
 
   it("matches Groq base_url", () => {
-    expect(resolveByokProviderFromConfig("https://api.groq.com/openai/v1")).toBe(
-      "groq",
-    );
+    expect(
+      resolveByokProviderFromConfig("https://api.groq.com/openai/v1"),
+    ).toBe("groq");
     expect(
       resolveByokProviderFromConfig("https://api.groq.com/openai/v1/"),
     ).toBe("groq");
