@@ -13,7 +13,6 @@ import {
 import {
   coordinationWaitCaptainCaption,
   waitingWorkerRoles,
-  workerProgress,
 } from "@/components/chat/teamSynthesisPhase";
 import type { InjectGraphOverlay } from "@/lib/causalInject";
 import {
@@ -672,9 +671,13 @@ export function useCaptainEndpointLive(runId: string): EndpointLive {
         })
       : ("pending" as RunStatus);
     const waitingRoles = execution ? waitingWorkerRoles(execution) : [];
-    const seatWait = execution ? workerProgress(execution) : wait;
+    // 等待句只该由「CEO 真的空等团队」(coordination_wait) 点亮。这里曾经喂
+    // `workerProgress(execution)` —— 它恒返回 {completed,total} 对象、恒真，于是
+    // waitCaption 恒非空、sinkStatus 被钉死在 "running"：汇总节点整回合转圈，
+    // 队员全绿收尾完也不停（收尾窗口只该在队员齐、CEO 仍在写时出现）。
+    // 契约与 projectFlowNodes 一致：有等待句才上 running 外壳，无等待句守派生状态。
     const waitCaption = (
-      coordinationWaitCaptainCaption(seatWait, { waitingRoles }) ?? ""
+      coordinationWaitCaptainCaption(wait, { waitingRoles }) ?? ""
     ).trim();
     const sinkStatus: RunStatus =
       waitCaption && !detached ? "running" : captainStatus;
