@@ -28,6 +28,7 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useRef,
+  useState,
 } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import type {
@@ -82,6 +83,12 @@ export const ComposerBodyEditor = forwardRef(function ComposerBodyEditor(
   const lastEmittedRef = useRef<string | null>(null);
   const pillRoots = useRef(new Map<string, Root>());
   const composingRef = useRef(false);
+  // IME 组合期间 onInput 被 composingRef 抑制 —— 这道闸必须同步、必须留在 ref 上：emitFromDom
+  // 会走 rebuild() 的 replaceChildren，在组合区结束前把它打散。代价是 value 整段组合期间不变，
+  // 而占位符只认 value，于是绝对定位的「默认字」一直压在正在组合的候选字底下（视觉重叠）。
+  // ref 改动不触发重渲染，所以另起一个 state 专供这一处绘制；两者在同两个事件里一起写，
+  // 不引入第二套判定。
+  const [composing, setComposing] = useState(false);
 
   const unmountPills = useCallback(() => {
     const roots = [...pillRoots.current.values()];
@@ -261,7 +268,10 @@ export const ComposerBodyEditor = forwardRef(function ComposerBodyEditor(
     serialize,
   ]);
 
-  const showPlaceholder = !plainText(value).trim() && !hasInlineMarkers(value);
+  // 组合期必须让位：占位符是 absolute inset-0 画在 contentEditable 底下的，组合中的候选字
+  // 还没进 value，只判 value 就会两者叠在一起。
+  const showPlaceholder =
+    !composing && !plainText(value).trim() && !hasInlineMarkers(value);
 
   return (
     <div className="relative min-w-0 flex-1">
@@ -295,9 +305,11 @@ export const ComposerBodyEditor = forwardRef(function ComposerBodyEditor(
         }}
         onCompositionStart={() => {
           composingRef.current = true;
+          setComposing(true);
         }}
         onCompositionEnd={() => {
           composingRef.current = false;
+          setComposing(false);
           emitFromDom();
         }}
         onKeyDown={onKeyDown}
