@@ -674,6 +674,21 @@ UNSUPPORTED_TOOL_SCHEMA_MESSAGE = (
     "请求在入口即被拒绝，未消耗 token、未产生费用。"
 )
 
+# OpenRouter refuses to route at all when the request carries ``tools`` /
+# ``tool_choice`` and the selected model has no provider endpoint advertising
+# native tool support. It answers 404 — not a missing model id, not a bad
+# base_url — so the generic 404 passthrough handed the user OpenRouter's English
+# routing notice verbatim (⑦A: product Chinese, no upstream wall).
+#
+# Unlike the tool-schema 400s above, no「未消耗 token、未产生费用」line here: the
+# refusal does precede any provider being picked, but that is upstream's account
+# of its own behaviour, not something we measured — copy stays inside what we can
+# stand behind.
+NO_TOOL_CAPABLE_ENDPOINT_MESSAGE = (
+    "该模型在当前服务商上没有支持工具调用的可用端点，"
+    "无法完成检索、委派或辩论。请更换支持工具调用的模型后重试。"
+)
+
 
 # ---------------------------------------------------------------------------
 # OpenCode structured ``error.type`` table (console source, 2026-08-18).
@@ -1008,6 +1023,37 @@ def is_unsupported_tool_schema(body: bytes | str | None) -> bool:
     return _extract_vendor_code(body_preview(body)) == _UNSUPPORTED_TOOL_SCHEMA
 
 
+# OpenRouter's routing refusal, in en and in its own zh rendering:
+#   "No endpoints found that support tool use. To learn more about provider
+#    routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection"
+#   "未找到支持工具使用的端点。"
+# Deliberately narrow: anchored on the distinctive「no endpoints found」token plus
+# the tool concept, so a plain "model not found" 404 (which has its own honest
+#「更换默认模型」copy) or any unrelated relay error never lands here.
+_NO_TOOL_CAPABLE_ENDPOINT_MARKERS = re.compile(
+    r"no\s+endpoints?\s+found[^.\n]{0,60}support\s+tool"
+    r"|no\s+endpoints?\s+found[^.\n]{0,60}支持工具"
+    r"|未找到支持工具使用的端点"
+    r"|没有支持工具调用的可用端点",
+    re.IGNORECASE,
+)
+
+
+def is_no_tool_capable_endpoint(body: bytes | str | None) -> bool:
+    """True when upstream refused because no endpoint of the model supports tools.
+
+    OpenRouter-specific: the request carried ``tools``/``tool_choice``, none of the
+    selected model's provider endpoints advertises native tool support, and the
+    gateway answers 404 *before* routing anywhere. Classified by body, not by
+    vendor name, so any relay that relays this text verbatim gets the same read.
+    """
+    preview = body_preview(body)
+    extracted = _extract_upstream_message(preview) or ""
+    if extracted and _NO_TOOL_CAPABLE_ENDPOINT_MARKERS.search(extracted):
+        return True
+    return bool(preview and _NO_TOOL_CAPABLE_ENDPOINT_MARKERS.search(preview))
+
+
 def unsupported_tool_schema_product_message(body: bytes | str | None) -> str:
     """Honest Chinese copy for OpenCode Go ``unsupported_tool_schema`` 400s."""
     reason = _extract_vendor_subreason(body_preview(body))
@@ -1091,6 +1137,11 @@ def client_error_message(
     provider_name: str, status_code: int, body: bytes | str | None
 ) -> str:
     extracted = _extract_upstream_message(body_preview(body))
+    # Must precede both the 404 branch and the trailing passthrough: the status is
+    # 404 but the cause is the model's tool capability, so neither the「更换默认模型」
+    # copy nor the raw English routing notice is the right face (⑦A).
+    if is_no_tool_capable_endpoint(body):
+        return NO_TOOL_CAPABLE_ENDPOINT_MESSAGE
     if status_code == 404:
         if is_model_not_found_404(body):
             if extracted:

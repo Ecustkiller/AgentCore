@@ -1565,6 +1565,97 @@ def test_client_error_message_400_unrelated_still_passthrough():
     assert msg == "平台 max_tokens too large"
 
 
+def _openrouter_no_tool_endpoint_body() -> bytes:
+    """The reported toast, verbatim shape (OpenRouter routing refusal)."""
+    return json.dumps(
+        {
+            "error": {
+                "message": (
+                    "No endpoints found that support tool use. "
+                    'Try disabling "web_search". To learn more about provider '
+                    "routing, visit: "
+                    "https://openrouter.ai/docs/guides/routing/provider-selection"
+                ),
+                "code": 404,
+            }
+        }
+    ).encode()
+
+
+def test_client_error_message_openrouter_no_tool_endpoint_product_copy():
+    """⑦A: OpenRouter's English routing wall must not reach the user bubble.
+
+    The 404 is a *routing* refusal, not a missing model id, so the existing
+    「更换默认模型」404 copy would mis-blame the model choice, and the trailing
+    passthrough would hand over upstream's English notice verbatim.
+    """
+    from agentcore.llm.errors import (
+        NO_TOOL_CAPABLE_ENDPOINT_MESSAGE,
+        client_error_message,
+        is_no_tool_capable_endpoint,
+    )
+
+    body = _openrouter_no_tool_endpoint_body()
+    assert is_no_tool_capable_endpoint(body) is True
+    msg = client_error_message("OpenRouter", 404, body)
+    assert msg == NO_TOOL_CAPABLE_ENDPOINT_MESSAGE
+    assert "No endpoints found" not in msg
+    assert "openrouter.ai" not in msg
+    assert "web_search" not in msg
+    # No「更换默认模型」blame either — the model id was fine.
+    assert "默认模型" not in msg
+
+
+def test_client_error_message_openrouter_zh_rendering_and_status_agnostic():
+    """Same refusal in OpenRouter's own zh text, and off the 404 branch.
+
+    Keyed on the body, not on the status: a relay wrapping this text in a 400 must
+    still get product copy, which is why the check precedes the generic passthrough.
+    """
+    from agentcore.llm.errors import (
+        NO_TOOL_CAPABLE_ENDPOINT_MESSAGE,
+        client_error_message,
+        is_no_tool_capable_endpoint,
+    )
+
+    zh = json.dumps(
+        {"error": {"message": "未找到支持工具使用的端点。", "code": 404}}
+    ).encode()
+    assert is_no_tool_capable_endpoint(zh) is True
+    assert client_error_message("OpenRouter", 404, zh) == NO_TOOL_CAPABLE_ENDPOINT_MESSAGE
+    assert client_error_message("OpenRouter", 400, zh) == NO_TOOL_CAPABLE_ENDPOINT_MESSAGE
+
+
+def test_no_tool_capable_endpoint_does_not_swallow_sibling_404s():
+    """Guard against over-reach: other OpenRouter 404s keep their own faces."""
+    from agentcore.llm.errors import (
+        client_error_message,
+        is_model_not_found_404,
+        is_no_tool_capable_endpoint,
+    )
+
+    # In-region routing failure —「no endpoints」but nothing about tools.
+    region = json.dumps(
+        {"error": {"message": "No endpoints found supporting your data region."}}
+    ).encode()
+    assert is_no_tool_capable_endpoint(region) is False
+    assert client_error_message("OpenRouter", 404, region).startswith("OpenRouter ")
+
+    # A real missing model id still gets the「更换默认模型」branch.
+    missing = b'{"error":{"message":"Not found the model x","code":"resource_not_found"}}'
+    assert is_model_not_found_404(missing) is True
+    assert is_no_tool_capable_endpoint(missing) is False
+    assert "默认模型" in client_error_message("OpenRouter", 404, missing)
+
+
+def test_no_tool_capable_endpoint_boundary_empty_and_unrelated():
+    from agentcore.llm.errors import is_no_tool_capable_endpoint
+
+    assert is_no_tool_capable_endpoint(b"") is False
+    assert is_no_tool_capable_endpoint(None) is False
+    assert is_no_tool_capable_endpoint(b'{"error":{"message":"rate limited"}}') is False
+
+
 def _go_tool_schema_body(
     *, reason: str | None = "tool_count_limit", json_code: str | None = None
 ) -> bytes:
