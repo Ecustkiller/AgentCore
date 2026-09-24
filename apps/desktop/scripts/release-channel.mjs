@@ -76,10 +76,11 @@ export function resolveReleaseIdentity(channel) {
     return {
       channel: /** @type {const} */ ("beta"),
       appId,
-      productName: "AgentCore 测试版",
-      shortcutName: "AgentCore 测试版",
+      productName: "Nexus 测试版",
+      shortcutName: "Nexus 测试版",
       publishUrl: "https://downloads.fashitianxia.xyz/desktop/beta",
-      // Same ASCII slug as stable so CDN/sync/官网文件名约定（AgentCore-${ver}-…）不断缝；
+      // 仍是上游 ASCII slug：CDN / GitHub Releases 安装包名与 installer-feed.ts 硬编码的
+      // `AgentCore-${ver}-…` 是同一份发布契约，改名会让更新器 404（我们不控制那个仓库）。
       // 通道靠 appId / productName / feed 目录 / GitHub tag 预发布后缀区分。
       artifactSlug: "AgentCore",
       channelLabelZh: "测试",
@@ -95,8 +96,8 @@ export function resolveReleaseIdentity(channel) {
   return {
     channel: /** @type {const} */ ("stable"),
     appId,
-    productName: "AgentCore",
-    shortcutName: "AgentCore",
+    productName: "Nexus",
+    shortcutName: "Nexus",
     publishUrl: "https://downloads.fashitianxia.xyz/desktop/stable",
     artifactSlug: "AgentCore",
     channelLabelZh: "稳定",

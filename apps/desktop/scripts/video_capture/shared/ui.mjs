@@ -1,7 +1,7 @@
 /** Playwright UI helpers shared across capture commands. */
 
 export async function dismissOnboarding(page) {
-  const dialog = page.locator('[aria-label="欢迎使用 AgentCore"]');
+  const dialog = page.locator('[aria-label="欢迎使用 Nexus"]');
   if (!(await dialog.isVisible().catch(() => false))) return false;
   const skip = dialog.getByRole("button", { name: /^跳过$/ });
   if (await skip.isVisible().catch(() => false)) {

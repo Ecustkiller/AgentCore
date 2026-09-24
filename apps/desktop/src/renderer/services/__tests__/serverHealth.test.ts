@@ -24,7 +24,7 @@ const logEventMock = vi.mocked(logEvent);
 const diagnoseOutageMock = vi.mocked(diagnoseOutage);
 const probeReadyzMock = vi.mocked(probeReadyz);
 
-const OUTAGE_REASON = "连不上 AgentCore 服务，请稍后重试。";
+const OUTAGE_REASON = "连不上 Nexus 服务，请稍后重试。";
 
 function unreachableDiagnosis(
   extras: Partial<Extract<ReadyzDiagnosis, { ok: false }>> = {},

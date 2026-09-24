@@ -1,8 +1,9 @@
 {
   "name": "agentcore-desktop",
+  "productName": "Nexus",
   "version": "0.9.34",
-  "description": "AgentCore Desktop - Multi-Agent AI Workspace",
-  "author": "AgentCore",
+  "description": "Nexus Desktop - Multi-Agent AI Workspace",
+  "author": "Nexus",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

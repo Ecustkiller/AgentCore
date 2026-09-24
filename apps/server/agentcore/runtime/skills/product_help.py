@@ -26,7 +26,7 @@ _PRODUCT_HELP_HOW = """\
 对人用产品面说法（对话、协作图、工作区、检查点、审批）≠ `ask_user` / SSE / `run`。
 
 【这是什么】
-AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；轻问它直接答，该协作时组团后把结果交给你。\
+Nexus 是 Multi-Agent AI 工作台：你只对接一位 CEO；轻问它直接答，该协作时组团后把结果交给你。\
 「协作，是更高级的智能」。
 
 【官网】

@@ -139,7 +139,7 @@ describe("bootstrapAuth", () => {
 
     expect(result.kind).toBe("unavailable");
     if (result.kind === "unavailable") {
-      expect(result.reason).toContain("AgentCore");
+      expect(result.reason).toContain("Nexus");
       expect(result.reason).not.toContain("请确认数据库");
     }
   });
@@ -167,7 +167,7 @@ describe("bootstrapAuth", () => {
 
     expect(result.kind).toBe("unavailable");
     if (result.kind === "unavailable") {
-      expect(result.reason).toContain("连不上 AgentCore");
+      expect(result.reason).toContain("连不上 Nexus");
     }
   });
 
@@ -185,7 +185,7 @@ describe("bootstrapAuth", () => {
 
     expect(result.kind).toBe("unavailable");
     if (result.kind === "unavailable") {
-      expect(result.reason).toContain("连不上 AgentCore");
+      expect(result.reason).toContain("连不上 Nexus");
     }
   });
 });
@@ -238,7 +238,7 @@ describe("probeReadyz", () => {
     expect(diagnosis.ok).toBe(false);
     if (diagnosis.ok) return;
     expect(diagnosis.kind).toBe("network");
-    expect(diagnosis.reason).toContain("连不上 AgentCore");
+    expect(diagnosis.reason).toContain("连不上 Nexus");
   });
 
   it("classifies AbortSignal timeout as timeout", async () => {
@@ -255,7 +255,7 @@ describe("probeReadyz", () => {
     expect(diagnosis.ok).toBe(false);
     if (diagnosis.ok) return;
     expect(diagnosis.kind).toBe("timeout");
-    expect(diagnosis.reason).toContain("连不上 AgentCore");
+    expect(diagnosis.reason).toContain("连不上 Nexus");
   });
 });
 

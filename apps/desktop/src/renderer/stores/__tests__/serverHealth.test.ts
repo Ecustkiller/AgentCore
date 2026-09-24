@@ -31,12 +31,12 @@ describe("useServerHealthStore edge logs", () => {
   it("logs server_health.offline once on the offline edge", () => {
     useServerHealthStore
       .getState()
-      .markOffline("连不上 AgentCore 服务，请稍后重试。", "heartbeat");
+      .markOffline("连不上 Nexus 服务，请稍后重试。", "heartbeat");
 
     expect(logEventMock).toHaveBeenCalledTimes(1);
     expect(logEventMock).toHaveBeenCalledWith("warn", "server_health.offline", {
       source: "heartbeat",
-      reason: "连不上 AgentCore 服务，请稍后重试。",
+      reason: "连不上 Nexus 服务，请稍后重试。",
       last_ok_at: null,
       from: "checking",
     });
@@ -47,10 +47,10 @@ describe("useServerHealthStore edge logs", () => {
 
     useServerHealthStore
       .getState()
-      .markOffline("AgentCore 服务暂时不可用，请稍后重试。", "heartbeat");
+      .markOffline("Nexus 服务暂时不可用，请稍后重试。", "heartbeat");
     expect(logEventMock).toHaveBeenCalledTimes(1);
     expect(useServerHealthStore.getState().reason).toBe(
-      "AgentCore 服务暂时不可用，请稍后重试。",
+      "Nexus 服务暂时不可用，请稍后重试。",
     );
   });
 
@@ -114,13 +114,13 @@ describe("useServerHealthStore edge logs", () => {
   it("logs consecutive_failures on offline edge when provided", () => {
     useServerHealthStore
       .getState()
-      .markOffline("连不上 AgentCore 服务，请稍后重试。", "heartbeat", {
+      .markOffline("连不上 Nexus 服务，请稍后重试。", "heartbeat", {
         consecutive_failures: 3,
       });
 
     expect(logEventMock).toHaveBeenCalledWith("warn", "server_health.offline", {
       source: "heartbeat",
-      reason: "连不上 AgentCore 服务，请稍后重试。",
+      reason: "连不上 Nexus 服务，请稍后重试。",
       last_ok_at: null,
       from: "checking",
       consecutive_failures: 3,

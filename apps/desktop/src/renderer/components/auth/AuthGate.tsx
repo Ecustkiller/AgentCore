@@ -96,7 +96,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         }
       } catch (err) {
         console.error("[auth] bootstrap failed", err);
-        const reason = "连不上 AgentCore 服务，请稍后重试。";
+        const reason = "连不上 Nexus 服务，请稍后重试。";
         const entered = await enterOfflineReadonly(reason);
         if (!entered) useAuthStore.getState().setUnavailable(reason);
       }
@@ -192,7 +192,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <PreAuthShell>
         <ServiceUnavailablePage
-          reason={reason ?? "连不上 AgentCore 服务，请稍后重试。"}
+          reason={reason ?? "连不上 Nexus 服务，请稍后重试。"}
           onRetry={() => void runBootstrap()}
         />
       </PreAuthShell>

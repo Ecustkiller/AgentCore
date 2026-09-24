@@ -263,7 +263,7 @@ function createWindow(): BrowserWindow {
     height: windowState.height,
     x: windowState.x,
     y: windowState.y,
-    title: is.dev ? "AgentCore [DEV]" : "AgentCore",
+    title: is.dev ? "Nexus [DEV]" : "Nexus",
     minWidth: 800,
     minHeight: 600,
     show: false,

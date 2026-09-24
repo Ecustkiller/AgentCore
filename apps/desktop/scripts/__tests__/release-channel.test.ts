@@ -24,8 +24,8 @@ describe("release-channel.mjs", () => {
     expect(id).toMatchObject({
       channel: "stable",
       appId: "xyz.fashitianxia.agentcore",
-      productName: "AgentCore",
-      shortcutName: "AgentCore",
+      productName: "Nexus",
+      shortcutName: "Nexus",
       publishUrl: "https://downloads.fashitianxia.xyz/desktop/stable",
       artifactSlug: "AgentCore",
       channelLabelZh: "稳定",
@@ -38,8 +38,8 @@ describe("release-channel.mjs", () => {
     expect(id).toMatchObject({
       channel: "beta",
       appId: "xyz.fashitianxia.agentcore.beta",
-      productName: "AgentCore 测试版",
-      shortcutName: "AgentCore 测试版",
+      productName: "Nexus 测试版",
+      shortcutName: "Nexus 测试版",
       publishUrl: "https://downloads.fashitianxia.xyz/desktop/beta",
       artifactSlug: "AgentCore",
       channelLabelZh: "测试",

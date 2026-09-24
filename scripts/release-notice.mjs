@@ -94,7 +94,7 @@ function buildReleaseDone({ versions }) {
 
 若刚才按预告暂停了使用：桌面请检查更新或到官网下载；手机 / Web 刷新即可。
 
-预告横幅可忽略或待过期；详情仍可在消息页「AgentCore 官方」查看。`;
+预告横幅可忽略或待过期；详情仍可在消息页「Nexus 官方」查看。`;
   return { title, body };
 }
 
@@ -110,7 +110,7 @@ function buildHotfixPreview({ at, summary }) {
 更新完成后刷新即可；一般无需重装客户端。
 本次：${summary.trim()}
 
-若结束后仍异常，打开消息页「AgentCore 官方」或稍后重试。`;
+若结束后仍异常，打开消息页「Nexus 官方」或稍后重试。`;
   return { title, body };
 }
 
@@ -120,7 +120,7 @@ function buildHotfixDone({ summary }) {
   const body = `系统短更新已完成${bit}。
 
 请刷新页面或重开客户端后继续；一般无需重装。
-若仍异常，打开消息页「AgentCore 官方」或稍后重试。`;
+若仍异常，打开消息页「Nexus 官方」或稍后重试。`;
   return { title, body };
 }
 

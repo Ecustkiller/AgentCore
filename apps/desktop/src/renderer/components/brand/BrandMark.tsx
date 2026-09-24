@@ -16,7 +16,7 @@ const WORD_CLASS: Record<BrandMarkSize, string> = {
 };
 
 /**
- * Shared product mark + AgentCore wordmark.
+ * Shared product mark + Nexus wordmark.
  * Display font (`font-brand`) applies to the Latin wordmark only; CJK copy nearby stays on the system stack.
  */
 export function BrandMark({
@@ -40,10 +40,10 @@ export function BrandMark({
     >
       <BrandMarkIcon
         size={MARK_PX[size]}
-        title={showWordmark ? undefined : "AgentCore"}
+        title={showWordmark ? undefined : "Nexus"}
       />
       {showWordmark && (
-        <span className={`font-brand ${WORD_CLASS[size]}`}>AgentCore</span>
+        <span className={`font-brand ${WORD_CLASS[size]}`}>Nexus</span>
       )}
     </div>
   );
