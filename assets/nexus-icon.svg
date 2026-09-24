@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Nexus 桌面图标源文件。三节点 + 连线，与 App 内 BrandMarkIcon 同源几何。 -->
+  <defs>
+    <linearGradient id="bg" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#95bbf8"/>
+      <stop offset="1" stop-color="#3a6cc8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g fill="#ffffff" stroke="#ffffff" stroke-width="38.08" stroke-linecap="round">
+    <line x1="471.68" y1="359.68" x2="373.12" y2="579.2"/>
+    <line x1="552.32" y1="359.68" x2="650.88" y2="579.2"/>
+    <line x1="404.48" y1="637.44" x2="619.52" y2="637.44"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="512.0" cy="301.44" r="64.96"/>
+    <circle cx="332.8" cy="637.44" r="64.96"/>
+    <circle cx="691.2" cy="637.44" r="64.96"/>
+  </g>
+</svg>

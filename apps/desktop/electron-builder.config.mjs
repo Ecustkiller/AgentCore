@@ -37,7 +37,7 @@ const config = {
   appId: identity.appId,
   productName: identity.productName,
 
-  // 应用图标按平台分源（母版在仓库根 assets/agentcore-icon-orbit-*.png，二进制复制入仓，勿重烤）：
+  // 应用图标按平台分源（母版在仓库根 assets/nexus-icon-*.png，二进制复制入仓，勿重烤）：
   // - Win / Linux：icon-win.png = rounded（四角透明 squircle）。Windows 快捷方式/任务栏不会再套一层
   //   圆角，若用满铺直角源会呈「方角块」；须预先烤好透明角。
   // - macOS：icon-mac.png = cropped（满铺、四角不透明）。系统会自己做 mask，预圆角反而被裁切/发糊。
