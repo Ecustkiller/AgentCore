@@ -119,8 +119,52 @@ export function resolveLexical(
 }
 
 /**
+ * 根的 canonical 路径缓存（``root.absPath`` → realpath 结果）。
+ *
+ * 为什么必须有：``realInside`` 把**目标** realpath 化，若**根**仍是词法值，两者不在
+ * 同一坐标系里，任何带符号链接祖先的根都会算出 ``../../..`` 开头的 rel，把**合法**
+ * 路径判成 ``out_of_root``。macOS 上 ``/var`` → ``/private/var``、``/tmp`` →
+ * ``/private/tmp``，所以 ``os.tmpdir()`` 下的根必中；用户把根选在符号链接目录
+ * （``/tmp/ws``、外置卷软链）时同样是合法路径被拒。
+ *
+ * 契约上这不是风格差异：服务端 ``resolve_safe_path``
+ * （``apps/server/agentcore/workspace/_paths.py``）两侧都 ``.resolve()``；桌面侧的
+ * ``stageAttachment.citeIfInsideDest`` / ``findContainingRoot`` 与 ``host/cwd.ts``
+ * 也都两侧 realpath。此处原是**唯一的例外**。
+ *
+ * 缓存过期方向安全：只有根的指向被改掉时才会读到旧值，而那时 rel 仍以 ``..`` 开头
+ * → 继续 fail-closed，不会放行越界（已由 ``pathGuard-lazy-fs.test.ts`` 的
+ * 「根指向被改掉后缓存过期 → fail-closed」用例坐实，非仅注释承诺）。
+ */
+const realRootCache = new Map<string, string>();
+
+async function canonicalRoot(absPath: string): Promise<string> {
+  const hit = realRootCache.get(absPath);
+  if (hit !== undefined) return hit;
+  let real = absPath;
+  try {
+    real = await fs.realpath(absPath);
+  } catch {
+    // 根当前不可达（已删 / 无权限）→ 保留词法值：让目标侧照旧抛 ENOENT，
+    // 维持既有 not_found / error 语义，不新造错误码。
+  }
+  realRootCache.set(absPath, real);
+  return real;
+}
+
+/** 测试辅助：清空 canonical 根缓存（换根 / 同一 absPath 重新指认后调用）。 */
+export function __clearRealRootCacheForTests(): void {
+  realRootCache.clear();
+}
+
+/**
  * realpath 复核：解析真实路径并确认仍在根内（防符号链接逃逸）。
  * ENOENT → `not_found`；逃逸 → `out_of_root`——二者不再折叠。
+ *
+ * 两侧都 canonical 化后再比：目标 realpath + 根走 {@link canonicalRoot}。只化一侧会
+ * 把「根带符号链接祖先」误判为越界（见 ``canonicalRoot`` 注释）。
+ * 对根做 realpath **不削弱**逃逸防护——根内符号链接指向根外时，realpath 后的目标
+ * 依旧以 ``..`` 开头，照旧被拒。
  */
 export async function realInside(
   root: StoredRoot,
@@ -128,7 +172,8 @@ export async function realInside(
 ): Promise<RealInsideResult> {
   try {
     const real = await fs.realpath(abs);
-    const rel = relative(root.absPath, real);
+    const rootReal = await canonicalRoot(root.absPath);
+    const rel = relative(rootReal, real);
     if (rel === "") return { ok: true, path: real };
     if (rel.startsWith("..") || isAbsolute(rel)) {
       return { ok: false, code: "out_of_root", reason: "路径越界，已拒绝" };
