@@ -4,6 +4,7 @@ import {
   INDEX_REL,
   INTERNAL_ZONE_NAMES,
   LIST_FILES_SKIP_DIRS,
+  SPILL_REL,
   VERSIONS_REL,
   isAttachmentPath,
   isInternalZoneRelPath,
@@ -50,21 +51,28 @@ describe("workspaceIgnore", () => {
     expect(
       isInternalZoneRelPath(`${AGENTCORE_ROOT}/versions/v1/content.zip`),
     ).toBe(true);
+    // 超预算输出落盘区：同样只按 `AgentCore/spill` 整段识别
+    expect(isInternalZoneRelPath(SPILL_REL)).toBe(true);
+    expect(isInternalZoneRelPath(`${AGENTCORE_ROOT}/spill/x.txt`)).toBe(true);
     expect(isInternalZoneRelPath(AGENTCORE_ROOT)).toBe(false);
     expect(isInternalZoneRelPath(`${AGENTCORE_ROOT}/rules/x.md`)).toBe(false);
     expect(shouldSkipDirName("index", AGENTCORE_ROOT)).toBe(true);
     expect(shouldSkipDirName("versions", AGENTCORE_ROOT)).toBe(true);
+    expect(shouldSkipDirName("spill", AGENTCORE_ROOT)).toBe(true);
     expect(shouldSkipDirName("rules", AGENTCORE_ROOT)).toBe(false);
     expect(shouldSkipDirName("index", "")).toBe(false);
     // 裸名 versions（用户项目里的目录）不得误伤
     expect(shouldSkipDirName("versions", "")).toBe(false);
+    expect(shouldSkipDirName("spill", "")).toBe(false);
     expect(LIST_FILES_SKIP_DIRS.has("versions")).toBe(false);
+    expect(LIST_FILES_SKIP_DIRS.has("spill")).toBe(false);
   });
 
   it("internal zone names mirror server stage_dirs.INTERNAL_ZONE_NAMES", () => {
     expect([...INTERNAL_ZONE_NAMES].sort()).toEqual([
       "baselines",
       "index",
+      "spill",
       "trash",
       "versions",
     ]);

@@ -14,7 +14,7 @@ import pytest
 
 from agentcore.workspace import ignore_parity as ip
 
-ZONE_NAMES = frozenset({"index", "trash", "baselines", "versions"})
+ZONE_NAMES = frozenset({"index", "trash", "baselines", "versions", "spill"})
 ZONE_RELS = frozenset(f"AgentCore/{zone}" for zone in ZONE_NAMES)
 
 
@@ -93,15 +93,15 @@ def test_all_three_zone_copies_parse_to_the_same_thing():
         ),
         pytest.param(
             "ts_src",
-            '\n  "versions",\n]);',
+            '\n  "spill",\n]);',
             "\n]);",
             "zone_names (python ↔ desktop main)",
             id="main-process-misses-a-zone",
         ),
         pytest.param(
             "renderer_src",
-            '"index", "trash", "baselines", "versions"',
-            '"index", "trash", "baselines"',
+            '    "versions",\n    "spill",\n',
+            '    "versions",\n',
             "renderer inline copy",
             id="renderer-inline-copy-misses-a-zone",
         ),

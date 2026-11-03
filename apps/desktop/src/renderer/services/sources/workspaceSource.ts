@@ -220,7 +220,7 @@ async function openCloudFileWithOsDefaultApp(
 }
 
 /**
- * Path-aware `AgentCore/{index,trash,baselines,versions}` — mirrors main
+ * Path-aware `AgentCore/{index,trash,baselines,versions,spill}` — mirrors main
  * `isInternalZoneRelPath`. Inlined on purpose (renderer must not import the
  * main-process module); the zone list is held to the server's by
  * `check_workspace_ignore_parity.py`, so add new zones here too.
@@ -231,7 +231,13 @@ function isHiddenAgentCorePath(path: string): boolean {
   const p = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (!p || p === ".") return false;
   if (isAgentCoreMemoryDirPath(p)) return true;
-  for (const zone of ["index", "trash", "baselines", "versions"] as const) {
+  for (const zone of [
+    "index",
+    "trash",
+    "baselines",
+    "versions",
+    "spill",
+  ] as const) {
     const prefix = `AgentCore/${zone}`;
     if (p === prefix || p.startsWith(`${prefix}/`)) return true;
   }

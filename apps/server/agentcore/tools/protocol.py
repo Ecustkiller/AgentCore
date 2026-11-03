@@ -708,6 +708,12 @@ class ToolResult:
     # (upstream policy/environment block) but for a self-correctable参数打回, not a refusal.
     contract_failure: bool = False
     audience: ToolAudience = TOOL_AUDIENCE_USER
+    # Untouched ``output`` when the cap below trimmed it. ``__post_init__`` has no
+    # workspace, so it cannot spill the full text itself — it keeps the original
+    # alive for the one seam that does have one (``tools/spill.py``), which
+    # writes it to disk and clears this. ``None`` when nothing was trimmed, and
+    # after a spill, so the copy never outlives the turn that made it.
+    spill_source: str | None = field(default=None, repr=False, compare=False)
 
     _MAX_OUTPUT_LEN = 4000
 
@@ -722,6 +728,7 @@ class ToolResult:
             # HEAD+TAIL, not a head-only chop: an agentic CEO leans on grep / read,
             # whose hits / numbers / 法条编号 often sit at the END — a head cut drops them
             # silently. Same primitive the dep-injection / compaction paths already use.
+            self.spill_source = self.output
             self.output = truncate_head_tail(self.output, limit)
 
 

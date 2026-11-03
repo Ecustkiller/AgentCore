@@ -39,17 +39,33 @@ BASELINES_ZONE_NAME = "baselines"
 # ``baselines``: the zips are product plumbing, not user files, so grep / index /
 # the next turn baseline must not see them.
 VERSIONS_ZONE_NAME = "versions"
+# Full text of an oversized tool result, kept so ``read offset/limit`` can recover
+# what the model-facing cap trimmed (``tools/spill.py``). Machine noise for the
+# same reason as the others: it is a copy of output the model already saw the
+# ends of, and it must not appear in a listing, a grep walk, or the file tree.
+# Unlike ``index`` / ``trash`` / ``baselines`` it is ALWAYS written in-tree — the
+# model reaches it through the workspace backend, so an out-of-tree location
+# would make it unreadable exactly where it is most needed.
+SPILL_ZONE_NAME = "spill"
 INTERNAL_ZONE_NAMES: frozenset[str] = frozenset(
-    {INDEX_ZONE_NAME, TRASH_ZONE_NAME, BASELINES_ZONE_NAME, VERSIONS_ZONE_NAME}
+    {
+        INDEX_ZONE_NAME,
+        TRASH_ZONE_NAME,
+        BASELINES_ZONE_NAME,
+        VERSIONS_ZONE_NAME,
+        SPILL_ZONE_NAME,
+    }
 )
 # In-tree relative form. Still the layout for local / sidecar roots and shared
 # spaces, and still what the desktop mirror (``fs/workspaceIgnore.ts``) hides.
 # Cloud conversation workspaces keep these zones OUT of the tree — see
-# ``internal_zone_base`` and ``locate.workspace_internal_root``.
+# ``internal_zone_base`` and ``locate.workspace_internal_root``. ``spill`` is the
+# exception: it is written in-tree in every mode.
 INDEX_REL = f"{AGENTCORE_ROOT}/{INDEX_ZONE_NAME}"
 TRASH_REL = f"{AGENTCORE_ROOT}/{TRASH_ZONE_NAME}"
 BASELINES_REL = f"{AGENTCORE_ROOT}/{BASELINES_ZONE_NAME}"
 VERSIONS_REL = f"{AGENTCORE_ROOT}/{VERSIONS_ZONE_NAME}"
+SPILL_REL = f"{AGENTCORE_ROOT}/{SPILL_ZONE_NAME}"
 
 # Retired 四格活柜 names — ``_paths`` still flattens nested writes under these prefixes.
 DRAFTS_PREFIX = "工作稿/"

@@ -11,8 +11,8 @@
  *   在 `attachments/`、区外 `external/`、`revealArchives` 或本回合 `reveal_paths`
  *   下豁免（与服务端 `file_list` / `list_tree` 对齐）。文件 UI（`listDir`）只藏系统噪音。
  *
- * 同树旁路 `AgentCore/{index,trash,baselines,versions}` 为路径感知系统噪音（禁止把裸名
- * `index`/`trash`/`baselines`/`versions` 放进全局跳过集，以免误伤用户项目）。
+ * 同树旁路 `AgentCore/{index,trash,baselines,versions,spill}` 为路径感知系统噪音（禁止把裸名
+ * `index`/`trash`/`baselines`/`versions`/`spill` 放进全局跳过集，以免误伤用户项目）。
  * 新增区名要同时改三处（服务端 `stage_dirs.py`、本文件、渲染层
  * `services/sources/workspaceSource.ts` 内联副本）——同一门禁对账区名集与
  * `AgentCore/<zone>` 路径形态，漏改任一处必红。
@@ -30,6 +30,7 @@ export const INTERNAL_ZONE_NAMES = new Set([
   "trash",
   "baselines",
   "versions",
+  "spill",
 ]);
 
 export const INDEX_REL = `${AGENTCORE_ROOT}/index`;
@@ -37,6 +38,8 @@ export const TRASH_REL = `${AGENTCORE_ROOT}/trash`;
 export const BASELINES_REL = `${AGENTCORE_ROOT}/baselines`;
 /** 用户命名版本区（`versions/<id>/{meta.json,content.zip}`）——本地版「留版本」。 */
 export const VERSIONS_REL = `${AGENTCORE_ROOT}/versions`;
+/** 超预算工具结果的全文落盘区（`spill/<ns>-<tool>-<call>.txt`）——模型按需 read。 */
+export const SPILL_REL = `${AGENTCORE_ROOT}/spill`;
 
 /** 系统噪音目录（整棵子树）。↔ 服务端 `IGNORED_DIRS`（parity gate）。 */
 export const LIST_FILES_SKIP_DIRS = new Set([
@@ -167,7 +170,7 @@ function endsWithAny(name: string, suffixes: readonly string[]): boolean {
   return suffixes.some((suf) => lower.endsWith(suf));
 }
 
-/** True when relPath is `AgentCore/{index|trash|baselines|versions}` or under it. */
+/** True when relPath is `AgentCore/{index|trash|baselines|versions|spill}` or under it. */
 export function isInternalZoneRelPath(relPath: string): boolean {
   const p = relPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (!p || p === ".") return false;

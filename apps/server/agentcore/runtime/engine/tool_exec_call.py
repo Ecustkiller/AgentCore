@@ -38,6 +38,7 @@ from agentcore.tools.cross_turn_retry import CrossTurnRetry, cross_turn_retry_me
 from agentcore.tools.file_products import LANDING_TOOLS, with_file_products_marker
 from agentcore.tools.protocol import TOOL_AUDIENCE_CEO, ToolContext, ToolResult
 from agentcore.tools.registry import ToolRegistry
+from agentcore.tools.spill import spill_capped_output
 
 from .timeout import outer_liveness_timeout_meta, resolve_tool_timeout
 from .tool_channel_redirect import tool_wire_status
@@ -699,6 +700,11 @@ async def run_one_tool(
         if note:
             prior = (result.output or "").rstrip()
             result.output = f"{prior}\n{note}" if prior else note
+
+    # 超预算的工具输出：把全文落到工作区，再在模型可见的那段后面留一行路径提示。
+    # 必须在 ``output = result.output`` 之前——之后吐给模型的就是这串；也必须在
+    # 预算/事件之前，否则 tool_use_end 的 output 与模型看到的会不一致。
+    await spill_capped_output(result, context, tool_name=name)
 
     # 缓存命中 / A3 拒绝等不计预算：reserved slot refunded when not charged.
     if budget_reserved and budget_state is not None and not charges_retrieval_budget(result):

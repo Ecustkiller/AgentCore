@@ -2703,6 +2703,40 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='tool.multi_terminal'),
     EventSpec(name='tool.name_protocol_sanitized'),
+    EventSpec(
+        name='tool.output_spill_failed',
+        description='超预算工具输出落盘失败（已回退为仅截断，不影响本次调用）',
+        fields={
+            'tool': FieldType('str'),
+            'chars': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='tool.output_spill_prune_failed',
+        description='spill 区清理单个陈旧文件失败（不影响本次调用）',
+        fields={
+            'path': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='tool.output_spill_skipped',
+        description='超预算工具输出放弃落盘（超过单文件上限）',
+        fields={
+            'tool': FieldType('str'),
+            'chars': FieldType('int'),
+            'reason': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='tool.output_spilled',
+        description='超预算工具输出全文已落盘，并在模型可见段尾部留了路径提示',
+        fields={
+            'tool': FieldType('str'),
+            'chars': FieldType('int'),
+            'kept_chars': FieldType('int'),
+            'path': FieldType('str'),
+        },
+    ),
     EventSpec(name='tool.web_fetch_cache_hit'),
     EventSpec(
         name='tool.web_fetch_error',
