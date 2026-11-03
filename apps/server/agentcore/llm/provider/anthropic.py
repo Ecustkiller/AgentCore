@@ -45,6 +45,12 @@ from agentcore.llm.provider.anthropic_messages import (
     usage_from_anthropic,
 )
 from agentcore.llm.provider.call_budget import provider_retry_ceiling
+from agentcore.llm.provider.first_byte import (
+    FirstByteTimeoutError,
+    anthropic_payload_line,
+    first_byte_timeout_seconds,
+    lines_until_first_byte,
+)
 from agentcore.llm.provider.openai_compatible import (
     _INITIAL_BACKOFF,
     _IO_ATTEMPT_CEILING,
@@ -269,6 +275,10 @@ class AnthropicMessagesProvider:
                 elapsed=time.monotonic() - started,
             )
             assembler = AnthropicSseAssembler()
+            # Per-attempt first-byte budget; started before the response head so
+            # an upstream that never sends headers is caught by the same clock.
+            attempt_started = time.monotonic()
+            first_byte_budget = first_byte_timeout_seconds()
             in_flight: httpx.Response | None = None
             try:
                 self._ensure_client_open()
@@ -289,7 +299,12 @@ class AnthropicMessagesProvider:
                         payload=payload,
                         retry_ceiling=ceiling,
                     )
-                    async for line in response.aiter_lines():
+                    async for line in lines_until_first_byte(
+                        response.aiter_lines(),
+                        budget_seconds=first_byte_budget,
+                        started_at=attempt_started,
+                        is_payload=anthropic_payload_line,
+                    ):
                         for chunk in assembler.feed_line(line):
                             if chunk.delta_content or chunk.delta_tool_calls:
                                 yielded = True
@@ -317,6 +332,24 @@ class AnthropicMessagesProvider:
                 backoff *= BACKOFF_MULTIPLIER
             except LLMError:
                 raise
+            except FirstByteTimeoutError as e:
+                # The stream opened and then produced nothing. Not a network
+                # failure, so it must not borrow the connect copy.
+                last_error = LLMTimeoutError(
+                    f"上游「{self._display_name}」接受了请求，但 {e.seconds:.0f} 秒内"
+                    "没有返回任何内容，本轮已中止。"
+                )
+                logger.warning(
+                    "llm.stream_first_byte_timeout",
+                    provider=self._name,
+                    seconds=e.seconds,
+                    attempt=attempt,
+                    scenario=request.scenario,
+                )
+                if yielded or attempt + 1 >= _MAX_RETRIES:
+                    raise last_error from e
+                await asyncio.sleep(backoff)
+                backoff *= BACKOFF_MULTIPLIER
             except httpx.TimeoutException as e:
                 raise_if_task_cancelled(e)
                 last_error = LLMTimeoutError(f"连接 {self._display_name} 超时，请检查网络后重试")

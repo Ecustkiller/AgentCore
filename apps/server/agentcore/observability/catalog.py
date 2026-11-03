@@ -1828,6 +1828,20 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='llm.retry_patience_ignored'),
     EventSpec(name='llm.router.close_failed'),
     EventSpec(name='llm.stream_aborted'),
+    EventSpec(
+        name='llm.stream_first_byte_timeout',
+        description=(
+            '上游接了请求但在首字节预算内没有产出任何内容（opt-in；默认由 '
+            'engine_llm_stream_idle_timeout_seconds 接管）'
+        ),
+        fields={
+            'provider': FieldType('str'),
+            'seconds': FieldType('float'),
+            'attempt': FieldType('int'),
+            'scenario': FieldType('str'),
+            'partial_sse_lines': FieldType('int'),
+        },
+    ),
     EventSpec(name='llm.stream_partial_disconnect'),
     EventSpec(
         name='llm.stream_stalled',

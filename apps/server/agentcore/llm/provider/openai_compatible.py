@@ -75,6 +75,12 @@ from agentcore.llm.provider.cooldown_gate import (
     peek_cooldown,
     silent_cooldown_seconds,
 )
+from agentcore.llm.provider.first_byte import (
+    FirstByteTimeoutError,
+    first_byte_timeout_seconds,
+    lines_until_first_byte,
+    openai_chat_payload_line,
+)
 from agentcore.llm.provider.protocol import (
     BACKOFF_MULTIPLIER,
     CONNECT_INITIAL_BACKOFF,
@@ -965,6 +971,11 @@ class OpenAICompatibleProvider:
             forwarded_preview: str | None = None
 
             in_flight: httpx.Response | None = None
+            # First-byte budget is per attempt: a retry gets a fresh one, and it
+            # starts before the response head so a hung upstream that never sends
+            # headers is caught by the same clock.
+            attempt_started = time.monotonic()
+            first_byte_budget = first_byte_timeout_seconds()
             try:
                 self._ensure_client_open()
                 async with self._client.stream(
@@ -990,7 +1001,12 @@ class OpenAICompatibleProvider:
                         payload=payload,
                     )
                     clear_cooldown(self._cooldown_slot(request.scenario))
-                    async for line in response.aiter_lines():
+                    async for line in lines_until_first_byte(
+                        response.aiter_lines(),
+                        budget_seconds=first_byte_budget,
+                        started_at=attempt_started,
+                        is_payload=openai_chat_payload_line,
+                    ):
                         lines_seen += 1
                         if len(last_lines) >= 5:
                             last_lines.pop(0)
@@ -1173,6 +1189,44 @@ class OpenAICompatibleProvider:
                 await asyncio.sleep(wait)
                 clear_cooldown(self._cooldown_slot(request.scenario))
                 backoff *= _BACKOFF_MULTIPLIER
+            except FirstByteTimeoutError as e:
+                # The upstream took the request and then produced nothing. The
+                # connection was fine, so this must not borrow the connect copy.
+                last_error = LLMTimeoutError(
+                    f"上游「{self._display_name}」接受了请求，但 {e.seconds:.0f} 秒内"
+                    "没有返回任何内容，本轮已中止。"
+                )
+                if committed:
+                    logger.warning(
+                        "llm.stream_partial_disconnect",
+                        provider=self._name,
+                        partial_sse_lines=lines_seen,
+                        reason="first_byte_timeout",
+                        committed=True,
+                    )
+                    yield LLMChunk(aborted=True)
+                    return
+                logger.warning(
+                    "llm.stream_first_byte_timeout",
+                    provider=self._name,
+                    seconds=e.seconds,
+                    attempt=attempt,
+                    scenario=request.scenario,
+                    partial_sse_lines=lines_seen,
+                )
+                if not self._can_retry_attempt(attempt, max_attempts=_MAX_RETRIES):
+                    raise last_error from e
+                if yielded_ephemeral:
+                    yield LLMChunk(stream_reset=True)
+                    yielded_ephemeral = False
+                backoff = await self._sleep_before_retry(
+                    attempt=attempt,
+                    backoff=backoff,
+                    stream=True,
+                    reason="first_byte_timeout",
+                    partial_sse_lines=lines_seen,
+                    max_attempts=_MAX_RETRIES,
+                )
             except httpx.TimeoutException as e:
                 raise_if_task_cancelled(e)
                 last_error = LLMTimeoutError(f"连接 {self._display_name} 超时，请检查网络后重试")
@@ -1538,6 +1592,10 @@ class OpenAICompatibleProvider:
             if headers.get("x-upstream-retried"):
                 err.retryable = False
             raise err
+        # A 4xx is request-scoped: replaying it reproduces it, so benching the
+        # credential would remove a healthy leaf and hide the real cause. Only a
+        # 429 arms the cooldown gate (see the retry path above); everything that
+        # lands here fails straight through with its classified copy.
         if is_non_retryable_client_status(status_code) or 400 <= status_code < 500:
             logger.warning(
                 "llm.client_error",
@@ -1927,6 +1985,15 @@ class OpenAICompatibleProvider:
         - ``False``: 4xx body clearly rejects tools / tools parameters
         - ``None``: unknown — 2xx without tool_calls, timeout, network, 429,
           auth errors, or any ambiguous failure (never pretend False)
+
+        The asymmetry is deliberate, and it is why ``False`` demands a body that
+        actually names a tools/function parameter rather than a status code: a
+        stale ``True`` costs one failed call the user can retry, while a wrong
+        ``False`` removes a working model until the next probe round and looks
+        like the product refusing to work. A 5xx in particular says nothing
+        about the model — an overloaded gateway answers ``503 Service
+        Unavailable``, and reading that reason phrase as a verdict is how a
+        healthy model gets dropped.
 
         Strategy: try ``tool_choice="required"`` first; on HTTP 400 when the
         dialect allows (``retry_forced_tool_choice_on_400``, e.g. DeepSeek V4)
