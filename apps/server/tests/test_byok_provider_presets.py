@@ -176,8 +176,35 @@ def test_openrouter_preset_includes_free_models():
     assert "google/gemini-2.5-pro" in preset.models
     # ":free" models present for non-sensitive background/worker slots.
     assert "nvidia/nemotron-3-ultra-550b-a55b:free" in preset.models
+    assert "nvidia/nemotron-3.5-super-vl:free" in preset.models
     assert "cohere/north-mini-code:free" in preset.models
+    assert "dots-studio/dots-3-note-preview:free" in preset.models
     assert "poolside/laguna-s-2.1:free" in preset.models
+
+
+def test_openveer_preset_is_the_free_deepseek_lane():
+    preset = match_byok_provider_preset("https://api.openveer.com/v1")
+    assert preset is not None
+    assert preset.id == "openveer"
+    assert preset.label == "OpenVeer（免费）"
+    assert preset.default_model == "DeepSeek-v4-flash-Free"
+    assert preset.models == ("DeepSeek-v4-flash-Free",)
+    assert seed_model_for_base_url("https://api.openveer.com/v1") == (
+        "DeepSeek-v4-flash-Free"
+    )
+    # The backup host in the vendor's own config maps to the same preset.
+    assert preset_models_for_base_url("https://openveer.com/v1") == (
+        "DeepSeek-v4-flash-Free",
+    )
+    assert preset_models_for_base_url("https://openveer.com/v1/") == (
+        "DeepSeek-v4-flash-Free",
+    )
+    # Not a prefix match: the bare host and deeper paths stay custom.
+    assert match_byok_provider_preset("https://openveer.com") is None
+    assert match_byok_provider_preset("https://api.openveer.com") is None
+    # Rejected ids stay out of the seed (see the preset's note).
+    assert "DeepSeek-R1-Free" not in preset.models
+    assert "Qwen3-8-Free" not in preset.models
 
 
 def test_byok_preset_base_urls_are_unique():

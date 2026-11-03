@@ -19,6 +19,7 @@ export type ByokProviderId =
   | "groq"
   | "opencode_zen"
   | "opencode_go"
+  | "openveer"
   | "custom";
 
 export interface ByokProviderPreset {

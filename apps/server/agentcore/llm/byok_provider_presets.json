@@ -120,7 +120,9 @@
         "anthropic/claude-sonnet-4",
         "google/gemini-2.5-pro",
         "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3.5-super-vl:free",
         "cohere/north-mini-code:free",
+        "dots-studio/dots-3-note-preview:free",
         "poolside/laguna-s-2.1:free"
       ],
       "keyHelpUrl": "https://openrouter.ai/keys"
@@ -164,6 +166,16 @@
         "deepseek-v4-flash-vision-exp"
       ],
       "keyHelpUrl": "https://opencode.ai/auth"
+    },
+    {
+      "id": "openveer",
+      "label": "OpenVeer（免费）",
+      "baseUrl": "https://api.openveer.com/v1",
+      "baseUrlAliases": ["https://openveer.com/v1"],
+      "defaultModel": "DeepSeek-v4-flash-Free",
+      "models": ["DeepSeek-v4-flash-Free"],
+      "keyHelpUrl": "https://openveer.com/",
+      "note": "One-model seed on purpose. The endpoint's /v1/models advertises more, but each other id failed a gate the agent loop needs: DeepSeek-R1-Free returns no tool_calls at all, Qwen3-8-Free emits none on the streaming path (so every agent turn fails), GLM-4-9-Free caps at 32768 context (guaranteed 413 on a long session), Spark-TTS-0.5B is TTS and 400s on chat. DeepSeek-v4-flash-Free passed base chat + non-streaming tool_calls + streaming tool_call deltas, 524288 context verified with a 390k-token request."
     }
   ]
 }

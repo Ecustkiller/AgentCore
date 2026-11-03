@@ -98,6 +98,19 @@ describe("resolveByokProviderFromConfig", () => {
     ).toBe("hy");
   });
 
+  it("matches OpenVeer canonical and backup base_urls", () => {
+    expect(resolveByokProviderFromConfig("https://api.openveer.com/v1")).toBe(
+      "openveer",
+    );
+    expect(resolveByokProviderFromConfig("https://openveer.com/v1/")).toBe(
+      "openveer",
+    );
+    // Bare host is not the API root — no prefix match.
+    expect(resolveByokProviderFromConfig("https://openveer.com")).toBe(
+      "custom",
+    );
+  });
+
   it("matches Groq base_url", () => {
     expect(
       resolveByokProviderFromConfig("https://api.groq.com/openai/v1"),
@@ -215,8 +228,24 @@ describe("getByokProviderPreset", () => {
     expect(preset.defaultModel).toBe("openrouter/auto");
     expect(preset.models).toContain("anthropic/claude-sonnet-4");
     expect(preset.models).toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
+    expect(preset.models).toContain("nvidia/nemotron-3.5-super-vl:free");
     expect(preset.models).toContain("cohere/north-mini-code:free");
+    expect(preset.models).toContain("dots-studio/dots-3-note-preview:free");
     expect(preset.models).toContain("poolside/laguna-s-2.1:free");
+  });
+
+  it("returns the OpenVeer free lane with a single tested model", () => {
+    const preset = getByokProviderPreset("openveer");
+    expect(preset.id).toBe("openveer");
+    expect(preset.label).toBe("OpenVeer（免费）");
+    expect(preset.baseUrl).toBe("https://api.openveer.com/v1");
+    expect(preset.baseUrlAliases).toEqual(["https://openveer.com/v1"]);
+    expect(preset.defaultModel).toBe("DeepSeek-v4-flash-Free");
+    expect(preset.models).toEqual(["DeepSeek-v4-flash-Free"]);
+    expect(preset.keyHelpUrl).toBe("https://openveer.com/");
+    // The ids that failed an agent gate stay out of the seed.
+    expect(preset.models).not.toContain("DeepSeek-R1-Free");
+    expect(preset.models).not.toContain("Qwen3-8-Free");
   });
 
   it("returns Groq metadata with free-tier seed", () => {
