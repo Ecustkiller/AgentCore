@@ -152,6 +152,11 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "via": "str",
         "stream_path_reason": "str",
     },
+    "task.mode_selected": {
+        "mode": "str",
+        "reason": "str",
+        "shared_workspace": "bool",
+    },
     "chat.turn_complete": {
         "finish_reason": "str",
         "rounds": "int",
@@ -1267,6 +1272,9 @@ KEY_DESC: dict[str, str] = {
     "chat.turn_start": (
         "回合起点（preview/chars/history）。"
         "stream_path_reason = 桌面过桥枚举（探活失败 / 强制关 / 无本机根等），仅云 POST 携带"
+    ),
+    "task.mode_selected": (
+        "本回合确定性任务模式（chat/code_fast/review/team）及触发原因；用于路由 A/B 与效率归因"
     ),
     "chat.turn_complete": "回合收尾（含 Phase-0 延迟：prepare/assemble/ttft_*；model/credential_source）",
     "chat.resume_complete": "暂停恢复回合收尾（终态带协作计数；STOP 终结不带）",

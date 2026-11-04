@@ -2826,6 +2826,17 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='table.csv_ingest_skipped'),
     EventSpec(name='table.csv_ingested'),
     EventSpec(
+        name='task.mode_selected',
+        description=(
+            '本回合确定性任务模式（chat/code_fast/review/team）及触发原因；用于路由 A/B 与效率归因'
+        ),
+        fields={
+            'mode': FieldType('str'),
+            'reason': FieldType('str'),
+            'shared_workspace': FieldType('bool'),
+        },
+    ),
+    EventSpec(
         name='team_preview.list_pending_failed',
         description='历史兼容：曾在列出待处理开工卡失败时发出；开工卡产品位已拆，不再发此事件',
     ),

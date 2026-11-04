@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, WorkspaceBoundary
 from agentcore.llm.profiles import TurnProfiles
 from agentcore.runtime.approvals import ApprovalGate
@@ -41,6 +42,8 @@ from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
 from .prepare import PreparedTurn, _gather_cancel_on_fail, _timed_phase, list_consult_entries
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -300,6 +303,12 @@ async def _assemble_ceo_wired(
     # for this turn's envelope here. Frozen system stays byte-stable across turns.
     task_mode = classify_task_mode(
         prepared.original_user_message or user_message,
+        shared_workspace=folder_id is not None,
+    )
+    logger.info(
+        "task.mode_selected",
+        mode=task_mode.mode,
+        reason=task_mode.reason,
         shared_workspace=folder_id is not None,
     )
     chat_envelope = render_ceo_turn_envelope(

@@ -375,6 +375,7 @@ async def _run_one_card(
         "first_green_ms": None,
         "patch_count": 0,
         "verify_count": 0,
+        "task_mode": None,
         "elapsed_sec": None,
         "checks": None,
         "checks_pass": None,
@@ -536,6 +537,16 @@ async def _run_one_card(
     row["first_green_ms"] = turn_complete.get("first_green_ms")
     row["patch_count"] = int(turn_complete.get("patch_count") or 0)
     row["verify_count"] = int(turn_complete.get("verify_count") or 0)
+    mode_event = next(
+        (
+            event
+            for event in sc.structured_events()
+            if event.get("event") == "task.mode_selected"
+            and event.get("trace_id") == trace_id
+        ),
+        {},
+    )
+    row["task_mode"] = mode_event.get("mode")
     row["event_types"] = [t for e in unwrapped if (t := e.get("type")) and isinstance(t, str)]
     row["error"] = error
     row["turn_started"] = turn_started
@@ -816,6 +827,48 @@ def _efficiency_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in rows
         if isinstance(row.get("first_green_ms"), (int, float))
     ]
+    by_mode: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        mode = str(row.get("task_mode") or "unknown")
+        bucket = by_mode.setdefault(
+            mode,
+            {
+                "cards": 0,
+                "tool_calls": 0,
+                "patch_count": 0,
+                "verify_count": 0,
+                "delegated_cards": 0,
+                "_elapsed": [],
+                "_first_patch": [],
+                "_first_green": [],
+            },
+        )
+        bucket["cards"] += 1
+        bucket["tool_calls"] += int(row.get("tool_call_count") or 0)
+        bucket["patch_count"] += int(row.get("patch_count") or 0)
+        bucket["verify_count"] += int(row.get("verify_count") or 0)
+        bucket["delegated_cards"] += int(bool(row.get("delegated")))
+        if isinstance(row.get("elapsed_sec"), (int, float)):
+            bucket["_elapsed"].append(float(row["elapsed_sec"]))
+        if isinstance(row.get("first_patch_ms"), (int, float)):
+            bucket["_first_patch"].append(int(row["first_patch_ms"]))
+        if isinstance(row.get("first_green_ms"), (int, float)):
+            bucket["_first_green"].append(int(row["first_green_ms"]))
+    for bucket in by_mode.values():
+        elapsed_values = bucket.pop("_elapsed")
+        patch_values = bucket.pop("_first_patch")
+        green_values = bucket.pop("_first_green")
+        cards = int(bucket["cards"])
+        bucket["avg_tool_calls"] = round(bucket["tool_calls"] / cards, 2) if cards else 0.0
+        bucket["avg_elapsed_sec"] = (
+            round(sum(elapsed_values) / len(elapsed_values), 1) if elapsed_values else None
+        )
+        bucket["avg_first_patch_ms"] = (
+            round(sum(patch_values) / len(patch_values), 1) if patch_values else None
+        )
+        bucket["avg_first_green_ms"] = (
+            round(sum(green_values) / len(green_values), 1) if green_values else None
+        )
     return {
         "cards": len(rows),
         "delegated_cards": sum(1 for row in rows if row.get("delegated")),
@@ -835,6 +888,7 @@ def _efficiency_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         else None,
         "total_patch_count": sum(int(row.get("patch_count") or 0) for row in rows),
         "total_verify_count": sum(int(row.get("verify_count") or 0) for row in rows),
+        "by_mode": by_mode,
         "by_tool": dict(by_tool),
     }
 
