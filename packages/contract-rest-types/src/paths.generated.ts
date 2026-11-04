@@ -212,6 +212,8 @@ export const REST_PATH_TEMPLATES = [
   "/v1/realtime",
   "/v1/search",
   "/v1/skill-catalog",
+  "/v1/skill-catalog/skill-pack/import",
+  "/v1/skill-catalog/skill-pack/{doc_id}/export",
   "/v1/skill-store",
   "/v1/skill-store/installed",
   "/v1/skill-store/mine",

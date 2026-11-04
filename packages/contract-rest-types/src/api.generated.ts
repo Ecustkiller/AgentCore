@@ -4911,6 +4911,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/skill-catalog/skill-pack/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Skill Pack
+         * @description 把包解成一条账号层 ``role=rule`` / 按需 Document；与商店安装同一写路径。
+         */
+        post: operations["import_skill_pack_v1_skill_catalog_skill_pack_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skill-catalog/skill-pack/{doc_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Skill Pack
+         * @description Owner-scoped；只导出账号层按需技能，正文去掉 frontmatter。
+         */
+        get: operations["export_skill_pack_v1_skill_catalog_skill_pack__doc_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/skill-store": {
         parameters: {
             query?: never;
@@ -11662,6 +11702,32 @@ export interface components {
              * @default true
              */
             writable: boolean;
+        };
+        /** SkillPackExportView */
+        SkillPackExportView: {
+            /** Description */
+            description: string;
+            /** Name */
+            name: string;
+            /** Pack Base64 */
+            pack_base64: string;
+        };
+        /**
+         * SkillPackImportRequest
+         * @description zip 的 base64；包内只准有 SKILL.md 与 references/*.md。
+         */
+        SkillPackImportRequest: {
+            /** Pack Base64 */
+            pack_base64: string;
+        };
+        /** SkillPackImportView */
+        SkillPackImportView: {
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** SkillSlotView */
         SkillSlotView: {
@@ -22229,6 +22295,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_skill_pack_v1_skill_catalog_skill_pack_import_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillPackImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillPackImportView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_skill_pack_v1_skill_catalog_skill_pack__doc_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                doc_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillPackExportView"];
                 };
             };
             /** @description Validation Error */

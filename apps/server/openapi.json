@@ -13203,6 +13203,66 @@
         "title": "SkillCatalogView",
         "type": "object"
       },
+      "SkillPackExportView": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pack_base64": {
+            "title": "Pack Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "pack_base64"
+        ],
+        "title": "SkillPackExportView",
+        "type": "object"
+      },
+      "SkillPackImportRequest": {
+        "description": "zip 的 base64；包内只准有 SKILL.md 与 references/*.md。",
+        "properties": {
+          "pack_base64": {
+            "title": "Pack Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pack_base64"
+        ],
+        "title": "SkillPackImportRequest",
+        "type": "object"
+      },
+      "SkillPackImportView": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "SkillPackImportView",
+        "type": "object"
+      },
       "SkillSlotView": {
         "properties": {
           "name": {
@@ -36494,6 +36554,157 @@
           }
         },
         "summary": "Get Skill Catalog",
+        "tags": [
+          "skill-catalog"
+        ]
+      }
+    },
+    "/v1/skill-catalog/skill-pack/import": {
+      "post": {
+        "description": "把包解成一条账号层 ``role=rule`` / 按需 Document；与商店安装同一写路径。",
+        "operationId": "import_skill_pack_v1_skill_catalog_skill_pack_import_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillPackImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillPackImportView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Skill Pack",
+        "tags": [
+          "skill-catalog"
+        ]
+      }
+    },
+    "/v1/skill-catalog/skill-pack/{doc_id}/export": {
+      "get": {
+        "description": "Owner-scoped；只导出账号层按需技能，正文去掉 frontmatter。",
+        "operationId": "export_skill_pack_v1_skill_catalog_skill_pack__doc_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillPackExportView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Skill Pack",
         "tags": [
           "skill-catalog"
         ]

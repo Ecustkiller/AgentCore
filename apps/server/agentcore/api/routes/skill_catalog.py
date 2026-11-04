@@ -9,6 +9,9 @@ on-demand documents the user wrote. Official HOW bodies stay in code — the
 
 from __future__ import annotations
 
+import base64
+import binascii
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +19,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.api.dependencies import AuthUser, get_db
 from agentcore.db.models import Document
 from agentcore.db.repositories import DocumentRepository
+from agentcore.documents.frontmatter import FrontmatterError, parse_entry_frontmatter
+from agentcore.documents.skillpack import (
+    SkillPackError,
+    build_pack,
+    canonical_content,
+    parse_pack,
+)
 from agentcore.folders.desk import resolve_desk_access
+from agentcore.memory.account_prepare_cache import drop_account_rules_memory_cache_for_user
 from agentcore.memory.rules_injection import rule_consult_name
 from agentcore.runtime.skills import build_system_skill_registry
 
@@ -42,6 +53,24 @@ class SkillCatalogView(BaseModel):
     mine: list[MineSkillView]
     folder_id: str | None = None
     writable: bool = True
+
+
+class SkillPackImportRequest(BaseModel):
+    """zip 的 base64；包内只准有 SKILL.md 与 references/*.md。"""
+
+    pack_base64: str
+
+
+class SkillPackImportView(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
+class SkillPackExportView(BaseModel):
+    name: str
+    description: str
+    pack_base64: str
 
 
 def _eligible_mine_doc(doc: Document) -> bool:
@@ -126,4 +155,73 @@ async def _catalog_view(
             for doc in mine_docs
             if _eligible_mine_doc(doc)
         ],
+    )
+
+
+# --- Skill Pack（纯 markdown 导入 / 导出，opt-in 无开关：不新增执行面）----------
+
+
+@router.post("/skill-pack/import", response_model=SkillPackImportView)
+async def import_skill_pack(
+    body: SkillPackImportRequest,
+    user: AuthUser,
+    docs: DocumentRepository = Depends(_doc_repo),
+) -> SkillPackImportView:
+    """把包解成一条账号层 ``role=rule`` / 按需 Document；与商店安装同一写路径。"""
+    try:
+        raw = base64.b64decode(body.pack_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail={"message": "技能包不是合法的 base64"}
+        ) from exc
+    try:
+        pack = parse_pack(raw)
+        content = canonical_content(pack)
+    except SkillPackError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+    rules = await docs.ensure_rules_dir(user.user_id, None)
+    filename = pack.name if pack.name.lower().endswith(".md") else f"{pack.name}.md"
+    doc = await docs.create(
+        user.user_id,
+        name=filename,
+        parent_id=rules.id,
+        folder_id=None,
+        kind="document",
+        role="rule",
+        apply_mode="on_demand",
+        content=content,
+    )
+    drop_account_rules_memory_cache_for_user(user.user_id)
+    return SkillPackImportView(
+        id=doc.id, name=rule_consult_name(doc.name), description=pack.description
+    )
+
+
+@router.get("/skill-pack/{doc_id}/export", response_model=SkillPackExportView)
+async def export_skill_pack(
+    doc_id: str,
+    user: AuthUser,
+    docs: DocumentRepository = Depends(_doc_repo),
+) -> SkillPackExportView:
+    """Owner-scoped；只导出账号层按需技能，正文去掉 frontmatter。"""
+    doc = await docs.get(doc_id, user_id=user.user_id)
+    if doc is None or not _eligible_mine_doc(doc):
+        raise HTTPException(status_code=404, detail={"message": "找不到这个技能"})
+    parsed = parse_entry_frontmatter(doc.content or "")
+    if isinstance(parsed, FrontmatterError):
+        raise HTTPException(
+            status_code=400, detail={"message": "技能正文 frontmatter 未闭合"}
+        )
+    name = rule_consult_name(doc.name)
+    description = parsed.description or (doc.description or "") or name
+    try:
+        data = build_pack(name=name, description=description, body=parsed.body)
+        pack = parse_pack(data)  # 自校验：导出的包必须能被自己导回来。
+    except SkillPackError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+    return SkillPackExportView(
+        name=pack.name,
+        description=pack.description,
+        pack_base64=base64.b64encode(data).decode("ascii"),
     )
