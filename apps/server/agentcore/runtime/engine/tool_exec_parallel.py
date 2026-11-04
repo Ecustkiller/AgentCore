@@ -93,9 +93,6 @@ async def execute_tools(
     event_run_id = "" if role == "captain" else run_id
     allowed_set = None if allowed_tool_names is None else frozenset(allowed_tool_names)
     disabled_set = frozenset(disabled_tools) if disabled_tools else frozenset()
-    # Same-round read-only coalesce (leader Future → fan-out clones).
-    read_only_inflight: dict[str, asyncio.Future[ToolResult]] = {}
-
     async def _run_one(tc: ToolCall) -> ToolCallQuad:
         return await run_one_tool(
             tc,
@@ -108,7 +105,6 @@ async def execute_tools(
             allowed_set=allowed_set,
             disabled_set=disabled_set,
             approval_gate=approval_gate,
-            read_only_inflight=read_only_inflight,
         )
 
     sem = asyncio.Semaphore(MAX_PARALLEL_TOOLS)

@@ -101,6 +101,9 @@ class TurnToolCache:
     ] = field(
         default_factory=dict, repr=False
     )
+    _inflight: dict[tuple[int, str], asyncio.Future[Any]] = field(
+        default_factory=dict, repr=False
+    )
     hits: int = 0
     saved_chars: int = 0
 
@@ -210,6 +213,39 @@ class TurnToolCache:
 
     def clear(self) -> None:
         self._entries.clear()
+        # Existing waiters keep their Future reference, but calls issued after a
+        # write must not join a pre-write in-flight operation.
+        self._inflight.clear()
+
+    def begin_inflight(
+        self,
+        *,
+        backend: object,
+        kind: str,
+        key: str,
+    ) -> tuple[asyncio.Future[Any], bool]:
+        full_key = (id(backend), f"{kind}\0{key}")
+        existing = self._inflight.get(full_key)
+        if existing is not None and not existing.done():
+            return existing, False
+        fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self._inflight[full_key] = fut
+        return fut, True
+
+    def end_inflight(
+        self,
+        *,
+        backend: object,
+        kind: str,
+        key: str,
+        future: asyncio.Future[Any] | None = None,
+    ) -> None:
+        full_key = (id(backend), f"{kind}\0{key}")
+        current = self._inflight.get(full_key)
+        if current is None:
+            return
+        if future is None or current is future:
+            self._inflight.pop(full_key, None)
 
 
 @dataclass
@@ -789,6 +825,34 @@ class ToolContext:
             key=key,
             value=value,
             fingerprint=fingerprint,
+        )
+
+    def begin_tool_inflight(
+        self,
+        *,
+        kind: str,
+        key: str,
+        backend: object | None = None,
+    ) -> tuple[asyncio.Future[Any], bool]:
+        return self._tool_cache.begin_inflight(
+            backend=self.backend if backend is None else backend,
+            kind=kind,
+            key=key,
+        )
+
+    def end_tool_inflight(
+        self,
+        *,
+        kind: str,
+        key: str,
+        future: asyncio.Future[Any] | None = None,
+        backend: object | None = None,
+    ) -> None:
+        self._tool_cache.end_inflight(
+            backend=self.backend if backend is None else backend,
+            kind=kind,
+            key=key,
+            future=future,
         )
 
 

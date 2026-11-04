@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -1643,6 +1644,61 @@ async def test_parallel_identical_grep_coalesces_once(tmp_path: Path):
     assert all(a.success for a in attempts)
     assert calls["n"] == 1
     assert all("app.py:1" in (m.content or "") for m in messages)
+
+
+async def test_identical_read_only_calls_share_inflight_across_workers(
+    tmp_path: Path,
+):
+    """Turn-shared single-flight coalesces workers that miss the cache together."""
+    from agentcore.tools.builtin.grep import GrepTool
+
+    (tmp_path / "app.py").write_text("TODO shared\n", encoding="utf-8")
+    backend = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    calls = {"n": 0}
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    real_grep = backend.grep
+
+    async def _blocking_grep(query):  # noqa: ANN001
+        calls["n"] += 1
+        entered.set()
+        await release.wait()
+        return await real_grep(query)
+
+    backend.grep = _blocking_grep  # type: ignore[method-assign]
+    reg = ToolRegistry()
+    reg.register(GrepTool())
+    ctx1 = _ctx(backend)
+    ctx2 = replace(ctx1, run_id="w2", agent_id="w2")
+    t1 = asyncio.create_task(
+        execute_tools(
+            [_call("g1", "grep", '{"pattern": "TODO"}')],
+            reg,
+            ctx1,
+            EventSink(),
+            approval_gate=None,
+            run_id="w1",
+        )
+    )
+    await asyncio.wait_for(entered.wait(), timeout=2.0)
+    t2 = asyncio.create_task(
+        execute_tools(
+            [_call("g2", "grep", '{"pattern": "TODO"}')],
+            reg,
+            ctx2,
+            EventSink(),
+            approval_gate=None,
+            run_id="w2",
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert calls["n"] == 1
+    release.set()
+    result1, result2 = await asyncio.gather(t1, t2)
+
+    assert calls["n"] == 1
+    assert "app.py:1" in (result1[0][0].content or "")
+    assert "app.py:1" in (result2[0][0].content or "")
 
 
 def test_tool_cache_invalidation_scopes_verify_checks():

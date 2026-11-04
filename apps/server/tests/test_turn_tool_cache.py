@@ -1,5 +1,7 @@
 """Turn-scoped cache key and fingerprint invariants."""
 
+import asyncio
+
 from agentcore.tools.protocol import TurnToolCache
 
 
@@ -72,3 +74,27 @@ def test_cached_value_with_fingerprint_misses_when_fingerprint_changes():
         )
         is None
     )
+
+
+async def test_clear_drops_inflight_handles_for_new_callers():
+    cache = TurnToolCache()
+    backend = object()
+    first, first_leader = cache.begin_inflight(
+        backend=backend,
+        kind="read_only",
+        key="grep:TODO",
+    )
+    assert first_leader is True
+
+    cache.clear()
+    second, second_leader = cache.begin_inflight(
+        backend=backend,
+        kind="read_only",
+        key="grep:TODO",
+    )
+    assert second_leader is True
+    assert second is not first
+
+    first.cancel()
+    second.cancel()
+    await asyncio.gather(first, second, return_exceptions=True)

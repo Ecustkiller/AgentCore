@@ -157,13 +157,12 @@ async def run_one_tool(
     allowed_set: frozenset[str] | None,
     disabled_set: frozenset[str],
     approval_gate: ApprovalGate | None,
-    read_only_inflight: dict[str, asyncio.Future[ToolResult]],
 ) -> ToolCallQuad:
     """Parse, gate, execute, and emit wire events for one tool call.
 
-    ``read_only_inflight`` is round-owned same-read coalesce state shared across
-    parallel calls. Return shape matches the gather quad used by
-    :func:`execute_tools`.
+    Identical read-only calls single-flight through the turn-shared tool cache,
+    so the coalescing works across both sibling calls and delegated workers.
+    Return shape matches the gather quad used by :func:`execute_tools`.
     """
     raw_name = tc.function.name or ""
     name = sanitize_tool_name(raw_name)
@@ -583,30 +582,38 @@ async def run_one_tool(
     )
     deadline_token = set_tool_deadline(timeout)
     coalesce_key = _read_only_round_coalesce_key(name, args)
+    coalesce_backend = context.backend
+    inflight: asyncio.Future[Any] | None = None
+    inflight_leader = False
     try:
         if coalesce_key is not None:
-            existing = read_only_inflight.get(coalesce_key)
-            if existing is not None:
-                shared = await existing
+            inflight, inflight_leader = context.begin_tool_inflight(
+                kind="read_only",
+                key=coalesce_key,
+                backend=coalesce_backend,
+            )
+            if not inflight_leader:
+                shared = await inflight
                 result = _clone_tool_result(shared, tc.id)
                 result.duration_ms = int((time.monotonic() - started) * 1000)
             else:
-                fut: asyncio.Future[ToolResult] = asyncio.get_running_loop().create_future()
-                read_only_inflight[coalesce_key] = fut
                 try:
                     if timeout is None:
                         result = await tool.execute(args, ctx)
                     else:
                         result = await asyncio.wait_for(tool.execute(args, ctx), timeout)
                     # Snapshot before this call mutates ``tool_call_id``.
-                    if not fut.done():
-                        fut.set_result(replace(result))
+                    if not inflight.done():
+                        inflight.set_result(replace(result))
                 except BaseException as exc:
-                    if not fut.done():
+                    if not inflight.done():
                         if isinstance(exc, asyncio.CancelledError):
-                            fut.cancel()
+                            inflight.cancel()
                         else:
-                            fut.set_exception(exc)
+                            inflight.set_exception(exc)
+                            # Mark retrieved when nobody joined; a later follower
+                            # still receives the same exception on await.
+                            inflight.exception()
                     raise
         elif timeout is None:
             result = await tool.execute(args, ctx)
@@ -782,6 +789,13 @@ async def run_one_tool(
         )
     finally:
         reset_tool_deadline(deadline_token)
+        if coalesce_key is not None and inflight_leader and inflight is not None:
+            context.end_tool_inflight(
+                kind="read_only",
+                key=coalesce_key,
+                future=inflight,
+                backend=coalesce_backend,
+            )
     result.tool_call_id = tc.id
     if _invalidates_tool_cache(name, result):
         # A failed command may still have written files before exiting non-zero.
