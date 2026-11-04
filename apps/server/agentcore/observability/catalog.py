@@ -2549,6 +2549,17 @@ EVENTS: list[EventSpec] = [
             'persist': FieldType('bool'),
         },
     ),
+    EventSpec(
+        name='shared_state.redis_fail_open',
+        description=(
+            'opt-in 共享状态后端（429 冷却槽 / 单回合计费 claim）的 Redis 读写或构造失败；'
+            '读失败当空槽、写失败只告警，claim 退回本地内存记账。不改变多 worker 拒启口径'
+        ),
+        fields={
+            'error': FieldType('str'),
+            'op': FieldType('str'),
+        },
+    ),
     EventSpec(name='sidecar.create_workspace_version_failed'),
     EventSpec(name='sidecar.dispatch_failed'),
     EventSpec(name='sidecar.exiting'),

@@ -19,6 +19,7 @@ from agentcore.config.quota import QuotaSettings
 from agentcore.config.runtime_hooks import RuntimeHooksSettings
 from agentcore.config.search import SearchSettings
 from agentcore.config.server import ServerSettings
+from agentcore.config.shared_state import SharedStateSettings
 from agentcore.config.workspace import WorkspaceSettings
 
 
@@ -39,6 +40,7 @@ class Settings(
     LabScheduleSettings,
     LlmCandidateChainSettings,
     RuntimeHooksSettings,
+    SharedStateSettings,
     DemoTapeSettings,
     BaseSettings,
 ):

@@ -121,8 +121,10 @@ class AuthSettings(BaseModel):
     admin_mfa_required: bool = True
     # ``memory`` = process-local rate-limit counters (dev / single worker only).
     # ``redis`` = shared rate limiters (CSRF stays a signed cookie — no Redis store).
-    # With shared cost_ledger_outbox, redis unlocks multi-worker API; memory +
-    # multi-worker is refused at boot in non-DEBUG.
+    # ⚠️ redis **不解锁**多 worker：共享限流 + 共享账本 outbox 只移掉两处阻塞，
+    # 设备履约中枢与对话事件流仍是进程内单例，启动校验一律拒启（部署拓扑 §六、
+    # main.py::_validate_single_process_assumptions）。放开前置是跨进程扇出，
+    # 不是任何环境变量，故上游有意不留 opt-in 逃生阀。
     rate_limit_backend: Literal["memory", "redis"] = "memory"
 
     @field_validator("rate_limit_backend", "smtp_tls_mode", mode="before")

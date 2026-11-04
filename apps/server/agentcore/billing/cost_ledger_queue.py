@@ -14,9 +14,12 @@ Legacy disk files under ``{data_dir}/telemetry/cost_ledger_queue/`` and
 ``proxy_spend_queue/`` are still drained once (upgrade compat). Enqueue DB
 failure falls back to that disk path so billing intent is never silent-dropped.
 
-Deployment: shared DB outbox + ``RATE_LIMIT_BACKEND=redis`` unlocks multi-worker
-API. Other subsystems (approval gate / IM / steer / journal settlement) may still
-be single-process — see 部署拓扑 · API 进程约束.
+Deployment: the shared DB outbox + ``RATE_LIMIT_BACKEND=redis`` remove the
+ledger / limiter blockers, but **do not unlock multi-worker**: the fulfill hub
+and conversation event stream are process-local singletons, so boot refuses
+multi-worker regardless (部署拓扑 §六 · API 进程约束 /
+``main.py::_validate_single_process_assumptions``). Other subsystems (approval
+gate / IM / steer / journal settlement) also assume one process.
 """
 
 from __future__ import annotations

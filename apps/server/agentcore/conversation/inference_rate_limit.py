@@ -1,4 +1,11 @@
-"""Rate limit helpers for inference-token minting and the sidecar LLM proxy."""
+"""Rate limit helpers for inference-token minting and the sidecar LLM proxy.
+
+最后修订 2026-11-04：单回合 claim 表改为可替换后端（``cache/shared_state.py``），
+默认 ``memory`` 与改造前逐位等价，opt-in ``redis`` 只共享「这一回合已扣过票」。
+**不改变多 worker 拒启口径**，也不宣称多机就绪 —— 见 ``config/shared_state.py``。
+``hold`` 的 asyncio 锁仍是进程内：跨进程 check→enforce→claim 的 TOCTOU 没有
+被这个改动消除，capabilities 里如实标注。
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from agentcore.cache.shared_state import TurnClaimStore, build_turn_claim_store
 from agentcore.config import settings
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.core.errors import RateLimitedError
@@ -26,10 +34,21 @@ class _TurnClaimGate:
     check → await enforce → claim cannot double-charge across the await yield.
     """
 
-    def __init__(self, *, ttl_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float,
+        store: TurnClaimStore | None = None,
+    ) -> None:
         self._ttl = ttl_seconds
-        self._claimed: dict[str, float] = {}
+        self._store = store
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def _claims(self) -> TurnClaimStore:
+        # 懒构造：模块 import 不碰 Redis，构造期失败也会 fail-open 到内存。
+        if self._store is None:
+            self._store = build_turn_claim_store(ttl_seconds=self._ttl)
+        return self._store
 
     def _lock_for(self, key: str) -> asyncio.Lock:
         # Sync map update is atomic on the asyncio event loop (no await between get/set).
@@ -46,28 +65,17 @@ class _TurnClaimGate:
             yield
 
     def already_claimed(self, key: str, *, now: float) -> bool:
-        ts = self._claimed.get(key)
-        if ts is None:
-            return False
-        if now - ts >= self._ttl:
-            del self._claimed[key]
-            return False
-        return True
+        return self._claims().has(key, now=now)
 
     def claim(self, key: str, *, now: float) -> None:
-        self._claimed[key] = now
-        if len(self._claimed) > 10_000:
-            cutoff = now - self._ttl
-            self._claimed = {k: t for k, t in self._claimed.items() if t > cutoff}
-            # Keep locks still held by in-flight check→enforce (not yet claimed).
-            self._locks = {
-                k: lock
-                for k, lock in self._locks.items()
-                if k in self._claimed or lock.locked()
-            }
+        self._claims().add(key, now=now)
+        if len(self._locks) > 10_000:
+            # Only in-flight check→enforce holders matter; released locks are
+            # cheap to recreate on the next call for that turn key.
+            self._locks = {k: lock for k, lock in self._locks.items() if lock.locked()}
 
     def reset(self) -> None:
-        self._claimed.clear()
+        self._claims().reset()
         self._locks.clear()
 
 
