@@ -8,6 +8,7 @@ from agentcore.config.checkpoint import CheckpointSettings
 from agentcore.config.database import DatabaseSettings
 from agentcore.config.demo_tape import DemoTapeSettings
 from agentcore.config.engine import EngineSettings
+from agentcore.config.knowledge import KnowledgeSettings
 from agentcore.config.model_health import ModelHealthSettings
 from agentcore.config.paths import ENV_FILE  # AGENTCORE_ENV → see paths.resolve_env_file
 from agentcore.config.persistence import PersistenceSettings
@@ -31,6 +32,7 @@ class Settings(
     ServerSettings,
     WorkspaceSettings,
     ModelHealthSettings,
+    KnowledgeSettings,
     DemoTapeSettings,
     BaseSettings,
 ):

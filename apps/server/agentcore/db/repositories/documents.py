@@ -746,6 +746,69 @@ class DocumentRepository:
         await self._session.refresh(doc)
         return doc
 
+    async def search_knowledge(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        limit: int = 8,
+    ) -> list[Any]:
+        """Owner-scoped, on-demand retrieval over the documents tree.
+
+        Separate from ``/v1/search`` (conversations/messages/folders): this reads
+        the "一切皆文档" single table's BODY. ILIKE rather than tsvector on
+        purpose — stock PostgreSQL does not segment Chinese. Excludes soft-deleted
+        rows, entries the user marked 「这条不对」(``disputed_at``), and folder
+        nodes (no body). Returns pure ``KnowledgeRow`` values so no ORM object
+        leaks into the scoring/rendering layer. Relevance ranking happens in
+        ``documents.knowledge_search.rank_and_render``; SQL only supplies a
+        recency-ordered candidate pool.
+        """
+        from agentcore.documents.knowledge_search import (
+            ILIKE_ESCAPE,
+            KnowledgeRow,
+            escape_ilike,
+            search_terms,
+        )
+
+        terms = search_terms(query)
+        if not terms:
+            return []
+        conditions: list[Any] = [
+            Document.user_id == user_id,
+            Document.deleted_at.is_(None),
+            Document.disputed_at.is_(None),
+            Document.kind != "folder",
+        ]
+        for term in terms:
+            pattern = f"%{escape_ilike(term)}%"
+            conditions.append(
+                or_(
+                    Document.name.ilike(pattern, escape=ILIKE_ESCAPE),
+                    Document.description.ilike(pattern, escape=ILIKE_ESCAPE),
+                    Document.content.ilike(pattern, escape=ILIKE_ESCAPE),
+                )
+            )
+        stmt = (
+            select(Document)
+            .where(and_(*conditions))
+            .order_by(Document.updated_at.desc())
+            .limit(max(1, limit))
+        )
+        result = await self._session.execute(stmt)
+        return [
+            KnowledgeRow(
+                document_id=doc.id,
+                name=doc.name,
+                folder_id=doc.folder_id,
+                role=doc.role,
+                updated_at=doc.updated_at,
+                content=doc.content or "",
+                description=doc.description or "",
+            )
+            for doc in result.scalars().all()
+        ]
+
     async def get(self, document_id: str, *, user_id: str) -> Document | None:
         """Owner-scoped fetch (non-owner / unknown id → None → route 404; SEC-002)."""
         result = await self._session.execute(

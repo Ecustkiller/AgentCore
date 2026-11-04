@@ -3646,6 +3646,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/documents/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Knowledge Documents
+         * @description On-demand keyword search over the user's own documents tree.
+         *
+         *     Deliberately separate from Tier 1 ``/v1/search`` (conversations/messages/folders):
+         *     this reads the 「一切皆文档」 table's BODY. Read-only, owner-scoped, and **never
+         *     auto-injected into a prompt** — that direction is explicitly rejected in
+         *     《Agent记忆与知识系统》. Empty / whitespace queries are a 400; a query with no
+         *     parsed terms returns an empty result rather than an opaque success.
+         */
+        get: operations["search_knowledge_documents_v1_documents_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -9505,6 +9531,41 @@ export interface components {
              * @enum {string}
              */
             type: "down" | "up";
+        };
+        /** KnowledgeSearchItem */
+        KnowledgeSearchItem: {
+            /** Document Id */
+            document_id: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Match End */
+            match_end?: number | null;
+            /** Match Start */
+            match_start?: number | null;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+            /** Score */
+            score: number;
+            /** Snippet */
+            snippet: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** KnowledgeSearchResponse */
+        KnowledgeSearchResponse: {
+            /** Items */
+            items?: components["schemas"]["KnowledgeSearchItem"][];
+            /** Query */
+            query: string;
+            /** Terms */
+            terms?: string[];
+            /**
+             * Total Candidates
+             * @default 0
+             */
+            total_candidates: number;
         };
         /**
          * LlmModelProbeResponse
@@ -19597,6 +19658,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AlwaysQuotaView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_knowledge_documents_v1_documents_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSearchResponse"];
                 };
             };
             /** @description Validation Error */

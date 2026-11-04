@@ -24,6 +24,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import AuthUser, get_db, get_document_repo
+from agentcore.api.schemas.knowledge_search import (
+    KnowledgeSearchItem,
+    KnowledgeSearchResponse,
+)
+from agentcore.config import settings
 from agentcore.db.models import Document
 from agentcore.db.repositories import DocumentRepository, SkillStoreRepository
 from agentcore.documents.description import maybe_schedule_description_fill
@@ -34,6 +39,7 @@ from agentcore.documents.frontmatter import (
     parse_entry_frontmatter,
     set_entry_frontmatter,
 )
+from agentcore.documents.knowledge_search import rank_and_render, search_terms
 from agentcore.documents.write_guards import is_ai_core_memory_leaf
 from agentcore.memory import memory_version
 from agentcore.memory.always_quota import (
@@ -226,6 +232,55 @@ async def _preview_create_body(
     if isinstance(parsed, FrontmatterError):
         raise HTTPException(status_code=400, detail=parsed.message)
     return body, counts_as_always_content(body)
+
+
+@router.get("/search", response_model=KnowledgeSearchResponse)
+async def search_knowledge_documents(
+    user: AuthUser,
+    q: str,
+    limit: int = 8,
+    repo: DocumentRepository = Depends(get_document_repo),
+) -> KnowledgeSearchResponse:
+    """On-demand keyword search over the user's own documents tree.
+
+    Deliberately separate from Tier 1 ``/v1/search`` (conversations/messages/folders):
+    this reads the 「一切皆文档」 table's BODY. Read-only, owner-scoped, and **never
+    auto-injected into a prompt** — that direction is explicitly rejected in
+    《Agent记忆与知识系统》. Empty / whitespace queries are a 400; a query with no
+    parsed terms returns an empty result rather than an opaque success.
+    """
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="q 不能为空")
+    limit = max(1, min(limit, 20))
+    terms = search_terms(query)
+    candidate_limit = limit * settings.knowledge_search_candidate_multiplier
+    rows = await repo.search_knowledge(user.user_id, query, limit=candidate_limit)
+    hits = rank_and_render(
+        rows,
+        terms,
+        radius=settings.knowledge_search_snippet_radius,
+        limit=limit,
+    )
+    return KnowledgeSearchResponse(
+        query=query,
+        terms=terms,
+        items=[
+            KnowledgeSearchItem(
+                document_id=hit.document_id,
+                name=hit.name,
+                folder_id=hit.folder_id,
+                role=hit.role,
+                updated_at=hit.updated_at,
+                snippet=hit.snippet,
+                match_start=hit.match_start,
+                match_end=hit.match_end,
+                score=hit.score,
+            )
+            for hit in hits
+        ],
+        total_candidates=len(rows),
+    )
 
 
 @router.get("/always-quota", response_model=AlwaysQuotaView)

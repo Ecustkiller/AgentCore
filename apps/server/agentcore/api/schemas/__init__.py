@@ -147,6 +147,10 @@ from .handoff import (
     HandoffJobListResponse,
     HandoffJobSummary,
 )
+from .knowledge_search import (
+    KnowledgeSearchItem,
+    KnowledgeSearchResponse,
+)
 from .llm_model_profiles import (
     CreateLlmModelProfileRequest,
     LlmModelProfileListResponse,
@@ -653,6 +657,9 @@ __all__ = [
     "DemoTapeDirectorSeekRequest",
     "DemoTapeDirectorChapter",
     "DemoTapeDirectorChaptersResponse",
+    # knowledge-tree on-demand search
+    "KnowledgeSearchItem",
+    "KnowledgeSearchResponse",
     # generic
     "StatusResponse",
 ]

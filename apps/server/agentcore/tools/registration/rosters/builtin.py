@@ -8,6 +8,7 @@ from __future__ import annotations
 
 
 def load_roster() -> tuple[type, ...]:
+    from agentcore.config import settings
     from agentcore.tools.builtin.browser import BrowserTool
     from agentcore.tools.builtin.file_ops import (
         FileBatchTool,
@@ -25,7 +26,7 @@ def load_roster() -> tuple[type, ...]:
     from agentcore.tools.builtin.web.search import WebSearchTool
     from agentcore.tools.builtin.web.web_fetch import WebFetchTool
 
-    return (
+    roster: tuple[type, ...] = (
         # platform base
         WebSearchTool,
         WebFetchTool,
@@ -44,3 +45,11 @@ def load_roster() -> tuple[type, ...]:
         # Host：用户这台电脑上的短命令（schema NEVER · 运行时按 host 轴升审批）
         HostTool,
     )
+    if not settings.knowledge_search_enabled:
+        return roster
+    # opt-in：在 roster 层条件加载，而不是在 build_*_registry 里事后过滤。
+    # 这样 registry / 能力目录 / ALWAYS wiring 读到的声明集完全一致，不会出现
+    # 「目录里列了工具但注册表里没有」的漂移。
+    from agentcore.tools.builtin.knowledge_search import KnowledgeSearchTool
+
+    return (*roster, KnowledgeSearchTool)
