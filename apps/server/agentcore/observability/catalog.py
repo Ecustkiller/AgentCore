@@ -1763,6 +1763,30 @@ EVENTS: list[EventSpec] = [
             'scenario': FieldType('str'),
         },
     ),
+    EventSpec(
+        name='llm.candidate_chain_skipped',
+        description=(
+            'opt-in 候选链：配置坏形状 / 平台凭据缺失 / BYOK provider 解析不到时跳过该候选；'
+            '跳过不等于换链，未解析到凭据的候选不会进链（避免未知前缀被默认 leaf 吞掉）'
+        ),
+        fields={
+            'provider_id': FieldType('str'),
+            'reason': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='llm.candidate_hop',
+        description=(
+            'opt-in 候选链：一次 LLM 调用在 commit 前遭遇可恢复上游故障，改走下一个候选。'
+            '只在 pre-commit 跳；鉴权 / 余额死亡与 post-commit 断流都不跳'
+        ),
+        fields={
+            'from_model': FieldType('str'),
+            'hop': FieldType('int'),
+            'reason': FieldType('str'),
+            'to_model': FieldType('str'),
+        },
+    ),
     EventSpec(name='llm.call_retried'),
     EventSpec(name='llm.client_error'),
     EventSpec(name='llm.empty_response'),

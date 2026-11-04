@@ -133,6 +133,119 @@ def build_router_around(
     return ProviderRouter(default=default, providers=providers)
 
 
+async def _attach_candidate_chain(
+    router: ProviderRouter,
+    *,
+    user_id: str | None,
+    purpose: ProviderPurpose,
+    payer: str,
+) -> ProviderRouter:
+    """Opt-in #6：把显式配置的候选 provider 注册进 router，并套上候选链。
+
+    凭据解析（DB）留在 ``factory`` 这个已豁免的 llm↔db bridge；纯策略与
+    router 子类在 ``llm/candidate_chain.py``，不 import ``agentcore.db``。
+    解析不到凭据的候选**不注册也不进链**：否则 ``ProviderRouter._route`` 会把
+    带未知前缀的 model 原样丢给默认 leaf，看起来像换了 provider，其实没有。
+
+    ``payer`` 是本回合主凭据的 source。候选链**只在同一 payer 内换**：
+    ``bind_credential_pricing_context`` 只在回合装配时绑一次，跨
+    user BYOK ↔ platform 换候选不会重绑 ambient credential_source，会把
+    计价 / 归因静默留在主 payer。这类候选一律跳过（fail closed）。
+    """
+    from agentcore.config import settings
+    from agentcore.core.logging import get_logger
+    from agentcore.db.base import async_session_factory
+    from agentcore.llm.candidate_chain import Candidate, CandidateChainRouter, parse_chain
+    from agentcore.llm.profiles import PLATFORM_PROVIDER_SENTINEL
+    from agentcore.llm.resolve import (
+        platform_llm_credentials,
+        resolve_provider_credentials,
+    )
+
+    log = get_logger(__name__)
+    spec = settings.llm_candidate_chain_spec
+    fallbacks = parse_chain(spec, limit=settings.llm_candidate_chain_max_hops)
+    if not fallbacks:
+        if spec.strip():
+            log.info(
+                "llm.candidate_chain_skipped",
+                provider_id="",
+                reason="invalid_spec",
+            )
+        return router
+
+    uid = user_id or ""
+    byok_ids = (
+        list(
+            dict.fromkeys(
+                c.provider_id
+                for c in fallbacks
+                if c.provider_id
+                and c.provider_id != PLATFORM_PROVIDER_SENTINEL
+                and c.provider_id not in router.available_prefixes
+            )
+        )
+        if uid and payer != "platform"
+        else []
+    )
+    resolved: dict[str, LLMCredentials | None] = {}
+    if byok_ids:
+        async with async_session_factory() as session:
+            for provider_id in byok_ids:
+                resolved[provider_id] = await resolve_provider_credentials(
+                    session, uid, provider_id
+                )
+
+    resolvable: list[Candidate] = []
+    for candidate in fallbacks:
+        provider_id = candidate.provider_id
+        if not provider_id:
+            # 空串 = 沿用默认 leaf 只换模型，payer 必然与主凭据一致。
+            resolvable.append(candidate)
+            continue
+        if (provider_id == PLATFORM_PROVIDER_SENTINEL) != (payer == "platform"):
+            log.info(
+                "llm.candidate_chain_skipped",
+                provider_id=provider_id,
+                reason="payer_mismatch",
+            )
+            continue
+        if provider_id in router.available_prefixes:
+            # 已注册的前缀（vendor / agent / debate）复用现成 leaf，绝不在同名
+            # prefix 上覆盖辩手身份。
+            resolvable.append(candidate)
+            continue
+        if provider_id == PLATFORM_PROVIDER_SENTINEL:
+            if platform_llm_credentials(model=candidate.model) is None:
+                log.info(
+                    "llm.candidate_chain_skipped",
+                    provider_id=provider_id,
+                    reason="no_platform_credentials",
+                )
+                continue
+            router.register(provider_id, build_platform_provider(purpose=purpose))
+            resolvable.append(candidate)
+            continue
+        creds = resolved.get(provider_id)
+        if creds is None:
+            log.info(
+                "llm.candidate_chain_skipped",
+                provider_id=provider_id,
+                reason="missing_user_id" if not uid else "credentials_unresolved",
+            )
+            continue
+        router.register(provider_id, build_provider(creds, purpose=purpose))
+        resolvable.append(candidate)
+
+    if not resolvable:
+        return router
+    return CandidateChainRouter.from_router(
+        router,
+        fallbacks=tuple(resolvable),
+        max_hops=settings.llm_candidate_chain_max_hops,
+    )
+
+
 async def build_turn_router(
     credentials: LLMCredentials | None = None,
     *,
@@ -177,10 +290,22 @@ async def build_turn_router(
                 )
             if agent_creds is not None:
                 extras[agent_provider_id] = build_provider(agent_creds, purpose=purpose)
-    return build_router_around(
+    router = build_router_around(
         build_provider(credentials, purpose=purpose),
         extra_providers=extras or None,
     )
+
+    from agentcore.config import settings
+
+    # 默认关：这里返回的对象与上游完全一致（连类型都是原生 ProviderRouter）。
+    if settings.llm_candidate_chain_enabled:
+        return await _attach_candidate_chain(
+            router,
+            user_id=user_id,
+            purpose=purpose,
+            payer=credentials.source,
+        )
+    return router
 
 
 def build_router(
