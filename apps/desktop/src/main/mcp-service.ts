@@ -2,18 +2,25 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 /**
- * 本机 MCP Client —— 主进程经官方 SDK（Client + StdioClientTransport）拉起 stdio Server。
+ * 本机 MCP Client（最后修订 2026-11-04）—— 主进程经官方 SDK 拉起 stdio Server；
+ * 另有 opt-in、默认关的 Streamable HTTP 运输（`mcp-remote.ts`，上游 §四C 二期）。
  *
  * 运输层对标 Host：renderer 收到 `mcp_op_required` 后经本 IPC 执行，再
  * resolveInteraction 回填；不经云端假连 127.0.0.1。
  *
- * stderr 以 pipe 采集并纳入握手/调用失败明细（勿整段 ignore）。
+ * stderr 以 pipe 采集并纳入握手/调用失败明细（勿整段 ignore）；只 stdio 有
+ * stderr，HTTP 运输下失败明细就是 SDK 的错误本身。
+ *
+ * 契约：服务端 `parse_mcp_list_payload()` 只认 `{servers:[{id,name,status,tools}]}`，
+ * `call_tool` 只认 `server_id`/`tool_name`/`arguments`，所以运输层对服务端透明。
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StdioClientTransport,
   getDefaultEnvironment,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   MCP_CHANNELS,
   type McpConfigResult,
@@ -23,8 +30,16 @@ import {
   type McpServerConfig,
   type McpServerListItem,
   type McpTestResult,
+  type McpTransportKind,
 } from "@shared/mcp-contract";
 import { app, ipcMain } from "electron";
+import {
+  REMOTE_MCP_DISABLED_HINT,
+  createGuardedFetch,
+  remoteMcpEnabled,
+  validateRemoteHeaders,
+  validateRemoteUrl,
+} from "./mcp-remote";
 
 const RPC_TIMEOUT_MS = 30_000;
 const HANDSHAKE_TIMEOUT_MS = 45_000;
@@ -39,12 +54,16 @@ interface McpToolInfo {
 interface LiveSession {
   config: McpServerConfig;
   client: Client;
-  transport: StdioClientTransport;
+  transport: Transport;
   tools: McpToolInfo[];
   ready: boolean;
   lastError?: string;
   stderrChunks: string[];
   stderrBytes: number;
+}
+
+function transportKind(config: McpServerConfig): McpTransportKind {
+  return config.transport === "http" ? "http" : "stdio";
 }
 
 function configPath(): string {
@@ -60,6 +79,43 @@ function ensureConfigFile(): void {
   }
 }
 
+function normalizeConfig(s: Record<string, unknown>): McpServerConfig | null {
+  const transport: McpTransportKind = s.transport === "http" ? "http" : "stdio";
+  const command = String(s.command || "").trim();
+  const url = typeof s.url === "string" ? s.url.trim() : "";
+  // 半填的配置既不进目录也不连接，避免把「有 id 但连不上」的幽灵 Server 报给模型。
+  if (transport === "stdio" && !command) return null;
+  if (transport === "http" && !url) return null;
+  const env =
+    s.env && typeof s.env === "object" && !Array.isArray(s.env)
+      ? Object.fromEntries(
+          Object.entries(s.env as Record<string, unknown>).map(([k, v]) => [
+            k,
+            String(v),
+          ]),
+        )
+      : undefined;
+  const headers =
+    s.headers && typeof s.headers === "object" && !Array.isArray(s.headers)
+      ? Object.fromEntries(
+          Object.entries(s.headers as Record<string, unknown>).map(([k, v]) => [
+            k,
+            String(v),
+          ]),
+        )
+      : undefined;
+  return {
+    id: String(s.id || randomUUID()),
+    name: String(s.name || "MCP Server"),
+    enabled: s.enabled !== false,
+    transport,
+    command,
+    args: Array.isArray(s.args) ? s.args.map(String) : [],
+    env,
+    ...(transport === "http" ? { url, headers } : {}),
+  };
+}
+
 function loadConfigs(): McpServerConfig[] {
   ensureConfigFile();
   try {
@@ -69,25 +125,22 @@ function loadConfigs(): McpServerConfig[] {
     if (!Array.isArray(raw.servers)) return [];
     return raw.servers
       .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
-      .map((s) => ({
-        id: String(s.id || randomUUID()),
-        name: String(s.name || "MCP Server"),
-        enabled: s.enabled !== false,
-        command: String(s.command || ""),
-        args: Array.isArray(s.args) ? s.args.map(String) : [],
-        env:
-          s.env && typeof s.env === "object" && !Array.isArray(s.env)
-            ? Object.fromEntries(
-                Object.entries(s.env as Record<string, unknown>).map(
-                  ([k, v]) => [k, String(v)],
-                ),
-              )
-            : undefined,
-      }))
-      .filter((s) => s.command.trim().length > 0);
+      .map(normalizeConfig)
+      .filter((s): s is McpServerConfig => s !== null);
   } catch {
     return [];
   }
+}
+
+/**
+ * 真正允许握手的集合。实验关时 http 条目直接消失（而不是报 failed），
+ * 于是服务端 `list_tools` 回填与上游「仅 stdio」逐字节一致。
+ */
+function usableConfigs(): McpServerConfig[] {
+  const all = loadConfigs();
+  return remoteMcpEnabled()
+    ? all
+    : all.filter((s) => transportKind(s) !== "http");
 }
 
 function saveConfigs(servers: McpServerConfig[]): void {
@@ -172,12 +225,35 @@ async function connectSession(config: McpServerConfig): Promise<LiveSession> {
     name: "agentcore-desktop",
     version: app.getVersion(),
   });
-  const transport = new StdioClientTransport({
-    command: config.command,
-    args: config.args,
-    env: spawnEnv(config),
-    stderr: "pipe",
-  });
+  let transport: Transport;
+  let stdio: StdioClientTransport | null = null;
+
+  if (transportKind(config) === "http") {
+    // 双重闸：usableConfigs() 已在调用侧挡过一次，这里再挡一次，
+    // 防止未来某个入口绕过过滤直接调 connectSession。
+    if (!remoteMcpEnabled()) throw new Error(REMOTE_MCP_DISABLED_HINT);
+    const urlVerdict = validateRemoteUrl(config.url);
+    if (!urlVerdict.ok) {
+      throw new Error(`远程 MCP URL 非法：${urlVerdict.reason}`);
+    }
+    const headerVerdict = validateRemoteHeaders(config.headers);
+    if (!headerVerdict.ok) {
+      throw new Error(`远程 MCP 请求头非法：${headerVerdict.reason}`);
+    }
+    transport = new StreamableHTTPClientTransport(urlVerdict.url, {
+      requestInit: { headers: headerVerdict.headers },
+      fetch: createGuardedFetch(urlVerdict.url),
+    });
+  } else {
+    stdio = new StdioClientTransport({
+      command: config.command,
+      args: config.args,
+      env: spawnEnv(config),
+      stderr: "pipe",
+    });
+    transport = stdio;
+  }
+
   const live: LiveSession = {
     config,
     client,
@@ -188,7 +264,7 @@ async function connectSession(config: McpServerConfig): Promise<LiveSession> {
     stderrBytes: 0,
   };
 
-  const stderr = transport.stderr;
+  const stderr = stdio?.stderr;
   if (stderr) {
     // StdioClientTransport.stderr is typed as Stream (no setEncoding).
     // Decode Buffer|string in the data callback — keep stderr observable.
@@ -272,7 +348,7 @@ export async function listMcpToolsValue(): Promise<Record<string, unknown>> {
 }
 
 async function listToolsValue(): Promise<Record<string, unknown>> {
-  const configs = loadConfigs().filter((s) => s.enabled);
+  const configs = usableConfigs().filter((s) => s.enabled);
   const servers: Array<Record<string, unknown>> = [];
   for (const cfg of configs) {
     try {
@@ -308,9 +384,16 @@ async function callToolValue(
   if (!serverId || !toolName) {
     throw new Error("call_tool 需要 server_id 与 tool_name");
   }
-  const cfg = loadConfigs().find((s) => s.id === serverId && s.enabled);
+  const cfg = usableConfigs().find((s) => s.id === serverId && s.enabled);
   if (!cfg) {
-    throw new Error(`MCP Server 未启用或不存在（${serverId}）`);
+    const gated = loadConfigs().some(
+      (s) => s.id === serverId && transportKind(s) === "http",
+    );
+    throw new Error(
+      gated
+        ? REMOTE_MCP_DISABLED_HINT
+        : `MCP Server 未启用或不存在（${serverId}）`,
+    );
   }
   const live = await ensureReady(cfg);
   try {
@@ -354,10 +437,18 @@ async function runOp(input: McpOpInput): Promise<McpOpResult> {
 
 function toListItem(cfg: McpServerConfig): McpServerListItem {
   const live = sessions.get(cfg.id);
+  // 配置仍可见（不静默吞用户数据），但实验关时明确标注不可用原因。
+  const gated = transportKind(cfg) === "http" && !remoteMcpEnabled();
   return {
     ...cfg,
-    runtimeStatus: live?.ready ? "ready" : live?.lastError ? "failed" : "idle",
-    runtimeError: live?.lastError,
+    runtimeStatus: gated
+      ? "failed"
+      : live?.ready
+        ? "ready"
+        : live?.lastError
+          ? "failed"
+          : "idle",
+    runtimeError: gated ? REMOTE_MCP_DISABLED_HINT : live?.lastError,
   };
 }
 
@@ -377,20 +468,62 @@ function listServers(): McpConfigResult {
 
 function upsertServer(server: McpServerConfig): McpMutationResult {
   try {
-    if (!server.command?.trim()) {
+    const transport: McpTransportKind =
+      server.transport === "http" ? "http" : "stdio";
+    // 默认关时不写入任何远程配置，实验面从根上保持空。
+    if (transport === "http" && !remoteMcpEnabled()) {
+      return {
+        ok: false,
+        error: { kind: "McpConfigError", detail: REMOTE_MCP_DISABLED_HINT },
+      };
+    }
+    if (transport === "stdio" && !server.command?.trim()) {
       return {
         ok: false,
         error: { kind: "McpConfigError", detail: "command 不能为空" },
       };
     }
+    const urlVerdict =
+      transport === "http" ? validateRemoteUrl(server.url) : null;
+    if (urlVerdict && !urlVerdict.ok) {
+      return {
+        ok: false,
+        error: {
+          kind: "McpConfigError",
+          detail: `远程 MCP URL 非法：${urlVerdict.reason}`,
+        },
+      };
+    }
+    const headerVerdict =
+      transport === "http" ? validateRemoteHeaders(server.headers) : null;
+    if (headerVerdict && !headerVerdict.ok) {
+      return {
+        ok: false,
+        error: {
+          kind: "McpConfigError",
+          detail: `远程 MCP 请求头非法：${headerVerdict.reason}`,
+        },
+      };
+    }
+
     const id = server.id?.trim() || randomUUID();
     const next: McpServerConfig = {
       id,
       name: (server.name || "MCP Server").trim() || "MCP Server",
       enabled: server.enabled !== false,
-      command: server.command.trim(),
-      args: Array.isArray(server.args) ? server.args.map(String) : [],
-      env: server.env,
+      transport,
+      command: transport === "stdio" ? server.command.trim() : "",
+      args:
+        transport === "stdio" && Array.isArray(server.args)
+          ? server.args.map(String)
+          : [],
+      env: transport === "stdio" ? server.env : undefined,
+      ...(transport === "http"
+        ? {
+            url: urlVerdict?.ok ? urlVerdict.url.toString() : "",
+            headers: headerVerdict?.ok ? headerVerdict.headers : {},
+          }
+        : {}),
     };
     const all = loadConfigs();
     const idx = all.findIndex((s) => s.id === id);
@@ -439,6 +572,13 @@ function setServerEnabled(id: string, enabled: boolean): McpMutationResult {
       error: { kind: "McpConfigError", detail: "Server 不存在" },
     };
   }
+  // 关时允许把远程条目禁用掉（用户能收拾现场），但不能把它启用。
+  if (enabled && transportKind(all[idx]) === "http" && !remoteMcpEnabled()) {
+    return {
+      ok: false,
+      error: { kind: "McpConfigError", detail: REMOTE_MCP_DISABLED_HINT },
+    };
+  }
   all[idx] = { ...all[idx], enabled };
   if (!enabled) void killSession(id);
   saveConfigs(all);
@@ -451,6 +591,12 @@ async function testServer(id: string): Promise<McpTestResult> {
     return {
       ok: false,
       error: { kind: "McpConfigError", detail: "Server 不存在" },
+    };
+  }
+  if (transportKind(cfg) === "http" && !remoteMcpEnabled()) {
+    return {
+      ok: false,
+      error: { kind: "McpConfigError", detail: REMOTE_MCP_DISABLED_HINT },
     };
   }
   try {

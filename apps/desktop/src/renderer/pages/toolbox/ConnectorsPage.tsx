@@ -1,4 +1,4 @@
-import { Badge, Button, Input } from "@/components/ui";
+import { Badge, Button, Input, Select, Textarea } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import type { McpServerConfig, McpServerListItem } from "@shared/mcp-contract";
 import { RefreshCw, Trash2 } from "lucide-react";
@@ -15,10 +15,37 @@ function emptyDraft(): McpServerConfig {
     id: "",
     name: "",
     enabled: true,
+    transport: "stdio",
     command: "",
     args: [],
     env: undefined,
   };
+}
+
+/**
+ * 静态请求头的文本表示。不静默吞掉写坏的行——主进程还有一道更严的校验，
+ * 但在这里就把格式问题指出来，用户不必等握手失败才知道。
+ */
+export function parseHeaderLines(text: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  text.split("\n").forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const sep = trimmed.indexOf(":");
+    const name = sep > 0 ? trimmed.slice(0, sep).trim() : "";
+    if (!name) {
+      throw new Error(`请求头第 ${index + 1} 行须写成「Key: Value」`);
+    }
+    headers[name] = trimmed.slice(sep + 1).trim();
+  });
+  return headers;
+}
+
+export function formatHeaderLines(headers?: Record<string, string>): string {
+  if (!headers) return "";
+  return Object.entries(headers)
+    .map(([name, value]) => `${name}: ${value}`)
+    .join("\n");
 }
 
 export function connectorStatusLabel(server: McpServerListItem): string {
@@ -114,6 +141,10 @@ export function ConnectorInspector({
   const [argsText, setArgsText] = useState(() =>
     server ? server.args.join(" ") : "",
   );
+  const [urlText, setUrlText] = useState(() => server?.url ?? "");
+  const [headersText, setHeadersText] = useState(() =>
+    formatHeaderLines(server?.headers),
+  );
   const [testNote, setTestNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,9 +156,13 @@ export function ConnectorInspector({
         env: server.env ? { ...server.env } : undefined,
       });
       setArgsText(server.args.join(" "));
+      setUrlText(server.url ?? "");
+      setHeadersText(formatHeaderLines(server.headers));
     } else {
       setDraft(emptyDraft());
       setArgsText("");
+      setUrlText("");
+      setHeadersText("");
     }
     setTestNote(null);
     setError(null);
@@ -135,11 +170,23 @@ export function ConnectorInspector({
 
   const saveDraft = async () => {
     if (!api.upsertServer) return;
-    const args = argsText.trim().split(/\s+/).filter(Boolean);
+    const isHttp = draft.transport === "http";
+    let headers: Record<string, string> | undefined;
+    try {
+      headers = isHttp ? parseHeaderLines(headersText) : undefined;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
     const payload: McpServerConfig = {
       ...draft,
       id: draft.id || crypto.randomUUID(),
-      args,
+      transport: isHttp ? "http" : "stdio",
+      command: isHttp ? "" : draft.command,
+      args: isHttp ? [] : argsText.trim().split(/\s+/).filter(Boolean),
+      env: isHttp ? undefined : draft.env,
+      url: isHttp ? urlText.trim() : undefined,
+      headers,
     };
     const res = await api.upsertServer(payload);
     if (!res.ok) {
@@ -241,28 +288,87 @@ export function ConnectorInspector({
           </label>
           <label
             className="flex flex-col gap-1 text-xs text-muted-foreground"
-            htmlFor="mcp-draft-command"
+            htmlFor="mcp-draft-transport"
           >
-            命令
-            <Input
-              id="mcp-draft-command"
-              value={draft.command}
-              onChange={(e) => setDraft({ ...draft, command: e.target.value })}
-              placeholder="例如：npx"
-            />
+            运输
+            <Select
+              id="mcp-draft-transport"
+              value={draft.transport === "http" ? "http" : "stdio"}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  transport: e.target.value === "http" ? "http" : "stdio",
+                })
+              }
+            >
+              <option value="stdio">本机 stdio（上游定案）</option>
+              <option value="http">远程 Streamable HTTP（实验）</option>
+            </Select>
           </label>
-          <label
-            className="flex flex-col gap-1 text-xs text-muted-foreground"
-            htmlFor="mcp-draft-args"
-          >
-            参数（空格分隔）
-            <Input
-              id="mcp-draft-args"
-              value={argsText}
-              onChange={(e) => setArgsText(e.target.value)}
-              placeholder="例如：-y @modelcontextprotocol/server-everything"
-            />
-          </label>
+          {draft.transport === "http" ? (
+            <>
+              <label
+                className="flex flex-col gap-1 text-xs text-muted-foreground"
+                htmlFor="mcp-draft-url"
+              >
+                HTTPS 端点
+                <Input
+                  id="mcp-draft-url"
+                  value={urlText}
+                  onChange={(e) => setUrlText(e.target.value)}
+                  placeholder="https://mcp.example.com/mcp"
+                />
+              </label>
+              <label
+                className="flex flex-col gap-1 text-xs text-muted-foreground"
+                htmlFor="mcp-draft-headers"
+              >
+                静态请求头（每行 Key: Value）
+                <Textarea
+                  id="mcp-draft-headers"
+                  rows={3}
+                  value={headersText}
+                  onChange={(e) => setHeadersText(e.target.value)}
+                  placeholder={"Authorization: Bearer ..."}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                实验功能默认关闭，需在启动桌面时设置
+                MCP_REMOTE_HTTP_ENABLED=true。 仅 HTTPS、静态请求头，不做
+                OAuth；请求头会与其他配置一起明文保存在本机
+                userData，请勿用于共享账号的长期凭据。
+              </p>
+            </>
+          ) : (
+            <>
+              <label
+                className="flex flex-col gap-1 text-xs text-muted-foreground"
+                htmlFor="mcp-draft-command"
+              >
+                命令
+                <Input
+                  id="mcp-draft-command"
+                  value={draft.command}
+                  onChange={(e) =>
+                    setDraft({ ...draft, command: e.target.value })
+                  }
+                  placeholder="例如：npx"
+                />
+              </label>
+              <label
+                className="flex flex-col gap-1 text-xs text-muted-foreground"
+                htmlFor="mcp-draft-args"
+              >
+                参数（空格分隔）
+                <Input
+                  id="mcp-draft-args"
+                  value={argsText}
+                  onChange={(e) => setArgsText(e.target.value)}
+                  placeholder="例如：-y @modelcontextprotocol/server-everything"
+                />
+              </label>
+            </>
+          )}
           {testNote ? (
             <p className="text-xs text-muted-foreground">{testNote}</p>
           ) : null}
