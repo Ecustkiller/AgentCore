@@ -7,6 +7,7 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import PurePosixPath
 from typing import Any, Literal, cast
 
@@ -28,7 +29,8 @@ CodeAction = Literal[
     "affected_tests",
 ]
 
-_SOURCE_EXTS = frozenset({".py", ".ts", ".tsx", ".js", ".jsx"})
+_SOURCE_EXTS = frozenset({".py", ".ts", ".tsx", ".js", ".jsx", ".mts", ".mjs", ".cts", ".cjs"})
+_INDEX_LIST_CAP = 6000
 _INDEX_FILE_CAP = 1200
 _INDEX_CHAR_CAP = 300_000
 _INDEX_TOTAL_CHAR_CAP = 16_000_000
@@ -41,6 +43,26 @@ _SYMBOL_RE = re.compile(
 )
 _IMPORT_RE = re.compile(
     r"""(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["'](?P<module>[^"']+)["']"""
+)
+_PYFLAKES_CORRECTNESS = frozenset(
+    {
+        "BreakOutsideLoop",
+        "ContinueOutsideLoop",
+        "DefaultExceptNotLast",
+        "DuplicateArgument",
+        "FStringMissingPlaceholders",
+        "FutureFeatureNotDefined",
+        "LateFutureImport",
+        "MultiValueRepeatedKeyLiteral",
+        "MultiValueRepeatedKeyVariable",
+        "RedefinedInListComp",
+        "RedefinedWhileUnused",
+        "ReturnOutsideFunction",
+        "UndefinedExport",
+        "UndefinedLocal",
+        "UndefinedName",
+        "YieldOutsideFunction",
+    }
 )
 
 
@@ -73,9 +95,11 @@ class CodeIntelIndex:
     diagnostics: list[tuple[str, int, str]]
     truncated: bool
 
+    @cached_property
     def symbols(self) -> list[SymbolDef]:
         return [symbol for file in self.files.values() for symbol in file.symbols]
 
+    @cached_property
     def reverse_imports(self) -> dict[str, set[str]]:
         modules = _path_modules(self.files)
         reverse: dict[str, set[str]] = {}
@@ -132,6 +156,25 @@ def _resolve_import(
     module = raw.strip()
     if not module:
         return None
+    if module.startswith("@/") or module.startswith("~/"):
+        base = PurePosixPath(module[2:])
+        for prefix in ("", "src/"):
+            resolved = f"{prefix}{base.as_posix()}"
+            for suffix in (
+                "",
+                ".ts",
+                ".tsx",
+                ".js",
+                ".jsx",
+                "/index.ts",
+                "/index.tsx",
+                "/index.js",
+                "/index.jsx",
+            ):
+                candidate = f"{resolved}{suffix}"
+                if candidate in available:
+                    return candidate
+        return None
     if module.startswith("./") or module.startswith("../"):
         base = PurePosixPath(importer).parent
         resolved = (base / module).as_posix()
@@ -142,6 +185,10 @@ def _resolve_import(
             ".tsx",
             ".js",
             ".jsx",
+            ".mts",
+            ".mjs",
+            ".cts",
+            ".cjs",
             "/__init__.py",
             "/index.ts",
             "/index.tsx",
@@ -165,6 +212,10 @@ def _resolve_import(
             ".tsx",
             ".js",
             ".jsx",
+            ".mts",
+            ".mjs",
+            ".cts",
+            ".cjs",
             "/__init__.py",
             "/index.ts",
             "/index.tsx",
@@ -231,19 +282,29 @@ class _PythonCollector(ast.NodeVisitor):
 
 def _python_intel(
     path: str, text: str
-) -> tuple[list[SymbolDef], list[ImportRef], tuple[int, str] | None]:
+) -> tuple[list[SymbolDef], list[ImportRef], list[tuple[int, str]]]:
     try:
         tree = ast.parse(text, filename=path)
     except SyntaxError as e:
-        return [], [], (e.lineno or 1, e.msg)
+        return [], [], [(e.lineno or 1, e.msg)]
     collector = _PythonCollector(path)
     collector.visit(tree)
-    return collector.symbols, collector.imports, None
+    # pyflakes is a lightweight semantic pass (undefined names, redefinitions,
+    # unused imports); it is not a full type checker.
+    from pyflakes import checker
+
+    messages = checker.Checker(tree, filename=path).messages
+    diagnostics = [
+        (message.lineno, message.message % message.message_args)
+        for message in messages
+        if type(message).__name__ in _PYFLAKES_CORRECTNESS
+    ]
+    return collector.symbols, collector.imports, diagnostics
 
 
 def _js_intel(
     path: str, text: str
-) -> tuple[list[SymbolDef], list[ImportRef], tuple[int, str] | None]:
+) -> tuple[list[SymbolDef], list[ImportRef], list[tuple[int, str]]]:
     symbols = [
         SymbolDef(path, match.group("name"), "symbol", text.count("\n", 0, match.start()) + 1)
         for match in _SYMBOL_RE.finditer(text)
@@ -256,24 +317,58 @@ def _js_intel(
         for match in _IMPORT_RE.finditer(text)
     ]
     if text.count("{") != text.count("}"):
-        return symbols, imports, (1, "unbalanced braces")
+        return symbols, imports, [(1, "unbalanced braces")]
     if text.count("(") != text.count(")"):
-        return symbols, imports, (1, "unbalanced parentheses")
-    return symbols, imports, None
+        return symbols, imports, [(1, "unbalanced parentheses")]
+    return symbols, imports, []
 
 
-async def _build_index(context: ToolContext) -> CodeIntelIndex:
-    cached = context.get_cached_tool_result(kind="code_intel_index", key="v1")
+async def build_code_intel_index(
+    context: ToolContext,
+    *,
+    scope: str = "",
+) -> CodeIntelIndex:
+    cache_key = f"v1:{scope}"
+    cached = context.get_cached_tool_result(kind="code_intel_index", key=cache_key)
     if isinstance(cached, CodeIntelIndex):
         return cached
+    future, owner = context.begin_tool_inflight(
+        kind="code_intel_index",
+        key=cache_key,
+    )
+    if not owner:
+        shared = await future
+        if isinstance(shared, CodeIntelIndex):
+            return shared
+    try:
+        index = await _build_code_intel_index_uncached(context, scope)
+    except BaseException:
+        future.cancel()
+        raise
+    finally:
+        context.end_tool_inflight(
+            kind="code_intel_index",
+            key=cache_key,
+            future=future,
+        )
+    if not future.done():
+        future.set_result(index)
+    return index
+
+
+async def _build_code_intel_index_uncached(
+    context: ToolContext,
+    scope: str,
+) -> CodeIntelIndex:
     index_files = getattr(context.backend, "index_files", None)
     if index_files is None:
         return CodeIntelIndex({}, frozenset(), [], False)
     try:
-        paths, truncated = await index_files(cap=_INDEX_FILE_CAP, order="path")
+        paths, truncated = await index_files(cap=_INDEX_LIST_CAP, order="path")
     except Exception:
         return CodeIntelIndex({}, frozenset(), [], False)
-    sources = [p for p in paths if _is_source(p)][:_INDEX_FILE_CAP]
+    scoped = [p for p in paths if _matches_path(p, scope)]
+    sources = [p for p in scoped if _is_source(p)][:_INDEX_FILE_CAP]
     all_paths = frozenset(paths)
     sem = asyncio.Semaphore(16)
 
@@ -306,8 +401,8 @@ async def _build_index(context: ToolContext) -> CodeIntelIndex:
             symbols, imports, error = _python_intel(path, text)
         else:
             symbols, imports, error = _js_intel(path, text)
-        if error and not file_truncated:
-            diagnostics.append((path, error[0], error[1]))
+        if not file_truncated:
+            diagnostics.extend((path, line, message) for line, message in error)
         files[path] = FileIntel(path=path, text=text, imports=imports, symbols=symbols)
     modules = _path_modules(files)
     for path, file in files.items():
@@ -321,10 +416,17 @@ async def _build_index(context: ToolContext) -> CodeIntelIndex:
     index = CodeIntelIndex(
         files=files,
         paths=all_paths,
-        diagnostics=diagnostics,
+        diagnostics=sorted(
+            set(diagnostics),
+            key=lambda item: (item[0].lower(), item[1], item[2]),
+        ),
         truncated=bool(truncated or content_truncated),
     )
-    context.cache_tool_result(kind="code_intel_index", key="v1", value=index)
+    context.cache_tool_result(
+        kind="code_intel_index",
+        key=f"v1:{scope}",
+        value=index,
+    )
     return index
 
 
@@ -339,7 +441,7 @@ def _symbol_lines(index: CodeIntelIndex, query: str, path: str, limit: int) -> l
     needle = query.lower()
     symbols = [
         symbol
-        for symbol in index.symbols()
+        for symbol in index.symbols
         if _matches_path(symbol.path, path)
         and (not needle or needle in symbol.name.lower())
     ]
@@ -368,7 +470,7 @@ def _reference_lines(
 
 
 def _import_lines(index: CodeIntelIndex, path: str) -> list[str]:
-    reverse = index.reverse_imports()
+    reverse = index.reverse_imports
     if path:
         file = index.files.get(path)
         if file is None:
@@ -407,10 +509,12 @@ def _test_candidates(source: str) -> list[str]:
     ]
 
 
-def _affected_lines(index: CodeIntelIndex, paths: list[str]) -> list[str]:
-    reverse = index.reverse_imports()
+def affected_test_paths(index: CodeIntelIndex, paths: list[str]) -> list[str]:
+    reverse = index.reverse_imports
     out: set[str] = set()
     for path in paths:
+        if _is_test(path) and path in index.paths:
+            out.add(path)
         for candidate in _test_candidates(path):
             if candidate and candidate in index.paths:
                 out.add(candidate)
@@ -425,7 +529,13 @@ def _affected_lines(index: CodeIntelIndex, paths: list[str]) -> list[str]:
             if _is_test(importer):
                 out.add(importer)
             frontier.append(importer)
-    return [f"{path}: affected test" for path in sorted(out)]
+    return sorted(out)
+
+
+def _affected_lines(index: CodeIntelIndex, paths: list[str]) -> list[str]:
+    return [
+        f"{path}: affected test" for path in affected_test_paths(index, paths)
+    ]
 
 
 def _render(action: CodeAction, index: CodeIntelIndex, args: dict[str, Any]) -> list[str]:
@@ -451,7 +561,7 @@ def _render(action: CodeAction, index: CodeIntelIndex, args: dict[str, Any]) -> 
         if not lines:
             lines = ["未发现可解析的语法/结构诊断"]
     if index.truncated:
-        lines.append(f"… 索引达到 {_INDEX_FILE_CAP} 文件上限")
+        lines.append("… 索引达到文件或字符安全预算")
     return lines
 
 
@@ -521,7 +631,9 @@ class CodeIntelTool:
                 duration_ms=0,
                 contract_failure=True,
             )
-        index = await _build_index(context)
+        path = str(arguments.get("path") or "").strip().replace("\\", "/")
+        scope = path if action in {"symbols", "references", "diagnostics"} else ""
+        index = await build_code_intel_index(context, scope=scope)
         render_args = dict(arguments)
         if action == "affected_tests" and not render_args.get("paths"):
             render_args["paths"] = list(context.landed_artifact_kinds)

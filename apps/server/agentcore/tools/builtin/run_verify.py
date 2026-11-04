@@ -720,6 +720,7 @@ async def _resolve_affected_paths(
     backend: WorkspaceBackend,
     *,
     changed_paths: list[str] | None = None,
+    context: ToolContext | None = None,
 ) -> list[str]:
     index = getattr(backend, "index_files", None)
     paths: list[str] = list(changed_paths or [])
@@ -732,13 +733,27 @@ async def _resolve_affected_paths(
             return []
         paths = list(recent)
 
+    test_paths = [
+        p
+        for p in paths
+        if _is_test_file(p) and await _file_exists(backend, p)
+    ]
     sources = [p for p in paths if _is_source_file(p) and not _is_test_file(p)]
-    test_paths: list[str] = []
     for src in sources[:_MAX_AFFECTED_SOURCES]:
         for candidate in _infer_test_candidates(src):
             if await _file_exists(backend, candidate):
                 test_paths.append(candidate)
                 break
+    if not test_paths and sources and context is not None:
+        # Filename inference misses integration tests reached through imports.
+        # Reuse the code-intel turn cache and walk reverse dependencies.
+        from agentcore.tools.builtin.code_intel import (
+            affected_test_paths,
+            build_code_intel_index,
+        )
+
+        index = await build_code_intel_index(context)
+        test_paths.extend(affected_test_paths(index, sources[:_MAX_AFFECTED_SOURCES]))
     return list(dict.fromkeys(test_paths))
 
 
@@ -975,6 +990,7 @@ async def _resolve_test_argv(
     profile: WorkspaceProfile,
     arguments: dict[str, Any],
     changed_paths: list[str] | None = None,
+    context: ToolContext | None = None,
 ) -> tuple[list[str] | None, Framework | None, str | None]:
     scope: Scope = arguments.get("scope", "affected")  # type: ignore[assignment]
     test_file = (arguments.get("test_file") or "").strip()
@@ -1015,6 +1031,7 @@ async def _resolve_test_argv(
         affected = await _resolve_affected_paths(
             backend,
             changed_paths=changed_paths,
+            context=context,
         )
         if affected:
             argv = _extend_test_targets(argv, affected)
@@ -1114,6 +1131,7 @@ async def execute_verify(arguments: dict[str, Any], context: ToolContext) -> Too
             profile=profile,
             arguments=arguments,
             changed_paths=list(context.landed_artifact_kinds) or None,
+            context=context,
         )
 
     if err:

@@ -1,5 +1,6 @@
 """Code intelligence tool: symbols, references, imports and diagnostics."""
 
+import asyncio
 from pathlib import Path
 
 from agentcore.tools.builtin.code_intel import CodeIntelTool
@@ -21,6 +22,10 @@ def _ctx(root: Path) -> ToolContext:
 def _seed(root: Path) -> None:
     (root / "src").mkdir()
     (root / "tests").mkdir()
+    (root / "tests" / "ui.test.ts").write_text(
+        'import { ui } from "@/ui"\n',
+        encoding="utf-8",
+    )
     (root / "src" / "pkg").mkdir()
     (root / "src" / "pkg" / "__init__.py").write_text(
         "from .worker import run\n",
@@ -28,6 +33,10 @@ def _seed(root: Path) -> None:
     )
     (root / "src" / "pkg" / "worker.py").write_text(
         "def run():\n    return 1\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "ui.ts").write_text(
+        'import value from "@/lib"\nexport const ui = value\n',
         encoding="utf-8",
     )
     (root / "src" / "util.py").write_text(
@@ -39,7 +48,11 @@ def _seed(root: Path) -> None:
         encoding="utf-8",
     )
     (root / "src" / "other.py").write_text(
-        "from . import util\n\ndef add_again():\n    return 1\n",
+        "from . import util\n\ndef add_again():\n    return util.Calc()\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "semantic.py").write_text(
+        "def broken():\n    return missing_name\n",
         encoding="utf-8",
     )
     (root / "src" / "unresolved.py").write_text(
@@ -98,9 +111,17 @@ async def test_code_intel_imports_affected_tests_and_diagnostics(tmp_path: Path)
         {"action": "affected_tests", "paths": ["src/util.py"]},
         ctx,
     )
+    ts_affected = await tool.execute(
+        {"action": "affected_tests", "paths": ["lib.ts"]},
+        ctx,
+    )
     ctx.landed_artifact_kinds["src/app.py"] = "prose"
     affected_from_turn = await tool.execute(
         {"action": "affected_tests"},
+        ctx,
+    )
+    changed_test = await tool.execute(
+        {"action": "affected_tests", "paths": ["tests/test_app.py"]},
         ctx,
     )
     diagnostics = await tool.execute({"action": "diagnostics"}, ctx)
@@ -111,9 +132,58 @@ async def test_code_intel_imports_affected_tests_and_diagnostics(tmp_path: Path)
 
     assert "src/app.py:1 -> .util" in imports.output
     assert "tests/test_app.py" in affected.output
+    assert "tests/ui.test.ts" in ts_affected.output
     assert "tests/test_app.py" in affected_from_turn.output
+    assert "tests/test_app.py" in changed_test.output
     assert "broken.py" in diagnostics.output
+    assert "src/semantic.py:2: undefined name 'missing_name'" in diagnostics.output
     assert "src/unresolved.py:3: unresolved relative import .missing" in diagnostics.output
     assert "src/other.py" not in diagnostics.output
-    assert "src/pkg/__init__.py" not in diagnostics.output
+    assert "unresolved relative import .worker" not in diagnostics.output
     assert "web.ts" in typescript.output
+
+
+async def test_code_intel_index_is_single_flight(tmp_path: Path, monkeypatch):
+    _seed(tmp_path)
+    ctx = _ctx(tmp_path)
+    original = ctx.backend.index_files
+    calls = 0
+
+    async def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.02)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(ctx.backend, "index_files", counted)
+    tool = CodeIntelTool()
+    first, second = await asyncio.gather(
+        tool.execute({"action": "symbols", "query": "add"}, ctx),
+        tool.execute({"action": "references", "query": "add"}, ctx),
+    )
+
+    assert first.success is True
+    assert second.success is True
+    assert calls == 1
+
+
+async def test_scoped_index_survives_parser_budget_truncation(tmp_path, monkeypatch):
+    from agentcore.tools.builtin import code_intel as module
+
+    (tmp_path / "a.py").write_text("def first():\n    pass\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def second():\n    pass\n", encoding="utf-8")
+    (tmp_path / "z.py").write_text("def deep_target():\n    pass\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_INDEX_FILE_CAP", 2)
+    tool = CodeIntelTool()
+
+    global_index = await tool.execute(
+        {"action": "symbols", "query": "deep_target"},
+        _ctx(tmp_path),
+    )
+    scoped_index = await tool.execute(
+        {"action": "symbols", "query": "deep_target", "path": "z.py"},
+        _ctx(tmp_path),
+    )
+
+    assert "deep_target" not in global_index.output
+    assert "z.py:1: function deep_target" in scoped_index.output

@@ -1286,6 +1286,44 @@ async def test_affected_scope_prefers_turn_changed_sources(tmp_path):
     assert no_code == []
 
 
+async def test_affected_scope_tracks_transitive_imports(tmp_path):
+    from agentcore.tools.builtin.run_verify import _resolve_affected_paths
+    from agentcore.tools.protocol import ToolContext
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.server import ServerWorkspace
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "util.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "src" / "app.py").write_text(
+        "from src.util import value\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "test_integration.py").write_text(
+        "from src.app import value\n", encoding="utf-8"
+    )
+    backend = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    context = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="a",
+        backend=backend,
+        user_id="u",
+    )
+
+    affected = await _resolve_affected_paths(
+        backend,
+        changed_paths=["src/util.py"],
+        context=context,
+    )
+    changed_test = await _resolve_affected_paths(
+        backend,
+        changed_paths=["tests/test_integration.py"],
+    )
+
+    assert affected == ["tests/test_integration.py"]
+    assert changed_test == ["tests/test_integration.py"]
+
+
 async def test_single_agent_verify_reuses_turn_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
