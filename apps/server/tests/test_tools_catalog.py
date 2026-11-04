@@ -27,6 +27,7 @@ _EXPECTED_NAMES = {
     "file_batch",
     "md_export",
     "grep",
+    "code_intel",
     "run",
 }
 
@@ -43,6 +44,7 @@ _CEO_DEFAULT_NAMES = {
     "file_batch",
     "md_export",
     "grep",
+    "code_intel",
     "run",
 }
 _MUTATION_NAMES = {
@@ -97,6 +99,7 @@ def test_write_and_exec_tools_are_grantable():
     assert approvals["read"] is ToolApproval.NEVER
     assert approvals["file_list"] is ToolApproval.NEVER
     assert approvals["glob"] is ToolApproval.NEVER
+    assert approvals["code_intel"] is ToolApproval.NEVER
     assert approvals["web_search"] is ToolApproval.NEVER
 
 

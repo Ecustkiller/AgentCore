@@ -461,7 +461,7 @@ def _stuffed_worker() -> ToolRegistry:
 def test_stuffed_worker_opening_table_includes_assembled_tools():
     """Assembled tools — including former on-demand — sit on the opening FC table."""
     registry = _stuffed_worker()
-    assert registry.count == 16
+    assert registry.count == 17
     assert "read_image" not in registry.names
     offered = _def_names(registry)
     assert offered == set(registry.names)
@@ -494,12 +494,12 @@ async def test_stuffed_worker_opening_table_includes_mcp_tools():
     registry = _stuffed_worker()
     opening_before = _def_names(registry)
     count_before = registry.count
-    assert count_before == 16
+    assert count_before == 17
     assert opening_before == set(registry.names)
 
     registered = register_mcp_tools(registry, _playwright_mcp_result(tool_count=24))
     assert registered == 24
-    assert registry.count == 40
+    assert registry.count == 41
     mcp_names = {n for n in registry.names if n.startswith("mcp_")}
     assert len(mcp_names) == 24
     offered = _def_names(registry)

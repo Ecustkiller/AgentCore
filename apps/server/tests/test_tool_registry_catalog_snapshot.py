@@ -38,6 +38,7 @@ _BUILTIN_ORDER = [
     "file_batch",
     "md_export",
     "grep",
+    "code_intel",
     "run",
 ]
 
@@ -84,6 +85,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "file_list": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "glob": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "grep": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "code_intel": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     # Write / execute: CEO + worker (same GRANTABLE ApprovalGate)
     "write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "edit": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
@@ -160,6 +162,7 @@ def test_tool_registry_builtin_approvals_snapshot():
         "file_list",
         "glob",
         "grep",
+            "code_intel",
     }
     grantable = set(_BUILTIN_ORDER) - never
     for name in never:
@@ -257,6 +260,7 @@ def test_tool_registry_declarations_cover_roster():
         "file_list",
         "glob",
         "grep",
+            "code_intel",
     } | frozenset(_BROWSER_CEO_ORDER)
 
     declared = declared_tools()

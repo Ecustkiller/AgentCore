@@ -10,6 +10,7 @@ from __future__ import annotations
 def load_roster() -> tuple[type, ...]:
     from agentcore.config import settings
     from agentcore.tools.builtin.browser import BrowserTool
+    from agentcore.tools.builtin.code_intel import CodeIntelTool
     from agentcore.tools.builtin.file_ops import (
         FileBatchTool,
         FileDeleteTool,
@@ -39,6 +40,7 @@ def load_roster() -> tuple[type, ...]:
         FileBatchTool,
         MdExportTool,
         GrepTool,
+        CodeIntelTool,
         RunTool,
         # L3 团队浏览器：单一 ``browser``（GRANTABLE · action 政策表；CEO+worker）
         BrowserTool,

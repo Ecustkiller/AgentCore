@@ -178,7 +178,11 @@ class SessionQueueMixin:
         was_active = self.active
         self.active = False
         self.cancel_all_timeouts()
-        current = asyncio.current_task()
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            # ``close`` is also called by synchronous teardown/tests with no loop.
+            current = None
         for task in tuple(self._settle_tasks):
             if task is current or task.done():
                 continue
