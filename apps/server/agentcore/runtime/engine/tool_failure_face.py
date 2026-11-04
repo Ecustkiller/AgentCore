@@ -119,6 +119,13 @@ _CURATED_BY_CODE: dict[str, str] = {
     "safety_breaker_deny": (
         "出于安全考虑，这一步操作已被拦下，没有执行。如果确实需要，请告诉我你想怎么做。"
     ),
+    # opt-in 生命周期钩子的明确 deny（实例级策略，不是用户确认卡）。钩子给的
+    # reason 只留在模型面 output/result，不直接透给用户面——它可能带内部信息。
+    # 策略在本回合仍生效，「请稍后重试」是谎话，所以只陈述事实 + 交给用户决定。
+    "hook_denied": (
+        "这一步被当前运行环境的策略拦下，没有执行，也没有改动任何东西。"
+        "如果确实需要，请告诉我你想怎么做。"
+    ),
     # Fuse / confirmation needed but nobody to ask (unattended job, ops kill switch).
     # A conversation really does have the confirmation card, so pointing there is honest;
     # naming a generic「可确认的界面」to someone who is already the user is not.
