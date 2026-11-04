@@ -4150,6 +4150,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/lab/scheduled-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Lab Jobs */
+        get: operations["list_lab_jobs_v1_lab_scheduled_jobs_get"];
+        put?: never;
+        /** Create Lab Job */
+        post: operations["create_lab_job_v1_lab_scheduled_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lab/scheduled-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Lab Job */
+        delete: operations["delete_lab_job_v1_lab_scheduled_jobs__job_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lab/scheduled-jobs/{job_id}/fire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fire Lab Job
+         * @description 手动触发一次，便于验证签名与出站；不改动 next_run_at。
+         */
+        post: operations["fire_lab_job_v1_lab_scheduled_jobs__job_id__fire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/messages/blocks": {
         parameters: {
             query?: never;
@@ -8072,6 +8127,21 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /** CreateLabJobRequest */
+        CreateLabJobRequest: {
+            /** Interval Seconds */
+            interval_seconds: number;
+            /** Name */
+            name: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Secret */
+            secret: string;
+            /** Webhook Url */
+            webhook_url: string;
+        };
         /** CreateLlmModelProfileRequest */
         CreateLlmModelProfileRequest: {
             background?: components["schemas"]["ModelProfileSlot"] | null;
@@ -9566,6 +9636,38 @@ export interface components {
              * @default 0
              */
             total_candidates: number;
+        };
+        /** LabJobFireResponse */
+        LabJobFireResponse: {
+            /** Status */
+            status: string;
+        };
+        /** LabJobView */
+        LabJobView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Interval Seconds */
+            interval_seconds: number;
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Last Status */
+            last_status: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Next Run At
+             * Format: date-time
+             */
+            next_run_at: string;
+            /** Webhook Url */
+            webhook_url: string;
         };
         /**
          * LlmModelProbeResponse
@@ -20687,6 +20789,148 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InferenceWebSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_lab_jobs_v1_lab_scheduled_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabJobView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_lab_job_v1_lab_scheduled_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateLabJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabJobView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_lab_job_v1_lab_scheduled_jobs__job_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fire_lab_job_v1_lab_scheduled_jobs__job_id__fire_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabJobFireResponse"];
                 };
             };
             /** @description Validation Error */

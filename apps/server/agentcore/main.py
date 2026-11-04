@@ -27,6 +27,7 @@ from agentcore.api.routes import (
     fulfill,
     git_credentials,
     inference,
+    lab_scheduled_jobs,
     llm_model_profiles,
     llm_providers,
     messages,
@@ -383,6 +384,15 @@ async def lifespan(app: FastAPI):
 
         model_health_task = asyncio.create_task(model_health_loop())
 
+    # Opt-in 本地实验：定时出站通知。默认关时**不创建 task**，与上游现状一致；
+    # 开关打开才挂，且 loop 内部再守一道门（防配置热变更）。见 config/lab_schedule.py
+    # 里与上游「定时代跑否决 / 不是远期」口径相悖的说明。
+    lab_schedule_task: asyncio.Task | None = None
+    if settings.lab_scheduled_jobs_enabled:
+        from agentcore.lab_schedule import lab_scheduled_jobs_loop
+
+        lab_schedule_task = asyncio.create_task(lab_scheduled_jobs_loop())
+
     # Durable RUNNING lease sweeper (crash recover): claim heartbeat-expired leases and
     # redrive unfinished DAG via recover_turn. The boot sweep is awaited here, before
     # the unstarted FIFO is reloaded, so a recovering turn still owns the slot.
@@ -511,6 +521,10 @@ async def lifespan(app: FastAPI):
                 model_health_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await model_health_task
+            if lab_schedule_task is not None:
+                lab_schedule_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await lab_schedule_task
             pool_refresh_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await pool_refresh_task
@@ -634,6 +648,7 @@ app.include_router(files.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
 app.include_router(fulfill.router, prefix="/v1")
 app.include_router(git_credentials.router, prefix="/v1")
+app.include_router(lab_scheduled_jobs.router, prefix="/v1")
 app.include_router(notices.router, prefix="/v1")
 app.include_router(preview.router, prefix="/v1")
 app.include_router(inference.router, prefix="/v1")
