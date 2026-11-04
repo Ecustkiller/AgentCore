@@ -17,6 +17,13 @@ import {
   spawnDeniedStderr,
   whichCommand,
 } from "./execCodec";
+import {
+  buildChildEnv,
+  buildSeatbeltProfile,
+  readLocalExecIsolation,
+  seatbeltArgv,
+  seatbeltRefusalReason,
+} from "./execIsolation";
 import { opErr, opOk } from "./result";
 import { withWrittenFiles, writtenScanCutoffMs } from "./writtenScan";
 
@@ -234,7 +241,10 @@ export function runSubprocess(
       cwd,
       // stdin 是要写入的 pipe（`args.stdin`），不能像 git_run 那样 ignore。
       stdio: ["pipe", "pipe", "pipe"],
-      env: envExtra ? { ...process.env, ...envExtra } : undefined,
+      // 显式构造 env：剥掉宿主的高危自动执行键（LD_*/DYLD_*/NODE_OPTIONS/
+      // BASH_ENV…）。`env: undefined` 的隐式继承会把它们原样交给 AI 脚本，
+      // API 侧的 pickUserExecEnv 拒绝表挡不住这条路径。
+      env: buildChildEnv(envExtra),
       ...treeSpawnOptions(),
     });
     let stdout = "";
@@ -371,6 +381,20 @@ export async function opExecute(
     });
   }
 
+  // 用户明确要求隔离但本机做不到时，拒绝执行而不是悄悄跑裸 spawn——
+  // 「以为有沙箱」比「没有沙箱」更危险。默认不开时这条路完全不进入。
+  const isolation = readLocalExecIsolation();
+  const seatbeltRefusal = seatbeltRefusalReason(isolation);
+  if (seatbeltRefusal) {
+    return execResult({
+      success: false,
+      stdout: "",
+      stderr: seatbeltRefusal,
+      exit_code: 1,
+      duration_ms: Date.now() - startedMs,
+    });
+  }
+
   const resolved = resolveLangCmd(language, lang);
   if ("error" in resolved) {
     return execResult({
@@ -412,6 +436,9 @@ export async function opExecute(
   let tmpDir: string;
   try {
     tmpDir = await fs.mkdtemp(join(tmpdir(), "agentcore-exec-"));
+    // mkdtemp 本身已是 0700；显式再钉一次，防宿主 umask / ACL 继承把脚本目录放宽。
+    // Windows 上 chmod 是 no-op，失败一律吞掉，不改变执行行为。
+    await fs.chmod(tmpDir, 0o700).catch(() => {});
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   }
@@ -433,10 +460,29 @@ export async function opExecute(
     if (language === "python") {
       Object.assign(envExtra, buildWorkspacePythonpathEnv(cwdAbs));
     }
+
+    // opt-in macOS seatbelt：profile 与脚本同放在 0700 临时目录，随 finally 一起清掉。
+    // `subpath` 必须给真实路径（macOS 上 /tmp、/var 都是符号链接），故统一 realpath。
+    let execCmd = resolved.cmd;
+    if (isolation.seatbelt) {
+      const [cwdReal, scratchReal, tmpReal] = await Promise.all([
+        fs.realpath(cwdAbs).catch(() => cwdAbs),
+        fs.realpath(tmpDir).catch(() => tmpDir),
+        fs.realpath(tmpdir()).catch(() => tmpdir()),
+      ]);
+      const profilePath = join(tmpDir, "exec.sb");
+      await fs.writeFile(
+        profilePath,
+        buildSeatbeltProfile([cwdReal, scratchReal, tmpReal]),
+        "utf-8",
+      );
+      execCmd = seatbeltArgv(resolved.cmd, profilePath);
+    }
+
     // 产物写回：截止值必须在子进程能碰盘之前取。
     const cutoffMs = writtenScanCutoffMs();
     const ran = await runSubprocess(
-      resolved.cmd,
+      execCmd,
       scriptFile,
       cwdAbs,
       stdin,
