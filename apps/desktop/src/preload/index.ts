@@ -474,6 +474,11 @@ const windowApi: WindowApi = {
   getFramePreset: () => ipcRenderer.invoke(WINDOW_CHANNELS.getFramePreset),
   setThemeSource: (theme) =>
     ipcRenderer.send(WINDOW_CHANNELS.setThemeSource, theme),
+  onDeepLink: (cb) => {
+    const listener = (_e: unknown, hashRoute: string) => cb(hashRoute);
+    ipcRenderer.on(WINDOW_CHANNELS.deepLink, listener);
+    return () => ipcRenderer.removeListener(WINDOW_CHANNELS.deepLink, listener);
+  },
 };
 
 /** 真 OS 浮窗（方案 C）；主窗侧 open/dock/destroy + closed 订阅。 */

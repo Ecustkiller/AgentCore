@@ -7,6 +7,7 @@ import { applyTheme } from "./lib/theme";
 import { readNarrowViewport } from "./lib/useNarrowLayout";
 import { installAccountStateIngress } from "./services/accountStateIngress";
 import { installClientToolIngress } from "./services/clientToolIngress";
+import { installDeepLinkIngress } from "./services/deepLinkIngress";
 import { startOutboxReconcile } from "./services/outboxReconcile";
 import { installSidecarEventPump } from "./services/sidecarEventPump";
 import { installSidecarStatusListener } from "./services/sidecarStatus";
@@ -16,6 +17,8 @@ import { useUIStore } from "./stores/ui";
 import "./styles/globals.css";
 
 initScrollReveal();
+// nexus:// 深链：主进程推送站内路由，走 router.navigate（不重载页面）。
+installDeepLinkIngress();
 // Consume the sidecar lifecycle/diagnostic channel so a local-engine spawn/exit
 // failure surfaces its real reason on a failed turn, not a generic "network"
 // banner (no-op outside the desktop shell). See services/sidecarStatus.

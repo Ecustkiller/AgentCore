@@ -26,6 +26,7 @@ import {
 import { installAuthCookieFlushOnQuit } from "./auth-client";
 import { registerBrowserIpc, startDesktopBrowserBridge } from "./browser";
 import { WORKSPACE_SCHEME } from "./browser/workspace-paths";
+import { DEEP_LINK_SCHEME, deepLinkFromArgv, parseDeepLink } from "./deep-link";
 import { registerDeviceIdentityIpc } from "./device-identity";
 import {
   buildFloatHashRoute,
@@ -66,6 +67,8 @@ import { loadWindowState, manageWindowState } from "./window-state";
 /** 主 BrowserWindow（真窗 closed 事件目标；窗控按 sender 路由后不再闭包绑死它）。 */
 let mainWindowRef: BrowserWindow | null = null;
 let windowChromeIpcRegistered = false;
+/** macOS `open-url` 常早于窗口创建；先存解析后的路由，等首屏加载完再推。 */
+let pendingDeepLink: string | null = null;
 
 function preloadPath(): string {
   return join(__dirname, "../preload/index.js");
@@ -109,6 +112,52 @@ function registerWindowChromeIpc(): void {
 }
 
 installProcessSafetyNet();
+
+// 单实例：第二次启动不再拉起第二个 sidecar / 第二套 IPC 句柄，只聚焦已有窗口。
+// 深链（nexus://open?path=…）随第二次启动的 argv 或 macOS open-url 送到已有实例。
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    focusMainWindow();
+    const raw = deepLinkFromArgv(argv);
+    if (raw) dispatchDeepLink(raw);
+  });
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    dispatchDeepLink(url);
+  });
+}
+
+function focusMainWindow(): void {
+  const win = mainWindowRef;
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/** 深链只推一条校验过的站内路由，绝不把外部 URL 交给 loadURL / executeJavaScript。 */
+function dispatchDeepLink(raw: string): void {
+  const route = parseDeepLink(raw);
+  if (!route) {
+    console.warn("[deep-link] rejected invalid url");
+    return;
+  }
+  pendingDeepLink = route;
+  focusMainWindow();
+  flushPendingDeepLink();
+}
+
+function flushPendingDeepLink(): void {
+  const win = mainWindowRef;
+  if (!pendingDeepLink || !win || win.isDestroyed()) return;
+  // 首屏还没加载完时 renderer 未订阅 IPC，等 did-finish-load 再推，避免静默丢链。
+  if (win.webContents.isLoading()) return;
+  win.webContents.send(WINDOW_CHANNELS.deepLink, pendingDeepLink);
+  pendingDeepLink = null;
+}
 
 // Overlay scrollbars must be enabled before `ready`. They auto-hide per pane and
 // paint over content (Win11 / macOS). Fluent overlay is folded into this flag.
@@ -349,12 +398,22 @@ function createWindow(): BrowserWindow {
     }
   });
 
+  mainWindow.webContents.on("did-finish-load", () => flushPendingDeepLink());
   mainWindow.loadURL(rendererLoadBase());
 
   return mainWindow;
 }
 
 app.whenReady().then(async () => {
+  // 没拿到单实例锁时 app.quit() 已发出；此处兜底，避免第二个实例注册任何 IPC / 拉起 sidecar。
+  if (!hasSingleInstanceLock) return;
+  // 只在打包态注册协议：dev 实例不该抢走用户机器上的 nexus:// 归属。
+  if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  // 冷启动就带 URL（Windows 首次从链接启动，不会有 second-instance 事件）。
+  // 此时主窗尚未创建，dispatchDeepLink 把它存进 pending，等 did-finish-load 再推，
+  // 不会静默丢链；非法 URL 在 parseDeepLink 里被拒，不进 pending。
+  const coldStartLink = deepLinkFromArgv(process.argv);
+  if (coldStartLink) dispatchDeepLink(coldStartLink);
   // Windows 通知中心：AUMID 必须等于安装器 appId（NSIS 快捷方式），否则 toast 静默失败。
   if (process.platform === "win32") {
     app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);

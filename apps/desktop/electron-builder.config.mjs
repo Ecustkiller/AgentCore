@@ -37,6 +37,11 @@ const config = {
   appId: identity.appId,
   productName: identity.productName,
 
+  // 深链注册（macOS Info.plist CFBundleURLTypes / Windows 注册表）。运行时侧由
+  // main/index.ts 的 setAsDefaultProtocolClient(DEEP_LINK_SCHEME) 完成，二者必须
+  // 用同一个 scheme。格式：nexus://open?path=%2Fconversations%2F<id>。
+  protocols: [{ name: "Nexus deep link", schemes: ["nexus"] }],
+
   // 应用图标按平台分源（母版在仓库根 assets/nexus-icon-*.png，二进制复制入仓，勿重烤）：
   // - Win / Linux：icon-win.png = rounded（四角透明 squircle）。Windows 快捷方式/任务栏不会再套一层
   //   圆角，若用满铺直角源会呈「方角块」；须预先烤好透明角。

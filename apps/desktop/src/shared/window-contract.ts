@@ -48,6 +48,7 @@ export const WINDOW_CHANNELS = {
   maximize: "window:maximize",
   close: "window:close",
   setThemeSource: "window:setThemeSource",
+  deepLink: "app:deepLink",
 } as const;
 
 export type WindowThemeSource = "light" | "dark" | "system";
@@ -61,4 +62,7 @@ export interface WindowApi {
   getFramePreset: () => Promise<WindowFramePreset>;
   /** 同步 Electron `nativeTheme`（标题栏 / 系统控件）到渲染层主题。 */
   setThemeSource: (theme: WindowThemeSource) => void;
+  /** 主进程收到 `nexus://` 深链后推送站内 hash 路由；仅 Electron，web 运行时缺失。
+   *  返回取消订阅函数。走 router.navigate 而非 loadURL，避免重载页面丢掉草稿。 */
+  onDeepLink?: (callback: (hashRoute: string) => void) => () => void;
 }

@@ -41,7 +41,7 @@
     "build:win:cn": "node scripts/build-win-cn.mjs",
     "build:mac": "pnpm bundle:sidecar && electron-vite build && electron-builder --config electron-builder.config.mjs --mac --arm64",
     "build:linux": "pnpm bundle:sidecar && electron-vite build && electron-builder --config electron-builder.config.mjs --linux",
-    "lint": "biome check src/ && node ../../scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer && node ../../scripts/check-no-localstorage.mjs --src apps/desktop/src/renderer",
+    "lint": "biome check src/ && node ../../scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer && node ../../scripts/check-no-localstorage.mjs --src apps/desktop/src/renderer && node ../../scripts/check-rest-paths.mjs",
     "lint:fix": "biome check --write src/",
     "check-ui-tokens": "node ../../scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer",
     "test": "vitest",
