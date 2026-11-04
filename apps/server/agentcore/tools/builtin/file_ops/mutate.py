@@ -537,6 +537,7 @@ class FileWriteTool:
             if rename_note:
                 output = f"{output}\n{rename_note}"
             _mark_landed_files(context, path_key, kind=kind)
+            context.invalidate_tool_cache()
             return ToolResult(
                 tool_call_id="",
                 success=True,
@@ -602,6 +603,7 @@ class FileWriteTool:
         if rename_note:
             output = f"{output}\n{rename_note}"
         _mark_landed_files(context, path_key, kind=kind)
+        context.invalidate_tool_cache()
         result = ToolResult(
             tool_call_id="",
             success=True,
@@ -731,6 +733,7 @@ class StrReplaceTool:
             replace_all=replace_all,
         )
         if applied is not None:
+            context.invalidate_tool_cache()
             return applied
 
         try:
@@ -770,6 +773,7 @@ class StrReplaceTool:
                 replace_all=replace_all,
             )
             if applied is not None:
+                context.invalidate_tool_cache()
                 return applied
             # 失败回执自带有界盘片段，模型可凭回执改 old_string。
             receipt = await _assemble_str_replace_fail_receipt(
@@ -823,6 +827,7 @@ class StrReplaceTool:
                 _format_numbered_lines(region.lines, region.start_line)
             )
         _mark_landed_files(context, rel_path)
+        context.invalidate_tool_cache()
         rename_suffix = f"。{rename_note}" if rename_note else ""
         result = ToolResult(
             tool_call_id="",

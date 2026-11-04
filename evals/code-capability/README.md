@@ -167,7 +167,7 @@ uv run python ../../evals/code-capability/r_llm_smoke.py --no-prefix --max-resum
 | 状态 | **甲乙后难仓复测（2026-07-29 · 仅 V05/V06）**：**2/2 pass** · 经典 hang=0 · 墙钟 timeout=0（V05 近墙钟 898s 仍 `end_turn`）· 硬 Check 全绿。相对 e-idle（测红）：**双绿修通**。历史：e-idle 0/3；W5 3/5；优化前 1/5。写码完整化本段 **已收口**（大烧冻结） |
 | 本轮卡（甲乙后） | V05 `v05_fix_has`（**pass** · end_turn@898s · tools=71 · 硬测双绿 · `str_replace` 上盘）· V06 `v06_fix_dump`（**pass** · end_turn@450s · tools=57 · 硬测双绿 · `str_replace`/`file_write` 上盘）。e-idle 三卡结果见历史快照 |
 | 硬测 | turn 有 `finish_reason` 后跑 `TestExitCode` + `TestsUnchanged`；墙钟超时则 `checks_pass=null` |
-| 已知限制 | auth / mint inference / sidecar `initialize` OK。**经典接缝 hang** = `turn_started`+timeout+几乎无 tool（仅 `message_start`/`run_*`）→ `fail_class=接缝`。**大量 tool 后墙钟 timeout**（空转烧预算，如反复 `code_execute`/`terminal`/`delegate`）→ `fail_class=模型弱`（notes 标 `wall_clock`），**勿再记为接缝死锁**。**产品路径 = CEO→delegate**（卡声明 `path=team`/`toolset=ceo`）；EvalCase 字段**不**透传 `startTurn`，烟感**不**平行造 worker 直装。长跑建议把 stdout **重定向到文件**（Cursor terminal 背压可在 timeout 后卡死 print） |
+| 已知限制 | auth / mint inference / sidecar `initialize` OK。**经典接缝 hang** = `turn_started`+timeout+几乎无 tool（仅 `message_start`/`run_*`）→ `fail_class=接缝`。**大量 tool 后墙钟 timeout**（空转烧预算，如反复 `code_execute`/`terminal`/`delegate`）→ `fail_class=模型弱`（notes 标 `wall_clock`），**勿再记为接缝死锁**。**产品路径按任务结构分流**：简单修复走单 Agent fast path，并行/跨模块才进入 Team；EvalCase 字段**不**透传 `startTurn`，烟感**不**平行造 worker 直装。长跑建议把 stdout **重定向到文件**（Cursor terminal 背压可在 timeout 后卡死 print） |
 | 流程 | copytree vendor → seed → sidecar `startTurn`（prompt=可选 prefix + 卡内 `user_message`）→ 硬 Check |
 | 副本 | `workspaces/llm-smoke/<task_id>/`（禁直绑 `vendor/`） |
 | fail_class | 环境 / 模型弱 / 接缝 / 题面 / 需决策·交互（`ask_user` 默认不 resume） |

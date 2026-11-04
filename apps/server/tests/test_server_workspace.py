@@ -524,6 +524,7 @@ async def test_read_head_peeks_past_text_gate(tmp_path: Path):
     assert head.data.startswith(b"%PDF-")
     assert len(head.data) == WORKSPACE_READ_HEAD_MAX_BYTES
     assert head.size_bytes == len(payload)
+    assert head.mtime_ms == (tmp_path / "big.bin").stat().st_mtime_ns // 1_000_000
 
 
 async def test_write_bytes_escape_raises_outside_workspace(tmp_path: Path):

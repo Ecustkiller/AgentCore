@@ -52,7 +52,7 @@ from .tool_exec_args import (
     emit_args_parse_failed,
     with_tool_failed_marker,
 )
-from .tool_exec_coalesce import _clone_tool_result, _file_read_round_coalesce_key
+from .tool_exec_coalesce import _clone_tool_result, _read_only_round_coalesce_key
 from .tool_exec_gates import (
     _check_safety_and_approval_gates,
     _maybe_capture_mutation_baseline,
@@ -73,6 +73,35 @@ _MISSING_FILE_MODEL_MSG = "内部资源缺失，请换一种方式继续，不�
 _CIRCUIT_TOOL_DISABLED_MSG = (
     "工具 '{name}' 已因连续失败停用，未执行。请改用其他方案，不要原样重试该路径。"
 )
+
+# These tools can mutate arbitrary workspace paths through a shell or exporter.
+# File-operation tools invalidate precisely at their own success boundaries; this
+# list is the conservative outer fence for commands we cannot inspect reliably.
+_TOOL_CACHE_INVALIDATING_TOOLS = frozenset(
+    {
+        "write",
+        "edit",
+        "file_delete",
+        "file_batch",
+        "md_export",
+        "run",
+        "host",
+    }
+)
+
+
+def _invalidates_tool_cache(name: str, result: ToolResult) -> bool:
+    if name not in _TOOL_CACHE_INVALIDATING_TOOLS:
+        return False
+    # Test/typecheck are read-mostly and coalesced by the turn cache. Build,
+    # install and arbitrary command checks can produce files or change tooling,
+    # so they keep the conservative invalidation fence.
+    check = (result.metadata or {}).get("check")
+    return not (
+        name == "run"
+        and isinstance(check, str)
+        and check in {"test", "typecheck"}
+    )
 
 
 def _disabled_tool_denial(
@@ -128,11 +157,11 @@ async def run_one_tool(
     allowed_set: frozenset[str] | None,
     disabled_set: frozenset[str],
     approval_gate: ApprovalGate | None,
-    file_read_inflight: dict[str, asyncio.Future[ToolResult]],
+    read_only_inflight: dict[str, asyncio.Future[ToolResult]],
 ) -> ToolCallQuad:
     """Parse, gate, execute, and emit wire events for one tool call.
 
-    ``file_read_inflight`` is round-owned same-path coalesce state shared across
+    ``read_only_inflight`` is round-owned same-read coalesce state shared across
     parallel calls. Return shape matches the gather quad used by
     :func:`execute_tools`.
     """
@@ -553,17 +582,17 @@ async def run_one_tool(
         tool.schema, args, location=getattr(getattr(context, "backend", None), "location", None)
     )
     deadline_token = set_tool_deadline(timeout)
-    coalesce_key = _file_read_round_coalesce_key(args) if name == "read" else None
+    coalesce_key = _read_only_round_coalesce_key(name, args)
     try:
         if coalesce_key is not None:
-            existing = file_read_inflight.get(coalesce_key)
+            existing = read_only_inflight.get(coalesce_key)
             if existing is not None:
                 shared = await existing
                 result = _clone_tool_result(shared, tc.id)
                 result.duration_ms = int((time.monotonic() - started) * 1000)
             else:
                 fut: asyncio.Future[ToolResult] = asyncio.get_running_loop().create_future()
-                file_read_inflight[coalesce_key] = fut
+                read_only_inflight[coalesce_key] = fut
                 try:
                     if timeout is None:
                         result = await tool.execute(args, ctx)
@@ -572,9 +601,12 @@ async def run_one_tool(
                     # Snapshot before this call mutates ``tool_call_id``.
                     if not fut.done():
                         fut.set_result(replace(result))
-                except Exception as exc:
+                except BaseException as exc:
                     if not fut.done():
-                        fut.set_exception(exc)
+                        if isinstance(exc, asyncio.CancelledError):
+                            fut.cancel()
+                        else:
+                            fut.set_exception(exc)
                     raise
         elif timeout is None:
             result = await tool.execute(args, ctx)
@@ -587,6 +619,9 @@ async def run_one_tool(
         # error so the loop adapts instead of hanging, and count it as a failed
         # attempt so a tool that keeps timing out trips convergence governance.
         # Liveness (hang) ≠ capacity contract — steer forbids identical retry.
+        if name in _TOOL_CACHE_INVALIDATING_TOOLS:
+            # A killed command may have written before its ceiling fired.
+            context.invalidate_tool_cache()
         if budget_reserved and budget_state is not None:
             await budget_state.refund(name)
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -637,6 +672,8 @@ async def run_one_tool(
             [],
         )
     except asyncio.CancelledError:
+        if name in _TOOL_CACHE_INVALIDATING_TOOLS:
+            context.invalidate_tool_cache()
         # Real Stop: this task is cancelling → propagate so the turn salvages.
         # Leaked child cancel (httpx timeout wrap): isolate like a crash.
         if task_is_cancelling():
@@ -660,6 +697,8 @@ async def run_one_tool(
         # must not cancel its siblings via asyncio.gather. Convert to a failed tool
         # result so the loop can adapt; SUSPEND terminals are unaffected (they return
         # normally, never raise).
+        if name in _TOOL_CACHE_INVALIDATING_TOOLS:
+            context.invalidate_tool_cache()
         if budget_reserved and budget_state is not None:
             await budget_state.refund(name)
         duration_ms = int((time.monotonic() - started) * 1000)
@@ -744,6 +783,9 @@ async def run_one_tool(
     finally:
         reset_tool_deadline(deadline_token)
     result.tool_call_id = tc.id
+    if _invalidates_tool_cache(name, result):
+        # A failed command may still have written files before exiting non-zero.
+        context.invalidate_tool_cache()
     if result.file_products:
         from agentcore.table.land_csv import ingest_landed_csv_products
 
@@ -852,6 +894,13 @@ async def run_one_tool(
         end_fields["subcommand"] = meta["subcommand"]
     if isinstance(meta.get("timeout_layer"), str) and meta["timeout_layer"]:
         end_fields["timeout_layer"] = meta["timeout_layer"]
+    if meta.get("turn_cache_hit") is True:
+        end_fields["turn_cache_hit"] = True
+        if isinstance(meta.get("turn_cache_kind"), str):
+            end_fields["turn_cache_kind"] = meta["turn_cache_kind"]
+        saved = meta.get("turn_cache_saved_chars")
+        if isinstance(saved, int) and saved > 0:
+            end_fields["turn_cache_saved_chars"] = saved
     end_fields.update(_shell_observe_log_fields(name, args))
     logger.info("tool.execute_end", **end_fields)
 

@@ -76,6 +76,9 @@ class SectionOrder(IntEnum):
     # Retired 2026-08-29: resident <visualization> HOW removed. Slot kept so
     # billed prefix keys are not reshuffled.
     CEO_VISUALIZATION = 700
+    # Per-turn execution default (chat / code_fast / review / team). Volatile
+    # with the request, so it stays after the frozen core and before workspace facts.
+    TASK_MODE = 740
     # Per-turn environment facts (location / desktop / capabilities). Volatile with
     # binding changes. Was 250 (in front of the ~19k CEO core); moved 2026-08-19 —
     # see class docstring Exception. Worker and CEO envelopes add this key; it is

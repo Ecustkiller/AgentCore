@@ -30,6 +30,10 @@ from typing import Any, Literal
 
 from agentcore.core.errors import SandboxError
 from agentcore.runtime.context.workspace_profile import WorkspaceProfile, detect_workspace_profile
+from agentcore.tools.builtin.file_ops.turn_cache import (
+    cache_success,
+    cached_tool_result,
+)
 from agentcore.tools.builtin.package_install import (
     command_payload_argvs,
     install_cache_env,
@@ -385,6 +389,11 @@ _VERIFY_SHARED_PREFIX = (
 )
 
 
+_TURN_VERIFY_CACHE_PREFIX = (
+    "【同回合验证复用】工作区未发生写入，复用本回合上一次相同验证结果。\n\n"
+)
+
+
 def _annotate_shared_verify(result: ToolResult, source: str) -> ToolResult:
     meta = dict(result.metadata or {})
     meta["verify_shared"] = source
@@ -392,6 +401,55 @@ def _annotate_shared_verify(result: ToolResult, source: str) -> ToolResult:
     prefix = _VERIFY_SHARED_PREFIX.format(source=source)
     output = body if body.startswith("【团队共享验证】") else prefix + body
     return replace(result, output=output, metadata=meta)
+
+
+def _annotate_turn_cached_verify(result: ToolResult) -> ToolResult:
+    meta = dict(result.metadata or {})
+    meta["verify_shared"] = "turn_cache"
+    body = result.output or ""
+    output = (
+        body
+        if body.startswith("【同回合验证复用】")
+        else _TURN_VERIFY_CACHE_PREFIX + body
+    )
+    return replace(result, output=output, metadata=meta)
+
+
+def _verify_result_cacheable(result: ToolResult) -> bool:
+    """Cache completed red/green checks, never environment failures or timeouts."""
+    meta = result.metadata or {}
+    return (
+        meta.get("check") in {"test", "typecheck"}
+        and not result.contract_failure
+        and not meta.get("exec_env_timeout")
+        and result.spill_source is None
+    )
+
+
+async def _detect_workspace_profile_cached(context: ToolContext) -> WorkspaceProfile:
+    """Reuse one best-effort profile probe across verify calls in the same turn."""
+    cache_key = "workspace-profile:v1"
+    cached = context.get_cached_tool_result(
+        kind="workspace_profile",
+        key=cache_key,
+    )
+    if isinstance(cached, WorkspaceProfile):
+        return cached
+    profile = await detect_workspace_profile(context.backend)
+    if (
+        profile.languages
+        or profile.package_managers
+        or profile.vcs
+        or profile.test_commands
+        or profile.typecheck_commands
+        or profile.build_commands
+    ):
+        context.cache_tool_result(
+            kind="workspace_profile",
+            key=cache_key,
+            value=profile,
+        )
+    return profile
 
 
 def _argv_to_shell(argv: list[str]) -> str:
@@ -976,7 +1034,7 @@ async def execute_verify(arguments: dict[str, Any], context: ToolContext) -> Too
             metadata={"code": "verify_contract"},
         )
 
-    profile = await detect_workspace_profile(context.backend)
+    profile = await _detect_workspace_profile_cached(context)
     framework: Framework | None = None
     err: str | None = None
     argv: list[str] | None = None
@@ -1211,14 +1269,20 @@ async def execute_verify(arguments: dict[str, Any], context: ToolContext) -> Too
         env=env,
     )
 
-    if context.on_phase:
-        context.on_phase("executing")
-
     fingerprint = verify_coalesce_fingerprint(
         check, argv, working_directory, raw_command=shell_command or None
     )
+    cache_backend = context.backend
+    cached = context.get_cached_tool_result(kind="verify", key=fingerprint)
+    if cached is not None:
+        context.note_tool_cache_saved_chars(len(cached.output or ""))
+        return _annotate_turn_cached_verify(
+            cached_tool_result(cached, start, kind="verify")
+        )
 
     async def _run_verify() -> ToolResult:
+        if context.on_phase:
+            context.on_phase("executing")
         # Downgrade loop's busy("tool") → verify so idle patrol can wake CEO
         # during minute-level budgets (wall+0 no longer parks forever).
         if context.run_id:
@@ -1460,6 +1524,18 @@ async def execute_verify(arguments: dict[str, Any], context: ToolContext) -> Too
 
             note_coord_worker_busy(context.run_id, "verify")
         result, source = await session.coalesce_verify(fingerprint, _run_verify)
+        if _verify_result_cacheable(result):
+            cache_success(
+                context,
+                kind="verify",
+                key=fingerprint,
+                result=result,
+                backend=cache_backend,
+                max_chars=16_000,
+                allow_display=True,
+                max_display_chars=100_000,
+                cache_failure=True,
+            )
         if source != "run":
             from agentcore.core.logging import get_logger
 
@@ -1478,6 +1554,25 @@ async def execute_verify(arguments: dict[str, Any], context: ToolContext) -> Too
                 result,
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
+        if check == "install":
+            # Install may add/change lockfiles and workspace tooling. Keep neither
+            # the pre-install profile nor the install verdict for later calls.
+            context.invalidate_tool_cache()
         return result
 
-    return await _run_verify()
+    result = await _run_verify()
+    if _verify_result_cacheable(result):
+        cache_success(
+            context,
+            kind="verify",
+            key=fingerprint,
+            result=result,
+            backend=cache_backend,
+            max_chars=16_000,
+            allow_display=True,
+            max_display_chars=100_000,
+            cache_failure=True,
+        )
+    if check == "install":
+        context.invalidate_tool_cache()
+    return result

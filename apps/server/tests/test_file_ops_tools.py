@@ -6,6 +6,7 @@ tests. These tools are thin shells, so the focus is argument handling and the
 typed-failure → user-message mapping (the heavy I/O lives in the backend).
 """
 
+import os
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -42,6 +43,19 @@ def _ctx(workspace: Path, *, agent_id: str = "a") -> ToolContext:
         agent_id=agent_id,
         backend=ServerWorkspace(root=workspace, sandbox=SubprocessSandbox()),
         user_id="u",
+    )
+
+
+def test_file_list_and_glob_cache_keys_include_material_scope():
+    from agentcore.tools.builtin.file_ops.glob import _glob_cache_key
+    from agentcore.tools.builtin.file_ops.read import _file_list_cache_key
+
+    args = {"directory": ".", "pattern": "*"}
+    assert _file_list_cache_key(args, material_paths=frozenset({"a"})) != (
+        _file_list_cache_key(args, material_paths=frozenset({"b"}))
+    )
+    assert _glob_cache_key(args, material_paths=frozenset({"a"})) != (
+        _glob_cache_key(args, material_paths=frozenset({"b"}))
     )
 
 
@@ -917,6 +931,125 @@ async def test_file_read_http_filename_is_not_a_url(tmp_path: Path):
     assert result.metadata.get("code") != "url_not_workspace_path"
 
 
+async def test_file_read_reuses_successful_turn_cache(
+    tmp_path: Path, monkeypatch
+):
+    (tmp_path / "cached.txt").write_text("alpha\nbeta\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    real_read_lines = ctx.backend.read_lines
+    calls = {"n": 0}
+
+    async def _counted(path: str, *, offset: int = 1, limit: int = 2000):
+        calls["n"] += 1
+        return await real_read_lines(path, offset=offset, limit=limit)
+
+    monkeypatch.setattr(ctx.backend, "read_lines", _counted)
+    tool = FileReadTool()
+    first = await tool.execute({"file_path": "cached.txt"}, ctx)
+    second = await tool.execute({"file_path": "cached.txt"}, ctx)
+
+    assert first.success is True and second.success is True
+    assert first.output == second.output
+    assert second.metadata.get("turn_cache_hit") is True
+    assert second.metadata.get("turn_cache_kind") == "read"
+    assert second.metadata.get("turn_cache_saved_chars") == len(second.output)
+    assert calls["n"] == 1
+
+
+async def test_file_read_skips_expensive_fingerprint_probe_without_capability(
+    tmp_path: Path, monkeypatch
+):
+    """RemoteCloudWorkspace.read_head downloads the file; cache validation must skip it."""
+    (tmp_path / "cached.txt").write_text("alpha\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    ctx.backend.supports_cheap_read_head_fingerprint = False
+    probes = {"n": 0}
+    real_read_head = ctx.backend.read_head
+
+    async def _counted_read_head(path: str, *, max_bytes: int | None = None):
+        probes["n"] += 1
+        return await real_read_head(path, max_bytes=max_bytes)
+
+    monkeypatch.setattr(ctx.backend, "read_head", _counted_read_head)
+    tool = FileReadTool()
+    first = await tool.execute({"file_path": "cached.txt"}, ctx)
+    second = await tool.execute({"file_path": "cached.txt"}, ctx)
+
+    assert first.success is True and second.success is True
+    assert second.metadata.get("turn_cache_hit") is True
+    assert probes["n"] == 0
+
+
+async def test_file_write_invalidates_turn_read_cache(tmp_path: Path):
+    target = tmp_path / "cached.txt"
+    target.write_text("old body\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+
+    first = await tool.execute({"file_path": "cached.txt"}, ctx)
+    assert first.success is True and "old body" in first.output
+
+    written = await FileWriteTool().execute(
+        {"file_path": "cached.txt", "content": "new body\n"}, ctx
+    )
+    assert written.success is True
+
+    second = await tool.execute({"file_path": "cached.txt"}, ctx)
+    assert second.success is True
+    assert "new body" in second.output
+    assert "old body" not in second.output
+    assert second.metadata.get("turn_cache_hit") is not True
+
+
+async def test_file_read_cache_rejects_external_change(tmp_path: Path):
+    target = tmp_path / "cached.txt"
+    target.write_text("old body\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+
+    first = await tool.execute({"file_path": "cached.txt"}, ctx)
+    assert first.success is True and "old body" in first.output
+
+    current = target.stat()
+    target.write_text("new body from editor\n", encoding="utf-8")
+    os.utime(
+        target,
+        ns=(current.st_atime_ns, current.st_mtime_ns + 2_000_000),
+    )
+
+    second = await tool.execute({"file_path": "cached.txt"}, ctx)
+    assert second.success is True
+    assert "new body from editor" in second.output
+    assert "old body" not in second.output
+    assert second.metadata.get("turn_cache_hit") is not True
+
+
+async def test_file_edit_invalidates_turn_read_cache(tmp_path: Path):
+    target = tmp_path / "cached.txt"
+    target.write_text("alpha beta\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+
+    first = await tool.execute({"file_path": "cached.txt"}, ctx)
+    assert first.success is True and "alpha beta" in first.output
+
+    edited = await StrReplaceTool().execute(
+        {
+            "file_path": "cached.txt",
+            "old_string": "beta",
+            "new_string": "gamma",
+        },
+        ctx,
+    )
+    assert edited.success is True
+
+    second = await tool.execute({"file_path": "cached.txt"}, ctx)
+    assert second.success is True
+    assert "alpha gamma" in second.output
+    assert "alpha beta" not in second.output
+    assert second.metadata.get("turn_cache_hit") is not True
+
+
 async def test_write_lands_substantial_prose_with_omission(tmp_path: Path):
     """省略套话不再硬拒；正文照常落盘。"""
     body = ("完整段落内容填充字。" * 50) + "\n……（中间省略，已保留首尾）……\n" + ("尾段续写。" * 30)
@@ -1692,6 +1825,28 @@ async def test_glob_finds_nested_files_from_root(tmp_path: Path):
     assert "├──" not in (result.output or "")
 
 
+async def test_glob_reuses_turn_cache(tmp_path: Path, monkeypatch):
+    (tmp_path / "main.py").write_text("x", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    real_glob_files = ctx.backend.glob_files
+    calls = {"n": 0}
+
+    async def _counted(query):
+        calls["n"] += 1
+        return await real_glob_files(query)
+
+    monkeypatch.setattr(ctx.backend, "glob_files", _counted)
+    tool = GlobTool()
+    first = await tool.execute({"pattern": "*.py"}, ctx)
+    second = await tool.execute({"pattern": "*.py"}, ctx)
+
+    assert first.success is True and second.success is True
+    assert first.output == second.output
+    assert second.metadata.get("turn_cache_hit") is True
+    assert second.metadata.get("turn_cache_kind") == "glob"
+    assert calls["n"] == 1
+
+
 @pytest.mark.parametrize(
     "extra",
     [{"pattern": "*.py"}, {"recursive": True}, {"max_depth": 4}],
@@ -1881,6 +2036,28 @@ async def test_file_list_star_stays_one_layer(tmp_path: Path):
     assert result.success is True
     assert "apps" in result.output
     assert "main.py" not in result.output
+
+
+async def test_file_list_reuses_turn_cache(tmp_path: Path, monkeypatch):
+    (tmp_path / "main.py").write_text("x", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    real_list = ctx.backend.list
+    calls = {"n": 0}
+
+    async def _counted(directory: str, pattern: str, *, cap: int | None = None):
+        calls["n"] += 1
+        return await real_list(directory, pattern, cap=cap)
+
+    monkeypatch.setattr(ctx.backend, "list", _counted)
+    tool = FileListTool()
+    first = await tool.execute({"directory": "."}, ctx)
+    second = await tool.execute({"directory": "."}, ctx)
+
+    assert first.success is True and second.success is True
+    assert first.output == second.output
+    assert second.metadata.get("turn_cache_hit") is True
+    assert second.metadata.get("turn_cache_kind") == "file_list"
+    assert calls["n"] == 1
 
 
 async def test_file_list_truly_empty_dir_still_says_empty(tmp_path: Path):

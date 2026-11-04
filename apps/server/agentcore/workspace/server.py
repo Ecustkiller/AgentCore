@@ -337,6 +337,8 @@ class ServerWorkspace:
     cloud card exemption.
     """
 
+    supports_cheap_read_head_fingerprint = True
+
     def __init__(
         self,
         root: Path,
@@ -689,12 +691,16 @@ class ServerWorkspace:
             raise NotAFile(path)
         cap = effective_read_head_cap(max_bytes)
         try:
-            size = target.stat().st_size
+            stat = target.stat()
             with target.open("rb") as fh:
                 data = fh.read(cap)
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
-        return ReadHeadResult(data=data, size_bytes=size)
+        return ReadHeadResult(
+            data=data,
+            size_bytes=stat.st_size,
+            mtime_ms=stat.st_mtime_ns // 1_000_000,
+        )
 
     async def extract_office(
         self, path: str, *, ext: str, start_page: int = 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -72,7 +73,12 @@ async def test_upgrade_builds_index_when_historical_duplicates_exist(session_fac
             )
         ).scalar_one()
         assert "TIMESTAMPTZ" in defn.upper() or "timestamp with time zone" in defn.lower()
-        assert "2026-08-18 06:00:00" in defn
+        cutoff_match = re.search(r"created_at >= '([^']+)'", defn)
+        assert cutoff_match is not None
+        cutoff = datetime.fromisoformat(cutoff_match.group(1))
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=UTC)
+        assert cutoff == datetime(2026, 8, 18, 6, 0, tzinfo=UTC)
 
         session.add(_harvest_row(created_at=_HISTORICAL, execution_id="exec-hist-dup"))
         await session.commit()

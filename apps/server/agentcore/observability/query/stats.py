@@ -622,11 +622,19 @@ def compute_stats(
         }
     if tool_calls:
         errs = sum(1 for t in tool_calls if t.get("status") not in ("ok", None))
+        cache_hits = sum(1 for t in tool_calls if t.get("turn_cache_hit") is True)
+        chars_saved = sum(
+            int(t.get("turn_cache_saved_chars") or 0)
+            for t in tool_calls
+            if t.get("turn_cache_hit") is True
+        )
         summaries["tools"] = {
             "count": len(tool_calls),
             "failed": errs,
             "success_rate": (len(tool_calls) - errs) / len(tool_calls) if tool_calls else 0.0,
             "by_tool": dict(Counter(t.get("tool", "?") for t in tool_calls)),
+            "turn_cache_hits": cache_hits,
+            "turn_cache_saved_chars": chars_saved,
         }
     if cost_records:
         total_nano = sum(int(c.get("total_nano", 0) or 0) for c in cost_records)

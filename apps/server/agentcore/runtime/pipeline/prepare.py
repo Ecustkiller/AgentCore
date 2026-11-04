@@ -238,6 +238,9 @@ class PreparedTurn:
     execution_id_token: object
     mcp_discover: McpDiscoverResult
     member_turn: bool
+    # User utterance before inline attachment bodies. Routing must read the
+    # request, not text embedded inside an attached file.
+    original_user_message: str = ""
 
 
 async def prepare_fresh_turn(
@@ -462,6 +465,7 @@ async def prepare_fresh_turn(
     attachment_slim = merge_attachment_and_mention_context(
         attachment_prompt.slim_envelope, agent_mentions
     )
+    original_user_message = user_message
     from agentcore.core.inline_body import apply_inline_body
 
     user_message, attachment_context = apply_inline_body(
@@ -592,4 +596,5 @@ async def prepare_fresh_turn(
         execution_id_token=execution_id_token,
         mcp_discover=mcp_discover,
         member_turn=member_turn,
+        original_user_message=original_user_message,
     )

@@ -153,10 +153,11 @@ class ReadLinesResult:
 
 @dataclass(frozen=True)
 class ReadHeadResult:
-    """First bytes of a file plus total size. Not a whole-file ingest."""
+    """First bytes of a file plus total size and optional local-stat fingerprint."""
 
     data: bytes
     size_bytes: int
+    mtime_ms: int | None = None
 
 
 @dataclass(frozen=True)

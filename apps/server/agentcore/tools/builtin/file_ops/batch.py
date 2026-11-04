@@ -185,6 +185,11 @@ class FileBatchTool:
 
         summary = f"完成：成功 {ok_n}，跳过 {skip_n}，失败 {fail_n}"
         lines.append(summary)
+        if ok_n:
+            # Any successful move/copy/delete/mkdir can invalidate a path or a
+            # directory subtree; clearing the bounded turn cache is cheaper than
+            # reasoning about every backend's mutation semantics.
+            context.invalidate_tool_cache()
         return ToolResult(
             tool_call_id="",
             success=fail_n == 0,

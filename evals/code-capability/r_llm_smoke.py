@@ -23,6 +23,7 @@ import shutil
 import sys
 import time
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,12 +49,12 @@ _DEFAULT_CARD_STEMS = (
     "v01_fix_int",
 )
 
-# Fix 烟感短前缀：仅复述产品规则（CEO→delegate；mutation=worker edit）。
+# Fix 烟感短前缀：仅复述当前产品规则（简单修复走单 Agent；跨模块才组队）。
 # 可用 --no-prefix 关掉。禁幽灵工具名；不平行造 worker 直装。
 _FIX_PROMPT_PREFIX = (
-    "[eval smoke] Product path: CEO coordinates then delegate "
-    "(handwritten 1-person repair is the default). "
-    "Worker mutates with edit (not CEO). Prefer read / grep; "
+    "[eval smoke] Product path: use the fast single-agent path for a small "
+    "single-step repair; delegate only when the work is parallel or cross-module. "
+    "Use read / grep then edit. "
     "verify once with the card's pytest command, then stop. "
     "Avoid repeated code_execute or terminal loops."
 )
@@ -366,6 +367,10 @@ async def _run_one_card(
         "finish_reason": None,
         "run_plan": False,
         "tool_names": [],
+        "tool_call_count": 0,
+        "tool_counts": {},
+        "duplicate_tool_calls": 0,
+        "delegated": False,
         "elapsed_sec": None,
         "checks": None,
         "checks_pass": None,
@@ -495,6 +500,25 @@ async def _run_one_card(
         for e in unwrapped
         if e.get("type") == "tool_use_start"
     ]
+    tool_calls = [
+        (
+            str((e.get("payload") or {}).get("tool_name") or ""),
+            (e.get("payload") or {}).get("arguments") or {},
+        )
+        for e in unwrapped
+        if e.get("type") == "tool_use_start"
+    ]
+    signatures = [
+        f"{name}:{json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)}"
+        for name, args in tool_calls
+        if name
+    ]
+    row["tool_call_count"] = len(signatures)
+    row["tool_counts"] = dict(Counter(name for name, _ in tool_calls if name))
+    row["duplicate_tool_calls"] = sum(
+        count - 1 for count in Counter(signatures).values() if count > 1
+    )
+    row["delegated"] = bool(row["run_plan"] or row["tool_counts"].get("delegate"))
     row["event_types"] = [t for e in unwrapped if (t := e.get("type")) and isinstance(t, str)]
     row["error"] = error
     row["turn_started"] = turn_started
@@ -660,6 +684,7 @@ async def main_async(args: argparse.Namespace) -> int:
         print(
             f"[{row['task_id']}] verdict={row['verdict']} fail_class={row.get('fail_class')} "
             f"checks_pass={row.get('checks_pass')} tools={len(row.get('tool_names') or [])} "
+            f"duplicate_tools={row.get('duplicate_tool_calls', 0)} "
             f"finish={row.get('finish_reason')}",
             flush=True,
         )
@@ -705,6 +730,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "pass": n_pass,
             "fail": n_fail,
             "by_fail_class": _count_fail_class(rows),
+            "efficiency": _efficiency_summary(rows),
         },
         "known_limits": {
             "auth_inference": "preflight ok",
@@ -713,8 +739,8 @@ async def main_async(args: argparse.Namespace) -> int:
             "classic_post_llm_hang_cards": classic_seam,
             "wall_clock_timeout_model_weak_cards": wall_clock_weak,
             "product_path": (
-                "产品路径恒 CEO→delegate(playbook)；EvalCase path/toolset 仅诊断标签"
-                "（已对齐 team+ceo），startTurn 不透传、不平行造 worker 直装"
+                "产品路径按任务结构分流：简单修复走单 Agent fast path；"
+                "并行/跨模块才进入 Team。EvalCase path/toolset 仅诊断标签"
             ),
             "seam_note": (
                 "经典接缝 hang = turn_started+timeout+几乎无 tool（仅 message_start/run_*）；"
@@ -732,7 +758,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "首波 Fix 烟感；不进 PR 门禁；禁直绑 vendor 写盘",
             "ask_user 默认 max_resumes=0 → fail_class=需决策/交互",
             "经典 post_llm_hang（几乎无 tool）→ 接缝；多 tool 后墙钟 timeout → 模型弱",
-            "产品路径=CEO→delegate；EvalCase toolset/path 不透传 startTurn",
+            "产品路径=简单任务单 Agent、跨模块任务 Team；EvalCase toolset/path 仅诊断标签",
         ],
     }
     out = _write_report(report)
@@ -747,6 +773,35 @@ def _count_fail_class(rows: list[dict[str, Any]]) -> dict[str, int]:
         if fc:
             out[fc] = out.get(fc, 0) + 1
     return out
+
+
+def _efficiency_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Cross-card efficiency fields for before/after optimization comparisons."""
+    elapsed = [
+        float(row["elapsed_sec"])
+        for row in rows
+        if isinstance(row.get("elapsed_sec"), (int, float))
+    ]
+    total_calls = sum(int(row.get("tool_call_count") or 0) for row in rows)
+    by_tool: Counter[str] = Counter()
+    for row in rows:
+        counts = row.get("tool_counts")
+        if isinstance(counts, dict):
+            by_tool.update({str(k): int(v or 0) for k, v in counts.items()})
+    duplicates = sum(int(row.get("duplicate_tool_calls") or 0) for row in rows)
+    return {
+        "cards": len(rows),
+        "delegated_cards": sum(1 for row in rows if row.get("delegated")),
+        "total_tool_calls": total_calls,
+        "avg_tool_calls": round(total_calls / len(rows), 2) if rows else 0.0,
+        "duplicate_tool_calls": duplicates,
+        "cards_with_duplicate_calls": sum(
+            1 for row in rows if int(row.get("duplicate_tool_calls") or 0) > 0
+        ),
+        "avg_elapsed_sec": round(sum(elapsed) / len(elapsed), 1) if elapsed else None,
+        "max_elapsed_sec": round(max(elapsed), 1) if elapsed else None,
+        "by_tool": dict(by_tool),
+    }
 
 
 def _write_report(report: dict[str, Any]) -> Path:

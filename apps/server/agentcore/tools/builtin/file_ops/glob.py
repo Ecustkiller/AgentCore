@@ -38,6 +38,25 @@ from .listing import (
     pattern_targets_archives,
     visible_list_entries,
 )
+from .turn_cache import cache_success, cached_tool_result, key_from_parts
+
+_OUTPUT_LIMIT = 16000
+
+
+def _glob_cache_key(
+    arguments: dict[str, Any],
+    *,
+    material_paths: frozenset[str] | None = None,
+) -> str:
+    pattern = str(arguments.get("pattern") or "").strip()
+    directory = str(arguments.get("path") or ".").strip() or "."
+    return key_from_parts(
+        "glob",
+        pattern,
+        directory,
+        pattern_targets_archives(pattern),
+        tuple(sorted(material_paths or ())),
+    )
 
 
 class GlobTool:
@@ -93,6 +112,16 @@ class GlobTool:
         directory = str(arguments.get("path") or ".").strip() or "."
         max_entries = GLOB_DEFAULT_MAX_ENTRIES
         reveal_archives = pattern_targets_archives(pattern)
+
+        cache_backend = context.backend
+        cache_key = _glob_cache_key(
+            arguments,
+            material_paths=context.material_paths,
+        )
+        cached = context.get_cached_tool_result(kind="glob", key=cache_key)
+        if cached is not None:
+            context.note_tool_cache_saved_chars(len(cached.output or ""))
+            return cached_tool_result(cached, start, kind="glob")
 
         if is_bare_external_directory(directory):
             return bare_external_error(directory, context.backend, start)
@@ -172,12 +201,21 @@ class GlobTool:
         finally:
             context.backend.ai_list_reveal_archives = prev_reveal
 
-        return ToolResult(
+        final = ToolResult(
             tool_call_id="",
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
+        cache_success(
+            context,
+            kind="glob",
+            key=cache_key,
+            result=final,
+            backend=cache_backend,
+            max_chars=_OUTPUT_LIMIT,
+        )
+        return final
 
 
 async def _no_match_output(

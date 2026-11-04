@@ -5,8 +5,8 @@ If this turn's composed system differs from that node 0, DeepSeek in-history
 appends the changed ``<设定>`` / ``<按需目录>`` (or the full new string when the
 rest drifted) as ``role: system`` after history and before the envelope
 (``usage.in_history_system`` replay). Date, workspace (+ CEO file
-index), scene gates, attachments, table, and source ledger ride a synthetic
-user message fenced with ``[系统提示]``. A new envelope that matches the last
+index), per-turn task mode, scene gates, attachments, table, and source ledger
+ride a synthetic user message fenced with ``[系统提示]``. A new envelope that matches the last
 one already in the window is omitted. The envelope is snapshotted on
 ``turn_started`` and stamped onto the prompting user row
 (``usage.turn_envelope``) so later turns replay it in order. The LLM window
@@ -169,6 +169,7 @@ def _last_envelope_text(messages: Sequence[LLMMessage]) -> str:
 
 def render_ceo_turn_envelope(
     *,
+    task_mode_context: str | None = None,
     workspace_context: str | None = None,
     workspace_file_index: str | None = None,
     table_context: str | None = None,
@@ -187,6 +188,11 @@ def render_ceo_turn_envelope(
             "runtime_context",
             render_runtime_date_block() if include_runtime else None,
             SectionOrder.RUNTIME_CONTEXT,
+        )
+        .add(
+            "task_mode",
+            (task_mode_context or "").strip() or None,
+            SectionOrder.TASK_MODE,
         )
         .add(
             "workspace_facts",

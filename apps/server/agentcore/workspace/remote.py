@@ -113,6 +113,7 @@ class RemoteCloudWorkspace:
     """HTTP WorkspaceBackend for an unbound cloud desk, hosted by sidecar."""
 
     location: Literal["server"] = "server"
+    supports_cheap_read_head_fingerprint = False
 
     def __init__(self, *, ws_id: str, root_label: str = "workspace") -> None:
         self._ws_id = (ws_id or "").strip()

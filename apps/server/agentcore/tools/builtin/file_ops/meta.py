@@ -122,6 +122,7 @@ class FileDeleteTool:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
             if is_write_replay():
+                context.invalidate_tool_cache()
                 return ToolResult(
                     tool_call_id="",
                     success=True,
@@ -149,6 +150,7 @@ class FileDeleteTool:
                 "云端/sidecar→AgentCore/trash，可工作区一键还原）"
             )
 
+        context.invalidate_tool_cache()
         return ToolResult(
             tool_call_id="",
             success=True,

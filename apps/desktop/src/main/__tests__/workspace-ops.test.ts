@@ -147,8 +147,13 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
     const denied = errOf(await run("read_bytes", { path: "big.bin" }));
     expect(denied.kind).toBe("WorkspaceIOError");
     const ok = await run("read_head", { path: "big.bin" });
-    const val = valOf(ok) as { data: string; size_bytes: number };
+    const val = valOf(ok) as {
+      data: string;
+      size_bytes: number;
+      mtime_ms: number;
+    };
     expect(val.size_bytes).toBe(raw.length);
+    expect(val.mtime_ms).toBeGreaterThan(0);
     const head = Buffer.from(val.data, "base64");
     expect(head.subarray(0, 5).toString()).toBe("%PDF-");
     expect(head.length).toBe(1024);

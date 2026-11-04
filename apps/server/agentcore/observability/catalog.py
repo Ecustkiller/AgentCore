@@ -675,6 +675,27 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.execution_completed_emitted'),
     EventSpec(name='coordination.execution_detached_emitted'),
     EventSpec(name='coordination.file_ownership_snapshot_failed'),
+    EventSpec(
+        name='coordination.harvest_task_done',
+        description='协作会话的后台 harvest/settle 任务正常结束',
+        fields={
+            'completed': FieldType('int'),
+            'conversation_id': FieldType('str'),
+            'execution_id': FieldType('str'),
+            'harvest_scheduled': FieldType('bool'),
+            'settled_via': FieldType('str'),
+            'total': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='coordination.harvest_task_exception',
+        description='协作会话的后台 harvest/settle 任务异常结束',
+        fields={
+            'conversation_id': FieldType('str'),
+            'error': FieldType('str'),
+            'execution_id': FieldType('str'),
+        },
+    ),
     EventSpec(name='coordination.idle_patrol_deferred'),
     EventSpec(name='coordination.idle_yield_held_inflight'),
     EventSpec(
@@ -1082,6 +1103,18 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='delegate.thrash_rebrand_rejected'),
     EventSpec(name='delegate.turn_auth_dead_rejected'),
     EventSpec(name='delegate.turn_auth_dead_skip'),
+    EventSpec(
+        name='delegate.turn_cost_ceiling_skip',
+        description='回合成本触顶后停止派发剩余委派节点',
+        fields={
+            'ceiling': FieldType('int'),
+            'cost_ceiling_nano': FieldType('int'),
+            'cost_spent_nano': FieldType('int'),
+            'depth': FieldType('int'),
+            'skipped': FieldType('int'),
+            'spent': FieldType('int'),
+        },
+    ),
     EventSpec(name='delegate.turn_target_desk_inherited'),
     EventSpec(name='delegate.turn_token_ceiling_rejected'),
     EventSpec(name='delegate.turn_token_ceiling_skip'),
@@ -1577,8 +1610,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='hook.denied',
         description=(
-            'opt-in 生命周期钩子：pre_tool_use 命令明确 deny（stdout decision=deny 或 exit 2），'
-            '本次工具调用被拒且 policy_failure=True；allow 一律忽略，不绕过审批闸'
+            'opt-in 生命周期钩子：pre_tool_use 命令明确 deny（stdout decision=deny 或 exit 2），本'
+            '次工具调用被拒且 policy_failure=True；allow 一律忽略，不绕过审批闸'
         ),
         fields={
             'hook_event': FieldType('str'),
@@ -1589,8 +1622,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='hook.failed',
         description=(
-            'opt-in 生命周期钩子：起子进程 / IO / 超时 / 排任务失败，一律 fail-open 记 warning；'
-            '钩子失败不等于工具调用失败'
+            'opt-in 生命周期钩子：起子进程 / IO / 超时 / 排任务失败，一律 fail-open 记 warning；钩'
+            '子失败不等于工具调用失败'
         ),
         fields={
             'error': FieldType('str'),
@@ -1602,8 +1635,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='hook.invoked',
         description=(
-            'opt-in 生命周期钩子：一次 pre/post 命令执行完成。decision=allow 仅代表钩子没拒，'
-            '不代表工具已获准执行；post 固定 observe'
+            'opt-in 生命周期钩子：一次 pre/post 命令执行完成。decision=allow 仅代表钩子没拒，不代表'
+            '工具已获准执行；post 固定 observe'
         ),
         fields={
             'decision': FieldType('str'),
@@ -1800,11 +1833,12 @@ EVENTS: list[EventSpec] = [
             'scenario': FieldType('str'),
         },
     ),
+    EventSpec(name='llm.call_retried'),
     EventSpec(
         name='llm.candidate_chain_skipped',
         description=(
-            'opt-in 候选链：配置坏形状 / 平台凭据缺失 / BYOK provider 解析不到时跳过该候选；'
-            '跳过不等于换链，未解析到凭据的候选不会进链（避免未知前缀被默认 leaf 吞掉）'
+            'opt-in 候选链：配置坏形状 / 平台凭据缺失 / BYOK provider 解析不到时跳过该候选；跳过不'
+            '等于换链，未解析到凭据的候选不会进链（避免未知前缀被默认 leaf 吞掉）'
         ),
         fields={
             'provider_id': FieldType('str'),
@@ -1814,8 +1848,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='llm.candidate_hop',
         description=(
-            'opt-in 候选链：一次 LLM 调用在 commit 前遭遇可恢复上游故障，改走下一个候选。'
-            '只在 pre-commit 跳；鉴权 / 余额死亡与 post-commit 断流都不跳'
+            'opt-in 候选链：一次 LLM 调用在 commit 前遭遇可恢复上游故障，改走下一个候选。只在 pre-c'
+            'ommit 跳；鉴权 / 余额死亡与 post-commit 断流都不跳'
         ),
         fields={
             'from_model': FieldType('str'),
@@ -1824,7 +1858,6 @@ EVENTS: list[EventSpec] = [
             'to_model': FieldType('str'),
         },
     ),
-    EventSpec(name='llm.call_retried'),
     EventSpec(name='llm.client_error'),
     EventSpec(name='llm.empty_response'),
     EventSpec(
@@ -1837,6 +1870,60 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='llm.inference_envelope_relay'),
     EventSpec(name='llm.inference_unary_bypass'),
+    EventSpec(
+        name='llm.model_probe_decrypt_failed',
+        description='模型探测取不到该服务商的已存 Key（密文损坏或主密钥轮换），本轮跳过',
+        fields={
+            'provider_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='llm.model_probe_done',
+        description='一个服务商的模型探测完成（写入 llm_model_health）',
+        fields={
+            'dead': FieldType('int'),
+            'held': FieldType('int'),
+            'probed': FieldType('int'),
+            'provider_id': FieldType('str'),
+            'user_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='llm.model_probe_failed',
+        description='单个服务商的模型探测整体失败（不影响其它服务商）',
+        fields={
+            'provider_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='llm.model_probe_quota_hold',
+        description='探测证明该账号的免费日额度已空，按住剩余免费模型直到上游给出的重置时刻',
+        fields={
+            'until': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='llm.model_probe_skipped',
+        description='模型探测跳过（无加密主密钥，无法解密已存 Key）',
+        fields={
+            'reason': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='llm.model_probe_sweep_failed',
+        description='模型探测整轮失败（循环继续，下个周期重试）',
+        fields={
+            'error': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='llm.model_probe_unreachable',
+        description='探测请求连不上（DNS/TLS/连接被拒），该模型记为 error 而非 dead',
+        fields={
+            'error': FieldType('str'),
+            'model': FieldType('str'),
+        },
+    ),
     EventSpec(
         name='llm.observation_failed',
         description=(
@@ -1887,64 +1974,20 @@ EVENTS: list[EventSpec] = [
         },
     ),
     EventSpec(name='llm.retry_patience_ignored'),
-    EventSpec(
-        name='llm.model_probe_decrypt_failed',
-        description='模型探测取不到该服务商的已存 Key（密文损坏或主密钥轮换），本轮跳过',
-        fields={'provider_id': FieldType('str')},
-    ),
-    EventSpec(
-        name='llm.model_probe_done',
-        description='一个服务商的模型探测完成（写入 llm_model_health）',
-        fields={
-            'user_id': FieldType('str'),
-            'provider_id': FieldType('str'),
-            'probed': FieldType('int'),
-            'held': FieldType('int'),
-            'dead': FieldType('int'),
-        },
-    ),
-    EventSpec(
-        name='llm.model_probe_quota_hold',
-        description='探测证明该账号的免费日额度已空，按住剩余免费模型直到上游给出的重置时刻',
-        fields={'until': FieldType('str')},
-    ),
-    EventSpec(
-        name='llm.model_probe_failed',
-        description='单个服务商的模型探测整体失败（不影响其它服务商）',
-        fields={'provider_id': FieldType('str')},
-    ),
-    EventSpec(
-        name='llm.model_probe_skipped',
-        description='模型探测跳过（无加密主密钥，无法解密已存 Key）',
-        fields={'reason': FieldType('str')},
-    ),
-    EventSpec(
-        name='llm.model_probe_sweep_failed',
-        description='模型探测整轮失败（循环继续，下个周期重试）',
-        fields={'error': FieldType('str')},
-    ),
-    EventSpec(
-        name='llm.model_probe_unreachable',
-        description='探测请求连不上（DNS/TLS/连接被拒），该模型记为 error 而非 dead',
-        fields={
-            'model': FieldType('str'),
-            'error': FieldType('str'),
-        },
-    ),
     EventSpec(name='llm.router.close_failed'),
     EventSpec(name='llm.stream_aborted'),
     EventSpec(
         name='llm.stream_first_byte_timeout',
         description=(
-            '上游接了请求但在首字节预算内没有产出任何内容（opt-in；默认由 '
-            'engine_llm_stream_idle_timeout_seconds 接管）'
+            '上游接了请求但在首字节预算内没有产出任何内容（opt-in；默认由 engine_llm_stream_idle_ti'
+            'meout_seconds 接管）'
         ),
         fields={
-            'provider': FieldType('str'),
-            'seconds': FieldType('float'),
             'attempt': FieldType('int'),
-            'scenario': FieldType('str'),
             'partial_sse_lines': FieldType('int'),
+            'provider': FieldType('str'),
+            'scenario': FieldType('str'),
+            'seconds': FieldType('float'),
         },
     ),
     EventSpec(name='llm.stream_partial_disconnect'),
@@ -2003,12 +2046,12 @@ EVENTS: list[EventSpec] = [
             'user_id': FieldType('str'),
         },
     ),
+    EventSpec(name='llm_provider.models_probed'),
     EventSpec(name='llm_provider.test.failed'),
     EventSpec(name='llm_provider.test.ok'),
     EventSpec(name='llm_provider.test.probe_tools_failed'),
     EventSpec(name='llm_provider.test.start'),
     EventSpec(name='llm_provider.test.unhandled'),
-    EventSpec(name='llm_provider.models_probed'),
     EventSpec(name='llm_provider.tested'),
     EventSpec(name='md_export.exported'),
     EventSpec(name='memory.always_quota_card'),
@@ -2237,6 +2280,24 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='recover.lease_done'),
     EventSpec(name='recover.lease_failed'),
     EventSpec(name='recover.lease_no_delegate'),
+    EventSpec(
+        name='recover.lease_stalled',
+        description='租约恢复尝试次数触顶，停止继续抢占并转入中断结算',
+        fields={
+            'attempts': FieldType('int'),
+            'conversation_id': FieldType('str'),
+            'message_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='recover.lease_timeout',
+        description='租约恢复的 rebuild/arm 阶段超时，停止继续抢占并转入中断结算',
+        fields={
+            'attempts': FieldType('int'),
+            'conversation_id': FieldType('str'),
+            'message_id': FieldType('str'),
+        },
+    ),
     EventSpec(name='recover.recovered_badge_stamped'),
     EventSpec(name='recover.recovered_badge_write_failed'),
     EventSpec(name='recover.redrive_bound_turn'),
@@ -2552,8 +2613,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='shared_state.redis_fail_open',
         description=(
-            'opt-in 共享状态后端（429 冷却槽 / 单回合计费 claim）的 Redis 读写或构造失败；'
-            '读失败当空槽、写失败只告警，claim 退回本地内存记账。不改变多 worker 拒启口径'
+            'opt-in 共享状态后端（429 冷却槽 / 单回合计费 claim）的 Redis 读写或构造失败；读失败当'
+            '空槽、写失败只告警，claim 退回本地内存记账。不改变多 worker 拒启口径'
         ),
         fields={
             'error': FieldType('str'),
@@ -2824,8 +2885,8 @@ EVENTS: list[EventSpec] = [
         name='tool.output_spill_failed',
         description='超预算工具输出落盘失败（已回退为仅截断，不影响本次调用）',
         fields={
-            'tool': FieldType('str'),
             'chars': FieldType('int'),
+            'tool': FieldType('str'),
         },
     ),
     EventSpec(
@@ -2839,19 +2900,19 @@ EVENTS: list[EventSpec] = [
         name='tool.output_spill_skipped',
         description='超预算工具输出放弃落盘（超过单文件上限）',
         fields={
-            'tool': FieldType('str'),
             'chars': FieldType('int'),
             'reason': FieldType('str'),
+            'tool': FieldType('str'),
         },
     ),
     EventSpec(
         name='tool.output_spilled',
         description='超预算工具输出全文已落盘，并在模型可见段尾部留了路径提示',
         fields={
-            'tool': FieldType('str'),
             'chars': FieldType('int'),
             'kept_chars': FieldType('int'),
             'path': FieldType('str'),
+            'tool': FieldType('str'),
         },
     ),
     EventSpec(name='tool.web_fetch_cache_hit'),
@@ -2985,6 +3046,16 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='worker.escalate.cap_degraded'),
     EventSpec(name='worker.escalate.coordination_route_failed'),
     EventSpec(name='worker.escalate.emit_failed'),
+    EventSpec(
+        name='worker.escalate.merged',
+        description='同一升级请求被合并到已有卡片，用户回答后被多个等待方共同消费',
+        fields={
+            'awaiting': FieldType('str'),
+            'parent_escalation_id': FieldType('str'),
+            'run_id': FieldType('str'),
+            'status': FieldType('str'),
+        },
+    ),
     EventSpec(name='worker.escalate.settled'),
     EventSpec(
         name='worker.escalate_option_label_rejected',

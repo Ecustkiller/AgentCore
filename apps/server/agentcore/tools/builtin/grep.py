@@ -18,6 +18,11 @@ from typing import Any
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.tools.builtin.file_ops.errors import _outside_workspace_msg
 from agentcore.tools.builtin.file_ops.path_hints import enrich_missing_path_message
+from agentcore.tools.builtin.file_ops.turn_cache import (
+    cache_success,
+    cached_tool_result,
+    key_from_parts,
+)
 from agentcore.tools.cross_turn_retry import CROSS_TURN_RETRY_KEY, CrossTurnRetry
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -44,6 +49,17 @@ _DEFAULT_MAX_RESULTS = 50
 # grep output is line-oriented and denser than the 4000-char default; lift it so
 # a full (already capped) result set is never truncated into a partial last line.
 _OUTPUT_LIMIT = 16000
+
+
+def _grep_cache_key(arguments: dict[str, Any]) -> str:
+    return key_from_parts(
+        "grep",
+        str(arguments.get("pattern") or ""),
+        str(arguments.get("path") or ".").strip().replace("\\", "/"),
+        str(arguments.get("glob") or ""),
+        bool(arguments.get("case_insensitive")),
+        bool(arguments.get("files_only")),
+    )
 
 
 class GrepTool:
@@ -104,6 +120,13 @@ class GrepTool:
         pattern = arguments.get("pattern") or ""
         if not pattern:
             return _fail("缺少必填参数：pattern", start)
+
+        cache_backend = context.backend
+        cache_key = _grep_cache_key(arguments)
+        cached = context.get_cached_tool_result(kind="grep", key=cache_key)
+        if cached is not None:
+            context.note_tool_cache_saved_chars(len(cached.output or ""))
+            return cached_tool_result(cached, start, kind="grep")
 
         # Regex validity is authoritative in ripgrep (Rust regex), not Python re.
         rel_dir = arguments.get("path") or "."
@@ -198,7 +221,7 @@ class GrepTool:
             result=result,
             files_only=files_only,
         )
-        return ToolResult(
+        final = ToolResult(
             tool_call_id="",
             success=True,
             output=output,
@@ -209,6 +232,15 @@ class GrepTool:
                 "file_count": len(result.file_counts),
             },
         )
+        cache_success(
+            context,
+            kind="grep",
+            key=cache_key,
+            result=final,
+            backend=cache_backend,
+            max_chars=_OUTPUT_LIMIT,
+        )
+        return final
 
 
 def _fail(

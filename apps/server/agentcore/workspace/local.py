@@ -78,6 +78,7 @@ class LocalWorkspace:
     """``WorkspaceBackend`` backed by the desktop, reached over a channel."""
 
     location = "local"
+    supports_cheap_read_head_fingerprint = True
 
     def __init__(
         self,
@@ -268,9 +269,11 @@ class LocalWorkspace:
             WorkspaceOp.READ_HEAD, payload, root_id=root_id
         )
         value = value or {}
+        raw_mtime = value.get("mtime_ms")
         return ReadHeadResult(
             data=base64.b64decode(str(value.get("data") or "")),
             size_bytes=int(value.get("size_bytes") or 0),
+            mtime_ms=int(raw_mtime) if raw_mtime is not None else None,
         )
 
     async def extract_office(

@@ -946,6 +946,124 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "pruned": "int",
         "failed": "int",
     },
+    "coordination.harvest_task_done": {
+        "execution_id": "str",
+        "conversation_id": "str",
+        "settled_via": "str",
+        "harvest_scheduled": "bool",
+        "completed": "int",
+        "total": "int",
+    },
+    "coordination.harvest_task_exception": {
+        "execution_id": "str",
+        "conversation_id": "str",
+        "error": "str",
+    },
+    "delegate.turn_cost_ceiling_skip": {
+        "skipped": "int",
+        "spent": "int",
+        "ceiling": "int",
+        "depth": "int",
+        "cost_spent_nano": "int",
+        "cost_ceiling_nano": "int",
+    },
+    "hook.denied": {
+        "hook_event": "str",
+        "reason": "str",
+        "tool": "str",
+    },
+    "hook.failed": {
+        "error": "str",
+        "hook_event": "str",
+        "reason": "str",
+        "tool": "str",
+    },
+    "hook.invoked": {
+        "decision": "str",
+        "hook_event": "str",
+        "tool": "str",
+    },
+    "llm.candidate_chain_skipped": {
+        "provider_id": "str",
+        "reason": "str",
+    },
+    "llm.candidate_hop": {
+        "from_model": "str",
+        "hop": "int",
+        "reason": "str",
+        "to_model": "str",
+    },
+    "llm.model_probe_decrypt_failed": {
+        "provider_id": "str",
+    },
+    "llm.model_probe_done": {
+        "user_id": "str",
+        "provider_id": "str",
+        "probed": "int",
+        "held": "int",
+        "dead": "int",
+    },
+    "llm.model_probe_failed": {
+        "provider_id": "str",
+    },
+    "llm.model_probe_quota_hold": {
+        "until": "str",
+    },
+    "llm.model_probe_skipped": {
+        "reason": "str",
+    },
+    "llm.model_probe_sweep_failed": {
+        "error": "str",
+    },
+    "llm.model_probe_unreachable": {
+        "model": "str",
+        "error": "str",
+    },
+    "llm.stream_first_byte_timeout": {
+        "provider": "str",
+        "seconds": "float",
+        "attempt": "int",
+        "scenario": "str",
+        "partial_sse_lines": "int",
+    },
+    "recover.lease_stalled": {
+        "message_id": "str",
+        "conversation_id": "str",
+        "attempts": "int",
+    },
+    "recover.lease_timeout": {
+        "message_id": "str",
+        "conversation_id": "str",
+        "attempts": "int",
+    },
+    "shared_state.redis_fail_open": {
+        "error": "str",
+        "op": "str",
+    },
+    "tool.output_spill_failed": {
+        "tool": "str",
+        "chars": "int",
+    },
+    "tool.output_spill_prune_failed": {
+        "path": "str",
+    },
+    "tool.output_spill_skipped": {
+        "tool": "str",
+        "chars": "int",
+        "reason": "str",
+    },
+    "tool.output_spilled": {
+        "tool": "str",
+        "chars": "int",
+        "kept_chars": "int",
+        "path": "str",
+    },
+    "worker.escalate.merged": {
+        "run_id": "str",
+        "parent_escalation_id": "str",
+        "status": "str",
+        "awaiting": "str",
+    },
 }
 
 # S3-retired names: no emit site, kept so old JSONL still validates against the registry.
@@ -1457,6 +1575,57 @@ KEY_DESC: dict[str, str] = {
     "url_cache.conversation_evicted": (
         "空闲 TTL 清掉另一会话的 URL 缓存；victim 记 evicted_conversation_id，"
         "不写 canonical conversation_id（本行发生在驱逐方请求的 contextvars 里）"
+    ),
+    "coordination.harvest_task_done": "协作会话的后台 harvest/settle 任务正常结束",
+    "coordination.harvest_task_exception": "协作会话的后台 harvest/settle 任务异常结束",
+    "delegate.turn_cost_ceiling_skip": "回合成本触顶后停止派发剩余委派节点",
+    "hook.denied": (
+        "opt-in 生命周期钩子：pre_tool_use 命令明确 deny（stdout decision=deny 或 exit 2），"
+        "本次工具调用被拒且 policy_failure=True；allow 一律忽略，不绕过审批闸"
+    ),
+    "hook.failed": (
+        "opt-in 生命周期钩子：起子进程 / IO / 超时 / 排任务失败，一律 fail-open 记 warning；"
+        "钩子失败不等于工具调用失败"
+    ),
+    "hook.invoked": (
+        "opt-in 生命周期钩子：一次 pre/post 命令执行完成。decision=allow 仅代表钩子没拒，"
+        "不代表工具已获准执行；post 固定 observe"
+    ),
+    "llm.candidate_chain_skipped": (
+        "opt-in 候选链：配置坏形状 / 平台凭据缺失 / BYOK provider 解析不到时跳过该候选；"
+        "跳过不等于换链，未解析到凭据的候选不会进链（避免未知前缀被默认 leaf 吞掉）"
+    ),
+    "llm.candidate_hop": (
+        "opt-in 候选链：一次 LLM 调用在 commit 前遭遇可恢复上游故障，改走下一个候选。"
+        "只在 pre-commit 跳；鉴权 / 余额死亡与 post-commit 断流都不跳"
+    ),
+    "llm.model_probe_decrypt_failed": (
+        "模型探测取不到该服务商的已存 Key（密文损坏或主密钥轮换），本轮跳过"
+    ),
+    "llm.model_probe_done": "一个服务商的模型探测完成（写入 llm_model_health）",
+    "llm.model_probe_failed": "单个服务商的模型探测整体失败（不影响其它服务商）",
+    "llm.model_probe_quota_hold": (
+        "探测证明该账号的免费日额度已空，按住剩余免费模型直到上游给出的重置时刻"
+    ),
+    "llm.model_probe_skipped": "模型探测跳过（无加密主密钥，无法解密已存 Key）",
+    "llm.model_probe_sweep_failed": "模型探测整轮失败（循环继续，下个周期重试）",
+    "llm.model_probe_unreachable": "探测请求连不上（DNS/TLS/连接被拒），该模型记为 error 而非 dead",
+    "llm.stream_first_byte_timeout": (
+        "上游接了请求但在首字节预算内没有产出任何内容（opt-in；默认由 "
+        "engine_llm_stream_idle_timeout_seconds 接管）"
+    ),
+    "recover.lease_stalled": "租约恢复尝试次数触顶，停止继续抢占并转入中断结算",
+    "recover.lease_timeout": "租约恢复的 rebuild/arm 阶段超时，停止继续抢占并转入中断结算",
+    "shared_state.redis_fail_open": (
+        "opt-in 共享状态后端（429 冷却槽 / 单回合计费 claim）的 Redis 读写或构造失败；"
+        "读失败当空槽、写失败只告警，claim 退回本地内存记账。不改变多 worker 拒启口径"
+    ),
+    "tool.output_spill_failed": "超预算工具输出落盘失败（已回退为仅截断，不影响本次调用）",
+    "tool.output_spill_prune_failed": "spill 区清理单个陈旧文件失败（不影响本次调用）",
+    "tool.output_spill_skipped": "超预算工具输出放弃落盘（超过单文件上限）",
+    "tool.output_spilled": "超预算工具输出全文已落盘，并在模型可见段尾部留了路径提示",
+    "worker.escalate.merged": (
+        "同一升级请求被合并到已有卡片，用户回答后被多个等待方共同消费"
     ),
 }
 

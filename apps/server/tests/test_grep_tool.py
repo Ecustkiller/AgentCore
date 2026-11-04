@@ -280,6 +280,44 @@ async def test_grep_finds_matches_with_path_and_lineno(tmp_path: Path):
     assert "util.py" not in result.output
 
 
+async def test_grep_reuses_turn_cache_and_invalidates_after_write(
+    tmp_path: Path, monkeypatch
+):
+    from agentcore.tools.builtin.file_ops import FileWriteTool
+
+    _seed(tmp_path)
+    ctx = _ctx(tmp_path)
+    real_grep = ctx.backend.grep
+    calls = {"n": 0}
+
+    async def _counted(query):
+        calls["n"] += 1
+        return await real_grep(query)
+
+    monkeypatch.setattr(ctx.backend, "grep", _counted)
+    tool = GrepTool()
+    first = await tool.execute({"pattern": "TODO"}, ctx)
+    second = await tool.execute({"pattern": "TODO"}, ctx)
+
+    assert first.success is True and second.success is True
+    assert first.output == second.output
+    assert second.metadata.get("turn_cache_hit") is True
+    assert second.metadata.get("turn_cache_kind") == "grep"
+    assert calls["n"] == 1
+
+    (tmp_path / "new.py").write_text("# TODO newly added\n", encoding="utf-8")
+    written = await FileWriteTool().execute(
+        {"file_path": "new.py", "content": "# TODO from write\n"}, ctx
+    )
+    assert written.success is True
+
+    third = await tool.execute({"pattern": "TODO"}, ctx)
+    assert third.success is True
+    assert "new.py" in third.output
+    assert third.metadata.get("turn_cache_hit") is not True
+    assert calls["n"] == 2
+
+
 async def test_grep_prunes_noise_dirs(tmp_path: Path):
     _seed(tmp_path)
     # Also plant ``.pytest_tmp`` (Windows lock poison) — must be product-ignored.

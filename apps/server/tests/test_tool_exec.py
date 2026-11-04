@@ -1609,6 +1609,68 @@ async def test_parallel_same_path_different_window_file_reads_not_coalesced(
     assert "第 3–3 行" in by_id["r2"]
 
 
+async def test_parallel_identical_grep_coalesces_once(tmp_path: Path):
+    """Same-round identical grep calls share one repository scan."""
+    from agentcore.tools.builtin.grep import GrepTool
+
+    (tmp_path / "app.py").write_text("TODO shared\n", encoding="utf-8")
+    backend = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    calls = {"n": 0}
+    real_grep = backend.grep
+
+    async def _counting_grep(query):  # noqa: ANN001
+        calls["n"] += 1
+        return await real_grep(query)
+
+    backend.grep = _counting_grep  # type: ignore[method-assign]
+    reg = ToolRegistry()
+    reg.register(GrepTool())
+    messages, terminal, attempts = await execute_tools(
+        [
+            _call("g1", "grep", '{"pattern": "TODO"}'),
+            _call("g2", "grep", '{"pattern": "TODO"}'),
+            _call("g3", "grep", '{"pattern": "TODO"}'),
+        ],
+        reg,
+        _ctx(backend),
+        EventSink(),
+        approval_gate=None,
+        run_id="r1",
+    )
+
+    assert terminal is None
+    assert len(messages) == 3
+    assert all(a.success for a in attempts)
+    assert calls["n"] == 1
+    assert all("app.py:1" in (m.content or "") for m in messages)
+
+
+def test_tool_cache_invalidation_scopes_verify_checks():
+    from agentcore.runtime.engine.tool_exec_call import _invalidates_tool_cache
+
+    def _result(check: str) -> ToolResult:
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="",
+            metadata={"check": check},
+        )
+
+    assert _invalidates_tool_cache("run", _result("test")) is False
+    assert _invalidates_tool_cache("run", _result("typecheck")) is False
+    assert _invalidates_tool_cache("run", _result("build")) is True
+    assert _invalidates_tool_cache("run", _result("install")) is True
+    assert _invalidates_tool_cache("run", _result("command")) is True
+    assert _invalidates_tool_cache("host", _result("test")) is True
+    failed_delete = ToolResult(
+        tool_call_id="",
+        success=False,
+        output="",
+        error="missing",
+    )
+    assert _invalidates_tool_cache("file_delete", failed_delete) is True
+
+
 async def test_ceo_str_replace_miss_still_not_assembled():
     """CEO 写盘是 BOTH：本面未装配时走 not_assembled，不是 worker-only audience_deny。"""
     reg = ToolRegistry()

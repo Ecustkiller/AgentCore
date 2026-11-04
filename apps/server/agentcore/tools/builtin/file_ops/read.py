@@ -72,6 +72,7 @@ from .observe import (
     table_next,
 )
 from .path_hints import enrich_missing_path_message
+from .turn_cache import cache_success, cached_tool_result, key_from_parts
 
 # Safety cap for one read view (disk original text). Distinct from
 # retired sliding-clear ``min_chars`` and worker token ceilings — do not reuse those.
@@ -190,6 +191,62 @@ def _effective_start_page(start_page: object) -> int:
     if start_page is None:
         return 1
     return max(1, _as_int(start_page))
+
+
+def _read_cache_key(
+    arguments: dict[str, Any],
+) -> tuple[str, int, int, int] | None:
+    """Normalized key for a successful text/Office read, or ``None``."""
+    raw_path = arguments.get("file_path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None
+    try:
+        return (
+            raw_path.strip().replace("\\", "/"),
+            _effective_offset(arguments.get("offset")),
+            _effective_line_limit(arguments.get("limit")),
+            _effective_start_page(arguments.get("start_page")),
+        )
+    except (TypeError, ValueError):
+        # Invalid args must reach the normal path and produce the existing
+        # contract error; cache lookup must not change the failure surface.
+        return None
+
+
+def _file_list_cache_key(
+    arguments: dict[str, Any],
+    *,
+    material_paths: frozenset[str] | None = None,
+) -> str:
+    directory = str(arguments.get("directory") or ".").strip() or "."
+    return key_from_parts(
+        "file_list",
+        directory.replace("\\", "/"),
+        tuple(sorted(material_paths or ())),
+    )
+
+
+async def _read_file_fingerprint(
+    context: ToolContext, path: str
+) -> tuple[int, int] | None:
+    """Cheap stat fingerprint used to reject externally changed cached files."""
+    if not bool(
+        getattr(
+            context.backend,
+            "supports_cheap_read_head_fingerprint",
+            False,
+        )
+    ):
+        # RemoteCloudWorkspace.read_head currently downloads the full file; two
+        # validation probes per read would be worse than the duplicate read we avoid.
+        return None
+    try:
+        head = await _backend_read_head(context.backend, path, max_bytes=1)
+    except WorkspaceError:
+        return None
+    if head.mtime_ms is None:
+        return None
+    return int(head.mtime_ms), int(head.size_bytes)
 
 
 def _trim_to_char_cap(lines: list[str]) -> tuple[list[str], bool]:
@@ -488,13 +545,43 @@ class FileReadTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         start = time.monotonic()
+        cache_key = _read_cache_key(arguments)
+        cache_backend = context.backend
+        if cache_key is not None:
+            fingerprint = await _read_file_fingerprint(context, cache_key[0])
+            result_key = key_from_parts("read", *cache_key)
+            cached = context.get_cached_tool_result(
+                kind="read",
+                key=result_key,
+                fingerprint=fingerprint,
+            )
+            if cached is not None:
+                context.note_tool_cache_saved_chars(len(cached.output or ""))
+                return cached_tool_result(cached, start, kind="read")
+        else:
+            fingerprint = None
+            result_key = ""
+
         result = await self._read_on_desk(arguments, context, start)
         from .named_desk_read import maybe_named_desk_file_read
 
         retried = await maybe_named_desk_file_read(
             result, arguments, context, start, self._read_on_desk
         )
-        return retried if retried is not None else result
+        final = retried if retried is not None else result
+        if cache_key is not None:
+            after_fingerprint = await _read_file_fingerprint(context, cache_key[0])
+            if fingerprint == after_fingerprint:
+                cache_success(
+                    context,
+                    kind="read",
+                    key=result_key,
+                    result=final,
+                    backend=cache_backend,
+                    max_chars=FILE_READ_SAFETY_CHAR_CAP,
+                    fingerprint=after_fingerprint,
+                )
+        return final
 
     async def _read_on_desk(
         self, arguments: dict[str, Any], context: ToolContext, start: float
@@ -949,6 +1036,16 @@ class FileListTool:
             return leftover
 
         directory = str(arguments.get("directory") or ".").strip() or "."
+        cache_backend = context.backend
+        cache_key = _file_list_cache_key(
+            arguments,
+            material_paths=context.material_paths,
+        )
+        cached = context.get_cached_tool_result(kind="file_list", key=cache_key)
+        if cached is not None:
+            context.note_tool_cache_saved_chars(len(cached.output or ""))
+            return cached_tool_result(cached, start, kind="file_list")
+
         if is_bare_external_directory(directory):
             return bare_external_error(directory, context.backend, start)
 
@@ -995,9 +1092,18 @@ class FileListTool:
                 e, directory=directory, context=context, start=start
             )
 
-        return ToolResult(
+        final = ToolResult(
             tool_call_id="",
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
+        cache_success(
+            context,
+            kind="file_list",
+            key=cache_key,
+            result=final,
+            backend=cache_backend,
+            max_chars=16_000,
+        )
+        return final

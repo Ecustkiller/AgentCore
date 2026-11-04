@@ -85,16 +85,16 @@ async def execute_tools(
     ``content_delta``); ``ToolCallFact`` and circuit-breaker audit still keep
     ``run_id`` for §8.3 fold / audit. Workers keep ``run_id`` on SSE too.
 
-    Same-round parallel ``read`` calls that share a normalized path execute
-    the underlying read once; sibling tool_calls receive fan-out clones (one
-    count bump when the shared result is a full read).
+    Same-round parallel read-only calls (``read`` / ``grep`` / ``glob`` /
+    ``file_list``) with identical normalized arguments execute the underlying
+    operation once; siblings receive fan-out clones.
     """
     # Captain self-tools: inline timeline (no run_id on wire); facts/audit keep run_id.
     event_run_id = "" if role == "captain" else run_id
     allowed_set = None if allowed_tool_names is None else frozenset(allowed_tool_names)
     disabled_set = frozenset(disabled_tools) if disabled_tools else frozenset()
-    # Same-round read path coalesce (leader Future → fan-out clones).
-    file_read_inflight: dict[str, asyncio.Future[ToolResult]] = {}
+    # Same-round read-only coalesce (leader Future → fan-out clones).
+    read_only_inflight: dict[str, asyncio.Future[ToolResult]] = {}
 
     async def _run_one(tc: ToolCall) -> ToolCallQuad:
         return await run_one_tool(
@@ -108,7 +108,7 @@ async def execute_tools(
             allowed_set=allowed_set,
             disabled_set=disabled_set,
             approval_gate=approval_gate,
-            file_read_inflight=file_read_inflight,
+            read_only_inflight=read_only_inflight,
         )
 
     sem = asyncio.Semaphore(MAX_PARALLEL_TOOLS)

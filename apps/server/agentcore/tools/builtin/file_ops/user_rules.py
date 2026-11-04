@@ -277,6 +277,7 @@ async def maybe_user_rule_write(
     if result.message:
         output = f"{output}\n{result.message}"
     _mark_landed_files(context, _norm_rel_path(rel_path), kind=kind_label)
+    context.invalidate_tool_cache()
     return ToolResult(
         tool_call_id="",
         success=True,
@@ -358,6 +359,7 @@ async def maybe_user_rule_str_replace(
         action="write",
     )
     _mark_landed_files(context, _norm_rel_path(rel_path), kind=kind_label)
+    context.invalidate_tool_cache()
     return ToolResult(
         tool_call_id="",
         success=True,
@@ -396,6 +398,7 @@ async def maybe_user_rule_delete(
                 user_id=context.user_id,
                 folder_id=rule_folder_id(context),
             )
+    context.invalidate_tool_cache()
     return ToolResult(
         tool_call_id="",
         success=True,

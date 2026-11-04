@@ -23,6 +23,10 @@ from agentcore.runtime.resolve.prompt import (
     compose_ceo_chat_prompt,
 )
 from agentcore.runtime.resolve.prompt.envelope import render_ceo_turn_envelope
+from agentcore.runtime.resolve.task_mode import (
+    classify_task_mode,
+    render_task_mode_block,
+)
 from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
 from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
 from agentcore.tools.builtin import (
@@ -294,7 +298,12 @@ async def _assemble_ceo_wired(
     # 出处诚实：hydrate 后注入「已登记来源」结构化摘要（对照台账字段，禁占位叙事）。
     # Tools register into the ledger only once the loop runs, so its content is settled
     # for this turn's envelope here. Frozen system stays byte-stable across turns.
+    task_mode = classify_task_mode(
+        prepared.original_user_message or user_message,
+        shared_workspace=folder_id is not None,
+    )
     chat_envelope = render_ceo_turn_envelope(
+        task_mode_context=render_task_mode_block(task_mode),
         workspace_context=prepared.workspace_facts,
         workspace_file_index=workspace_overview,
         attachment_material=attachment_material_scene(prepared.attachment_context),

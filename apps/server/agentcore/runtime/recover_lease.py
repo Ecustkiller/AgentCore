@@ -186,13 +186,7 @@ async def recover_expired_lease(lease: TurnLeaseRow, state: TurnState) -> None:
         with contextlib.suppress(Exception):
             cancel_coordination_on_user_stop(execution_id=stop_eid)
 
-    async def _salvage(*, reason: str, event: str) -> bool:
-        logger.warning(
-            event,
-            message_id=message_id,
-            conversation_id=conversation_id,
-            attempts=attempts,
-        )
+    async def _salvage(*, reason: str) -> bool:
         return await salvage_interrupted_turn(
             message_id=message_id,
             conversation_id=conversation_id,
@@ -204,9 +198,14 @@ async def recover_expired_lease(lease: TurnLeaseRow, state: TurnState) -> None:
         # Cap ready loops: another claim after a hung/cancelled recover must not spin.
         max_attempts = max(1, int(settings.turn_lease_recover_max_attempts))
         if attempts > max_attempts:
+            logger.warning(
+                "recover.lease_stalled",
+                message_id=message_id,
+                conversation_id=conversation_id,
+                attempts=attempts,
+            )
             should_release = await _salvage(
                 reason=TurnInterruptReason.REDRIVE_FAILED.value,
-                event="recover.lease_stalled",
             )
             return
 
@@ -284,9 +283,14 @@ async def recover_expired_lease(lease: TurnLeaseRow, state: TurnState) -> None:
                 should_release = True
         except TimeoutError:
             _stop_background()
+            logger.warning(
+                "recover.lease_timeout",
+                message_id=message_id,
+                conversation_id=conversation_id,
+                attempts=attempts,
+            )
             should_release = await _salvage(
                 reason=TurnInterruptReason.REDRIVE_FAILED.value,
-                event="recover.lease_timeout",
             )
     except asyncio.CancelledError:
         # Strong-ref gap / process teardown used to cancel after ready with no salvage.

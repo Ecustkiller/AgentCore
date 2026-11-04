@@ -3,6 +3,12 @@ import { type ColumnDef, type TableDoc, emptyViewConfig } from "./types";
 
 export const DEMO_TABLE_ID = "demo-table";
 
+function currentMonthDay(day: number): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${String(day).padStart(2, "0")}`;
+}
+
 export function statusColumn(): ColumnDef {
   return {
     id: newId(),
@@ -122,7 +128,7 @@ export function createDemoTable(): TableDoc {
       cells: {
         "c-title": "飞书多维表格怎么做筛选",
         "c-status": "s-done",
-        "c-date": "2026-09-10",
+        "c-date": currentMonthDay(10),
         "c-score": 4,
         "c-read": true,
         "c-link": "https://www.feishu.cn",
@@ -135,7 +141,7 @@ export function createDemoTable(): TableDoc {
       cells: {
         "c-title": "看板拖拽改状态",
         "c-status": "s-doing",
-        "c-date": "2026-09-13",
+        "c-date": currentMonthDay(13),
         "c-score": 5,
         "c-read": false,
         "c-link": "",
@@ -148,7 +154,7 @@ export function createDemoTable(): TableDoc {
       cells: {
         "c-title": "日历视图按截止日期铺开",
         "c-status": "s-todo",
-        "c-date": "2026-09-20",
+        "c-date": currentMonthDay(20),
         "c-score": 3,
         "c-read": false,
         "c-link": "",
@@ -161,7 +167,7 @@ export function createDemoTable(): TableDoc {
       cells: {
         "c-title": "Agent 批量填表",
         "c-status": "s-todo",
-        "c-date": "2026-09-28",
+        "c-date": currentMonthDay(28),
         "c-score": null,
         "c-read": false,
         "c-link": "",
@@ -174,7 +180,7 @@ export function createDemoTable(): TableDoc {
       cells: {
         "c-title": "画廊卡片扫一眼",
         "c-status": "s-doing",
-        "c-date": "2026-09-16",
+        "c-date": currentMonthDay(16),
         "c-score": 4,
         "c-read": true,
         "c-link": "https://www.notion.so",

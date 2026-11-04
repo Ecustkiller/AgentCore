@@ -1,14 +1,17 @@
-"""Same-round parallel ``read`` coalesce helpers (path+window key + fan-out clone)."""
+"""Same-round parallel read-only tool coalesce helpers."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any
 
+from agentcore.tools.builtin.file_ops.glob import _glob_cache_key
 from agentcore.tools.builtin.file_ops.read import (
     _effective_line_limit,
     _effective_offset,
+    _file_list_cache_key,
 )
+from agentcore.tools.builtin.grep import _grep_cache_key
 from agentcore.tools.protocol import ToolResult
 
 
@@ -44,8 +47,30 @@ def _file_read_round_coalesce_key(args: dict[str, Any]) -> str | None:
     return f"{path}\0{offset}:{limit}"
 
 
+def _read_only_round_coalesce_key(
+    name: str,
+    args: dict[str, Any],
+) -> str | None:
+    """Coalesce identical read-only calls within one parallel tool round."""
+    if not isinstance(args, dict):
+        return None
+    if name == "read":
+        key = _file_read_round_coalesce_key(args)
+    elif name == "grep":
+        pattern = str(args.get("pattern") or "").strip()
+        key = _grep_cache_key(args) if pattern else None
+    elif name == "glob":
+        pattern = str(args.get("pattern") or "").strip()
+        key = _glob_cache_key(args) if pattern else None
+    elif name == "file_list":
+        key = _file_list_cache_key(args)
+    else:
+        return None
+    return f"{name}\0{key}" if key else None
+
+
 def _clone_tool_result(result: ToolResult, tool_call_id: str) -> ToolResult:
-    """Fan-out copy of a shared ``read`` result for a sibling tool_call."""
+    """Fan-out copy of a shared read-only result for a sibling tool_call."""
     return replace(
         result,
         tool_call_id=tool_call_id,

@@ -7,6 +7,8 @@ Tools declare their schema (for LLM function calling) and implement execute().
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -76,6 +78,138 @@ class TurnExploreGate:
     pending: bool = False
     write_scope: WriteScope = "project"
     turn_created_folder_ids: set[str] = field(default_factory=set)
+
+
+@dataclass
+class TurnToolCache:
+    """Successful read-only tool results shared by one turn.
+
+    The cache is deliberately conservative:
+
+    - keyed by backend identity + normalized path + effective window;
+    - bounded LRU, so a broad repository walk cannot retain the whole repo;
+    - cleared after a successful mutation or command execution.
+
+    ``dataclasses.replace`` on :class:`ToolContext` keeps this object by
+    reference, so CEO and delegated workers can share hits through their common
+    turn context without storing process-global state.
+    """
+
+    max_entries: int = 128
+    _entries: dict[
+        tuple[int, str, int, int, int], tuple[Any, float, Any | None]
+    ] = field(
+        default_factory=dict, repr=False
+    )
+    hits: int = 0
+    saved_chars: int = 0
+
+    @staticmethod
+    def normalize_path(path: str) -> str:
+        return (path or "").strip().replace("\\", "/")
+
+    def get(
+        self,
+        *,
+        backend: object,
+        path: str,
+        offset: int,
+        limit: int,
+        start_page: int,
+        fingerprint: Any | None = None,
+    ) -> Any | None:
+        key = (
+            id(backend),
+            self.normalize_path(path),
+            offset,
+            limit,
+            start_page,
+        )
+        entry = self._entries.pop(key, None)
+        if entry is None:
+            return None
+        value, expires_at, stored_fingerprint = entry
+        if expires_at < time.monotonic():
+            return None
+        if (
+            stored_fingerprint is not None or fingerprint is not None
+        ) and fingerprint != stored_fingerprint:
+            return None
+        # Reinsert to keep dict insertion order as the LRU order.
+        self._entries[key] = entry
+        self.hits += 1
+        return value
+
+    def put(
+        self,
+        *,
+        backend: object,
+        path: str,
+        offset: int,
+        limit: int,
+        start_page: int,
+        value: Any,
+        ttl_seconds: float = 120.0,
+        fingerprint: Any | None = None,
+    ) -> None:
+        key = (
+            id(backend),
+            self.normalize_path(path),
+            offset,
+            limit,
+            start_page,
+        )
+        self._entries.pop(key, None)
+        self._entries[key] = (
+            value,
+            time.monotonic() + max(0.0, ttl_seconds),
+            fingerprint,
+        )
+        while len(self._entries) > max(1, self.max_entries):
+            self._entries.pop(next(iter(self._entries)), None)
+
+    def note_saved_chars(self, chars: int) -> None:
+        if chars > 0:
+            self.saved_chars += chars
+
+    def get_tool_result(
+        self,
+        *,
+        backend: object,
+        kind: str,
+        key: str,
+        fingerprint: Any | None = None,
+    ) -> Any | None:
+        return self.get(
+            backend=backend,
+            path=f"@tool:{kind}:{hashlib.sha256(key.encode('utf-8')).hexdigest()}",
+            offset=0,
+            limit=0,
+            start_page=0,
+            fingerprint=fingerprint,
+        )
+
+    def put_tool_result(
+        self,
+        *,
+        backend: object,
+        kind: str,
+        key: str,
+        value: Any,
+        fingerprint: Any | None = None,
+    ) -> None:
+        self.put(
+            backend=backend,
+            path=f"@tool:{kind}:{hashlib.sha256(key.encode('utf-8')).hexdigest()}",
+            offset=0,
+            limit=0,
+            start_page=0,
+            value=value,
+            fingerprint=fingerprint,
+        )
+
+    def clear(self) -> None:
+        self._entries.clear()
 
 
 @dataclass
@@ -410,6 +544,11 @@ class ToolContext:
     _table_bind: TableBindSlot = field(
         default_factory=TableBindSlot, repr=False, compare=False
     )
+    # Turn-scoped successful-read cache. Shared by reference across replace()
+    # copies; mutations and command execution clear it before the next round.
+    _tool_cache: TurnToolCache = field(
+        default_factory=TurnToolCache, repr=False, compare=False
+    )
     # Desktop Client Tools: per-run channel for Host + MCP + external mount.
     # Set when the desktop client is online (local workspace **or** cloud +
     # ``desktop_online``) so tools can backfill via ClientTool SSE; ``None`` when
@@ -615,6 +754,42 @@ class ToolContext:
         cleaned = folder_id.strip()
         if cleaned:
             self._explore_gate.turn_created_folder_ids.add(cleaned)
+
+    def invalidate_tool_cache(self) -> None:
+        self._tool_cache.clear()
+
+    def note_tool_cache_saved_chars(self, chars: int) -> None:
+        self._tool_cache.note_saved_chars(chars)
+
+    def get_cached_tool_result(
+        self,
+        *,
+        kind: str,
+        key: str,
+        fingerprint: Any | None = None,
+    ) -> Any | None:
+        return self._tool_cache.get_tool_result(
+            backend=self.backend,
+            kind=kind,
+            key=key,
+            fingerprint=fingerprint,
+        )
+
+    def cache_tool_result(
+        self,
+        *,
+        kind: str,
+        key: str,
+        value: Any,
+        fingerprint: Any | None = None,
+    ) -> None:
+        self._tool_cache.put_tool_result(
+            backend=self.backend,
+            kind=kind,
+            key=key,
+            value=value,
+            fingerprint=fingerprint,
+        )
 
 
 @dataclass

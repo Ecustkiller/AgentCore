@@ -162,7 +162,11 @@ export async function opReadHead(
     if (n > 0) {
       await fh.read(buf, 0, n, 0);
     }
-    return opOk({ data: buf.toString("base64"), size_bytes: st.size });
+    return opOk({
+      data: buf.toString("base64"),
+      size_bytes: st.size,
+      mtime_ms: Math.floor(st.mtimeMs),
+    });
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   } finally {

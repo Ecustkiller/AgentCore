@@ -1260,6 +1260,55 @@ def test_verify_coalesce_fingerprint_stable_on_resolved_argv():
     assert a != c
 
 
+async def test_single_agent_verify_reuses_turn_cache(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = _FakeBackend(exists={"tsconfig.json"})
+    profile_calls = {"n": 0}
+
+    async def _fake_profile(_backend):
+        profile_calls["n"] += 1
+        return _make_profile(
+            languages=["typescript"],
+            package_managers=["npm"],
+            typecheck_commands=["npx tsc --noEmit"],
+            build_commands=["npm run build"],
+        )
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.run_verify.detect_workspace_profile",
+        _fake_profile,
+    )
+    ctx = _ctx(backend)
+    phases: list[str] = []
+    ctx.on_phase = phases.append
+    first = await execute_verify({"check": "typecheck"}, ctx)
+    second = await execute_verify({"check": "typecheck"}, ctx)
+
+    assert first.success is True and second.success is True
+    assert len(backend.requests) == 1
+    assert profile_calls["n"] == 1
+    assert phases == ["executing"]
+    assert second.metadata.get("turn_cache_hit") is True
+    assert second.metadata.get("turn_cache_kind") == "verify"
+    assert second.metadata.get("verify_shared") == "turn_cache"
+    assert "同回合验证复用" in (second.output or "")
+
+    built = await execute_verify({"check": "build"}, ctx)
+    assert built.success is True
+    assert len(backend.requests) == 2
+    assert profile_calls["n"] == 1
+    assert phases == ["executing", "executing"]
+
+    ctx.invalidate_tool_cache()
+    third = await execute_verify({"check": "typecheck"}, ctx)
+    assert third.success is True
+    assert len(backend.requests) == 3
+    assert profile_calls["n"] == 2
+    assert phases == ["executing", "executing", "executing"]
+    assert third.metadata.get("turn_cache_hit") is not True
+
+
 async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch):
     """Two workers sharing one execution join one sandbox execute (no double burn)."""
     import asyncio
