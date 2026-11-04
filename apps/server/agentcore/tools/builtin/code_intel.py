@@ -128,22 +128,27 @@ def _is_test(path: str) -> bool:
     )
 
 
+def _module_aliases(path: str) -> tuple[str, ...]:
+    p = PurePosixPath(path)
+    if p.suffix != ".py":
+        return ()
+    parts = list(p.with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    aliases: list[str] = []
+    if parts:
+        aliases.append(".".join(parts))
+    if len(parts) > 1 and parts[0] in {"src", "lib"}:
+        aliases.append(".".join(parts[1:]))
+    return tuple(dict.fromkeys(aliases))
+
+
 def _path_modules(files: dict[str, FileIntel]) -> dict[str, tuple[str, ...]]:
     out: dict[str, tuple[str, ...]] = {}
     for path in files:
-        p = PurePosixPath(path)
-        if p.suffix != ".py":
-            continue
-        parts = list(p.with_suffix("").parts)
-        if parts and parts[-1] == "__init__":
-            parts = parts[:-1]
-        aliases: list[str] = []
-        if parts:
-            aliases.append(".".join(parts))
-        if len(parts) > 1 and parts[0] in {"src", "lib"}:
-            aliases.append(".".join(parts[1:]))
+        aliases = _module_aliases(path)
         if aliases:
-            out[path] = tuple(dict.fromkeys(aliases))
+            out[path] = aliases
     return out
 
 
@@ -230,6 +235,9 @@ def _resolve_import(
         for known in aliases:
             if module == known or module.startswith(known + "."):
                 return path
+    for path, aliases in modules.items():
+        if any(known.startswith(module + ".") for known in aliases):
+            return path
     return None
 
 
@@ -302,23 +310,67 @@ def _python_intel(
     return collector.symbols, collector.imports, diagnostics
 
 
+def _mask_js_noncode(text: str, *, mask_strings: bool) -> str:
+    """Blank comments (and optionally strings) while preserving line numbers."""
+    out = list(text)
+    i = 0
+    size = len(text)
+    while i < size:
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            end = size if end < 0 else end
+            for j in range(i, end):
+                out[j] = " "
+            i = end
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            end = size if end < 0 else end + 2
+            for j in range(i, end):
+                if out[j] != "\n":
+                    out[j] = " "
+            i = end
+            continue
+        if text[i] in {"'", '"', "`"}:
+            quote = text[i]
+            j = i + 1
+            while j < size:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == quote:
+                    j += 1
+                    break
+                j += 1
+            if mask_strings:
+                for k in range(i, min(j, size)):
+                    if out[k] != "\n":
+                        out[k] = " "
+            i = j
+            continue
+        i += 1
+    return "".join(out)
+
+
 def _js_intel(
     path: str, text: str
 ) -> tuple[list[SymbolDef], list[ImportRef], list[tuple[int, str]]]:
+    code_only = _mask_js_noncode(text, mask_strings=True)
+    without_comments = _mask_js_noncode(text, mask_strings=False)
     symbols = [
         SymbolDef(path, match.group("name"), "symbol", text.count("\n", 0, match.start()) + 1)
-        for match in _SYMBOL_RE.finditer(text)
+        for match in _SYMBOL_RE.finditer(code_only)
     ]
     imports = [
         ImportRef(
             match.group("module"),
             text.count("\n", 0, match.start()) + 1,
         )
-        for match in _IMPORT_RE.finditer(text)
+        for match in _IMPORT_RE.finditer(without_comments)
     ]
-    if text.count("{") != text.count("}"):
+    if code_only.count("{") != code_only.count("}"):
         return symbols, imports, [(1, "unbalanced braces")]
-    if text.count("(") != text.count(")"):
+    if code_only.count("(") != code_only.count(")"):
         return symbols, imports, [(1, "unbalanced parentheses")]
     return symbols, imports, []
 
@@ -368,6 +420,25 @@ async def _build_code_intel_index_uncached(
     except Exception:
         return CodeIntelIndex({}, frozenset(), [], False)
     scoped = [p for p in paths if _matches_path(p, scope)]
+    if scope and not scoped:
+        # A very large tree can exhaust the flat-list cap before a deep scope.
+        # Walk that scope directly; this path is only for cache-miss scopes.
+        try:
+            if await context.backend.exists(scope):
+                scoped = [scope]
+                paths = list(dict.fromkeys([*paths, scope]))
+                tree = None
+            else:
+                tree = await context.backend.list_tree(
+                    scope,
+                    max_depth=20,
+                    max_entries=_INDEX_LIST_CAP,
+                )
+        except WorkspaceError:
+            tree = None
+        if tree is not None:
+            scoped = [entry.path for entry in tree.entries if not entry.is_dir]
+            paths = list(dict.fromkeys([*paths, *scoped]))
     sources = [p for p in scoped if _is_source(p)][:_INDEX_FILE_CAP]
     all_paths = frozenset(paths)
     sem = asyncio.Semaphore(16)
@@ -405,13 +476,30 @@ async def _build_code_intel_index_uncached(
             diagnostics.extend((path, line, message) for line, message in error)
         files[path] = FileIntel(path=path, text=text, imports=imports, symbols=symbols)
     modules = _path_modules(files)
+    all_modules = {
+        path: aliases
+        for path in all_paths
+        if (aliases := _module_aliases(path))
+    }
+    local_roots = {
+        alias.split(".", 1)[0]
+        for aliases in all_modules.values()
+        for alias in aliases
+    }
     for path, file in files.items():
         for ref in file.imports:
-            if not ref.module.startswith("."):
-                continue
-            if _resolve_import(ref.module, path, modules, all_paths) is None:
+            if ref.module.startswith("."):
+                resolved = _resolve_import(ref.module, path, modules, all_paths)
+                label = "unresolved relative import"
+            else:
+                root = ref.module.split(".", 1)[0]
+                if root not in local_roots:
+                    continue
+                resolved = _resolve_import(ref.module, path, all_modules, all_paths)
+                label = "unresolved local import"
+            if resolved is None:
                 diagnostics.append(
-                    (path, ref.line, f"unresolved relative import {ref.module}")
+                    (path, ref.line, f"{label} {ref.module}")
                 )
     index = CodeIntelIndex(
         files=files,
@@ -582,7 +670,8 @@ class CodeIntelTool:
         return ToolSchema(
             name="code_intel",
             description=(
-                "代码智能：symbols / references / imports / diagnostics / affected_tests。"
+                "只读代码导航：查声明、文本引用、依赖、静态诊断和受影响测试；"
+                "Python 诊断含未定义名称，TS/JS 为轻量结构诊断，非完整 LSP。"
             ),
             parameters={
                 "type": "object",
@@ -597,8 +686,14 @@ class CodeIntelTool:
                             "affected_tests",
                         ],
                     },
-                    "query": {"type": "string", "description": "符号或引用名称。"},
-                    "path": {"type": "string", "description": "文件相对路径。"},
+                    "query": {
+                        "type": "string",
+                        "description": "符号名称片段；references 按文本边界匹配。",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "限定 symbols/references/diagnostics 的文件或目录。",
+                    },
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},

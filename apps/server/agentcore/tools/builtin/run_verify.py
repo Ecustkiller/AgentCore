@@ -744,9 +744,10 @@ async def _resolve_affected_paths(
             if await _file_exists(backend, candidate):
                 test_paths.append(candidate)
                 break
-    if not test_paths and sources and context is not None:
+    if sources and context is not None:
         # Filename inference misses integration tests reached through imports.
-        # Reuse the code-intel turn cache and walk reverse dependencies.
+        # Reuse the code-intel turn cache and walk reverse dependencies; merge
+        # with direct hits so naming-convention tests do not hide integration tests.
         from agentcore.tools.builtin.code_intel import (
             affected_test_paths,
             build_code_intel_index,

@@ -59,13 +59,20 @@ def _seed(root: Path) -> None:
         "value = 1\n\nfrom .missing import absent\n",
         encoding="utf-8",
     )
+    (root / "src" / "missing_absolute.py").write_text(
+        "from src.not_here import value\n",
+        encoding="utf-8",
+    )
     (root / "tests" / "test_app.py").write_text(
         "from src.app import add\n\ndef test_add():\n    assert add(1, 2) == 3\n",
         encoding="utf-8",
     )
     (root / "broken.py").write_text("def nope(:\n", encoding="utf-8")
     (root / "web.ts").write_text(
-        'import "./lib"\nexport function greet(name: string) { return name; }\n',
+        'import "./lib"\n'
+        '// import "./ghost"\n'
+        '// function phantom() {}\n'
+        'export function greet(name: string) { return "{"; }\n',
         encoding="utf-8",
     )
     (root / "lib.ts").write_text("export const value = 1;\n", encoding="utf-8")
@@ -129,6 +136,10 @@ async def test_code_intel_imports_affected_tests_and_diagnostics(tmp_path: Path)
         {"action": "symbols", "query": "greet"},
         ctx,
     )
+    phantom = await tool.execute(
+        {"action": "symbols", "query": "phantom"},
+        ctx,
+    )
 
     assert "src/app.py:1 -> .util" in imports.output
     assert "tests/test_app.py" in affected.output
@@ -138,9 +149,15 @@ async def test_code_intel_imports_affected_tests_and_diagnostics(tmp_path: Path)
     assert "broken.py" in diagnostics.output
     assert "src/semantic.py:2: undefined name 'missing_name'" in diagnostics.output
     assert "src/unresolved.py:3: unresolved relative import .missing" in diagnostics.output
+    assert "src/missing_absolute.py:1: unresolved local import src.not_here" in (
+        diagnostics.output
+    )
     assert "src/other.py" not in diagnostics.output
     assert "unresolved relative import .worker" not in diagnostics.output
     assert "web.ts" in typescript.output
+    assert "phantom" not in phantom.output
+    assert "ghost" not in diagnostics.output
+    assert "unbalanced braces" not in diagnostics.output
 
 
 async def test_code_intel_index_is_single_flight(tmp_path: Path, monkeypatch):
@@ -187,3 +204,23 @@ async def test_scoped_index_survives_parser_budget_truncation(tmp_path, monkeypa
 
     assert "deep_target" not in global_index.output
     assert "z.py:1: function deep_target" in scoped_index.output
+
+
+async def test_scoped_index_walks_past_flat_list_cap(tmp_path, monkeypatch):
+    from agentcore.tools.builtin import code_intel as module
+
+    (tmp_path / "a.py").write_text("def first():\n    pass\n", encoding="utf-8")
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "z.py").write_text(
+        "def beyond_cap():\n    pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_INDEX_LIST_CAP", 1)
+    tool = CodeIntelTool()
+
+    scoped = await tool.execute(
+        {"action": "symbols", "query": "beyond_cap", "path": "nested"},
+        _ctx(tmp_path),
+    )
+
+    assert "nested/z.py:1: function beyond_cap" in scoped.output

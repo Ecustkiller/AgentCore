@@ -1301,6 +1301,9 @@ async def test_affected_scope_tracks_transitive_imports(tmp_path):
     (tmp_path / "tests" / "test_integration.py").write_text(
         "from src.app import value\n", encoding="utf-8"
     )
+    (tmp_path / "tests" / "test_util.py").write_text(
+        "from src.util import value\n", encoding="utf-8"
+    )
     backend = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
     context = ToolContext.create(
         execution_id="e",
@@ -1320,7 +1323,7 @@ async def test_affected_scope_tracks_transitive_imports(tmp_path):
         changed_paths=["tests/test_integration.py"],
     )
 
-    assert affected == ["tests/test_integration.py"]
+    assert affected == ["tests/test_util.py", "tests/test_integration.py"]
     assert changed_test == ["tests/test_integration.py"]
 
 
