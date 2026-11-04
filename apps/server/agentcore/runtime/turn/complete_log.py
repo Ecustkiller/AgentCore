@@ -53,6 +53,10 @@ def log_chat_turn_complete(
             "assemble_ms": None,
             "ttft_reasoning_ms": None,
             "ttft_content_ms": None,
+            "first_patch_ms": None,
+            "first_green_ms": None,
+            "patch_count": 0,
+            "verify_count": 0,
         }
     )
     generation_ms = None

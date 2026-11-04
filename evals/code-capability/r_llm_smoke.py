@@ -371,6 +371,10 @@ async def _run_one_card(
         "tool_counts": {},
         "duplicate_tool_calls": 0,
         "delegated": False,
+        "first_patch_ms": None,
+        "first_green_ms": None,
+        "patch_count": 0,
+        "verify_count": 0,
         "elapsed_sec": None,
         "checks": None,
         "checks_pass": None,
@@ -519,6 +523,18 @@ async def _run_one_card(
         count - 1 for count in Counter(signatures).values() if count > 1
     )
     row["delegated"] = bool(row["run_plan"] or row["tool_counts"].get("delegate"))
+    turn_complete = next(
+        (
+            (e.get("payload") or {})
+            for e in unwrapped
+            if e.get("type") == "chat.turn_complete"
+        ),
+        {},
+    )
+    row["first_patch_ms"] = turn_complete.get("first_patch_ms")
+    row["first_green_ms"] = turn_complete.get("first_green_ms")
+    row["patch_count"] = int(turn_complete.get("patch_count") or 0)
+    row["verify_count"] = int(turn_complete.get("verify_count") or 0)
     row["event_types"] = [t for e in unwrapped if (t := e.get("type")) and isinstance(t, str)]
     row["error"] = error
     row["turn_started"] = turn_started
@@ -789,6 +805,16 @@ def _efficiency_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if isinstance(counts, dict):
             by_tool.update({str(k): int(v or 0) for k, v in counts.items()})
     duplicates = sum(int(row.get("duplicate_tool_calls") or 0) for row in rows)
+    first_patch = [
+        int(row["first_patch_ms"])
+        for row in rows
+        if isinstance(row.get("first_patch_ms"), (int, float))
+    ]
+    first_green = [
+        int(row["first_green_ms"])
+        for row in rows
+        if isinstance(row.get("first_green_ms"), (int, float))
+    ]
     return {
         "cards": len(rows),
         "delegated_cards": sum(1 for row in rows if row.get("delegated")),
@@ -800,6 +826,14 @@ def _efficiency_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "avg_elapsed_sec": round(sum(elapsed) / len(elapsed), 1) if elapsed else None,
         "max_elapsed_sec": round(max(elapsed), 1) if elapsed else None,
+        "avg_first_patch_ms": round(sum(first_patch) / len(first_patch), 1)
+        if first_patch
+        else None,
+        "avg_first_green_ms": round(sum(first_green) / len(first_green), 1)
+        if first_green
+        else None,
+        "total_patch_count": sum(int(row.get("patch_count") or 0) for row in rows),
+        "total_verify_count": sum(int(row.get("verify_count") or 0) for row in rows),
         "by_tool": dict(by_tool),
     }
 

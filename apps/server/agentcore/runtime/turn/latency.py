@@ -46,6 +46,10 @@ class TurnLatencyProbe:
     assemble_ms: int | None = None
     ttft_reasoning_ms: int | None = None
     ttft_content_ms: int | None = None
+    first_patch_ms: int | None = None
+    first_green_ms: int | None = None
+    patch_count: int = 0
+    verify_count: int = 0
     generation_ms: int = 0
     _captain_stream_armed: bool = False
     _captain_first_stream_done: bool = False
@@ -98,18 +102,34 @@ class TurnLatencyProbe:
         if self._recording_this_stream and self.ttft_content_ms is None:
             self.ttft_content_ms = self.elapsed_ms()
 
+    def mark_patch(self) -> None:
+        """Record one successful source patch; first timestamp wins."""
+        self.patch_count += 1
+        if self.first_patch_ms is None:
+            self.first_patch_ms = self.elapsed_ms()
+
+    def mark_verify(self, *, success: bool) -> None:
+        """Record one completed verification and the first green result."""
+        self.verify_count += 1
+        if success and self.first_green_ms is None:
+            self.first_green_ms = self.elapsed_ms()
+
     def add_generation_ms(self, ms: int) -> None:
         """Accumulate one LLM stream's decode window (captain and workers)."""
         if ms > 0:
             self.generation_ms += ms
 
     def as_log_fields(self) -> dict[str, int | None]:
-        """Always emit the four keys; absent paths are ``None`` (not ``0``)."""
+        """Always emit latency/efficiency keys; absent timings are ``None``."""
         return {
             "prepare_ms": self.prepare_ms,
             "assemble_ms": self.assemble_ms,
             "ttft_reasoning_ms": self.ttft_reasoning_ms,
             "ttft_content_ms": self.ttft_content_ms,
+            "first_patch_ms": self.first_patch_ms,
+            "first_green_ms": self.first_green_ms,
+            "patch_count": self.patch_count,
+            "verify_count": self.verify_count,
         }
 
 

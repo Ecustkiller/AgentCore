@@ -132,6 +132,10 @@ _PHASE0_FIELDS = (
     "assemble_ms",
     "ttft_reasoning_ms",
     "ttft_content_ms",
+    "first_patch_ms",
+    "first_green_ms",
+    "patch_count",
+    "verify_count",
 )
 
 _DECISION_KEEP_KEYS = (

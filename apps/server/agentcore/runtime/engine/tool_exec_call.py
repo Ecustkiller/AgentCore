@@ -797,6 +797,20 @@ async def run_one_tool(
                 backend=coalesce_backend,
             )
     result.tool_call_id = tc.id
+    from agentcore.runtime.turn.latency import get_turn_latency
+
+    latency = get_turn_latency()
+    if latency is not None:
+        if (
+            result.success
+            and name in {"write", "edit"}
+            and result.file_products
+            and not (result.metadata or {}).get("already_applied")
+        ):
+            latency.mark_patch()
+        check = (result.metadata or {}).get("check")
+        if name == "run" and check in {"test", "typecheck"}:
+            latency.mark_verify(success=result.success)
     if _invalidates_tool_cache(name, result):
         # A failed command may still have written files before exiting non-zero.
         context.invalidate_tool_cache()

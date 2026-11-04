@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -1725,6 +1726,74 @@ def test_tool_cache_invalidation_scopes_verify_checks():
         error="missing",
     )
     assert _invalidates_tool_cache("file_delete", failed_delete) is True
+
+
+async def test_turn_latency_marks_patch_and_verify_from_tool_results():
+    from agentcore.runtime.turn.latency import bind_turn_latency, reset_turn_latency
+    from agentcore.tools.file_products import file_product
+
+    class _MetricTool:
+        def __init__(self, name: str, result: ToolResult) -> None:
+            self._name = name
+            self._result = result
+
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name=self._name,
+                description="stub",
+                parameters={"type": "object", "properties": {}},
+                face=ToolFace.FILE,
+                approval=ToolApproval.NEVER,
+            )
+
+        async def execute(
+            self, arguments: dict[str, Any], context: ToolContext
+        ) -> ToolResult:
+            del arguments, context
+            return self._result
+
+    write = _MetricTool(
+        "write",
+        ToolResult(
+            tool_call_id="",
+            success=True,
+            output="written",
+            file_products=[file_product("src/app.py")],
+        ),
+    )
+    verify = _MetricTool(
+        "run",
+        ToolResult(
+            tool_call_id="",
+            success=True,
+            output="1 passed",
+            metadata={"check": "test"},
+        ),
+    )
+    reg = ToolRegistry()
+    reg.register(write)
+    reg.register(verify)
+    probe, token = bind_turn_latency(time.monotonic() - 0.01)
+    try:
+        await execute_tools(
+            [
+                _call("w1", "write", '{"file_path": "src/app.py"}'),
+                _call("v1", "run", '{"command": "pytest"}'),
+            ],
+            reg,
+            _ctx(),
+            EventSink(),
+            approval_gate=None,
+            run_id="r1",
+        )
+    finally:
+        reset_turn_latency(token)
+
+    assert probe.patch_count == 1
+    assert probe.verify_count == 1
+    assert probe.first_patch_ms is not None
+    assert probe.first_green_ms is not None
 
 
 async def test_ceo_str_replace_miss_still_not_assembled():

@@ -23,7 +23,7 @@ from agentcore.runtime.turn.latency import (
 from tests.conftest import LogSpy
 
 
-def test_probe_as_log_fields_always_has_four_keys_null_not_zero():
+def test_probe_as_log_fields_always_has_latency_and_efficiency_keys():
     probe = TurnLatencyProbe(anchor_mono=time.monotonic())
     fields = probe.as_log_fields()
     assert set(fields) == {
@@ -31,8 +31,32 @@ def test_probe_as_log_fields_always_has_four_keys_null_not_zero():
         "assemble_ms",
         "ttft_reasoning_ms",
         "ttft_content_ms",
+        "first_patch_ms",
+        "first_green_ms",
+        "patch_count",
+        "verify_count",
     }
-    assert all(v is None for v in fields.values())
+    assert fields["first_patch_ms"] is None
+    assert fields["first_green_ms"] is None
+    assert fields["patch_count"] == 0
+    assert fields["verify_count"] == 0
+
+
+def test_patch_and_verify_markers_first_timestamp_once():
+    probe = TurnLatencyProbe(anchor_mono=time.monotonic() - 0.05)
+    probe.mark_patch()
+    first_patch = probe.first_patch_ms
+    probe.mark_patch()
+    assert probe.patch_count == 2
+    assert probe.first_patch_ms == first_patch
+
+    probe.mark_verify(success=False)
+    assert probe.first_green_ms is None
+    probe.mark_verify(success=True)
+    first_green = probe.first_green_ms
+    probe.mark_verify(success=True)
+    assert probe.verify_count == 3
+    assert probe.first_green_ms == first_green
 
 
 def test_prepare_assemble_are_wall_clock_not_fake_zero():
@@ -350,5 +374,9 @@ def test_log_chat_turn_complete_emits_phase0_keys(monkeypatch):
     assert kw["assemble_ms"] is None
     assert kw["ttft_reasoning_ms"] is not None
     assert kw["ttft_content_ms"] is None
+    assert kw["first_patch_ms"] is None
+    assert kw["first_green_ms"] is None
+    assert kw["patch_count"] == 0
+    assert kw["verify_count"] == 0
     assert kw["generation_ms"] is None
     assert kw["reply_preview"]
