@@ -106,6 +106,24 @@ async def test_code_intel_symbols_and_references(tmp_path: Path):
     assert "src/util.py:2: method double" in methods.output
 
 
+async def test_references_do_not_depend_on_parser_budget(tmp_path, monkeypatch):
+    from agentcore.tools.builtin import code_intel as module
+
+    (tmp_path / "a.py").write_text("def first():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def second():\n    return 2\n", encoding="utf-8")
+    (tmp_path / "z.py").write_text("from a import first\nfirst()\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_INDEX_FILE_CAP", 1)
+
+    result = await CodeIntelTool().execute(
+        {"action": "references", "query": "first"},
+        _ctx(tmp_path),
+    )
+
+    assert "a.py:1: def first" in result.output
+    assert "z.py:1: from a import first" in result.output
+    assert result.metadata["source"] == "grep"
+
+
 async def test_code_intel_imports_affected_tests_and_diagnostics(tmp_path: Path):
     _seed(tmp_path)
     tool = CodeIntelTool()
@@ -202,8 +220,29 @@ async def test_scoped_index_survives_parser_budget_truncation(tmp_path, monkeypa
         _ctx(tmp_path),
     )
 
-    assert "deep_target" not in global_index.output
+    assert "z.py:1: function deep_target" in global_index.output
     assert "z.py:1: function deep_target" in scoped_index.output
+
+
+async def test_truncated_index_still_grep_completes_partial_query(
+    tmp_path, monkeypatch
+):
+    from agentcore.tools.builtin import code_intel as module
+
+    (tmp_path / "a.py").write_text("def first_helper():\n    pass\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def second():\n    pass\n", encoding="utf-8")
+    (tmp_path / "z.py").write_text("def first_deep():\n    pass\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_INDEX_FILE_CAP", 2)
+
+    result = await CodeIntelTool().execute(
+        {"action": "symbols", "query": "first"},
+        _ctx(tmp_path),
+    )
+
+    assert "a.py:1: function first_helper" in result.output
+    assert "z.py:1: function first_deep" in result.output
+    assert result.output.index("a.py:1") < result.output.index("z.py:1")
+    assert result.output.rindex("索引达到") > result.output.index("z.py:1")
 
 
 async def test_scoped_index_walks_past_flat_list_cap(tmp_path, monkeypatch):

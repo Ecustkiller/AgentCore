@@ -332,7 +332,10 @@ async def test_restore_paused_turn_upserts_frame_without_notify() -> None:
         ) as repo_cls, patch(
             "agentcore.runtime.suspension.persistence._notify_pause",
             AsyncMock(),
-        ) as notify:
+        ) as notify, patch(
+            "agentcore.runtime.suspension.persistence._set_message_pause_latch",
+            AsyncMock(),
+        ) as pause_latch:
             repo_cls.return_value.upsert = AsyncMock()
             await restore_paused_turn(suspension)
 
@@ -344,6 +347,11 @@ async def test_restore_paused_turn_upserts_frame_without_notify() -> None:
         trace_id="trace-1",
     )
     notify.assert_not_awaited()
+    pause_latch.assert_awaited_once_with(
+        message_id="msg-1",
+        conversation_id="conv-1",
+        paused=True,
+    )
 
 
 @pytest.mark.asyncio

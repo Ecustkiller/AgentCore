@@ -19,7 +19,7 @@ from agentcore.tools.registration import (
     ToolRegistration,
     ToolSurface,
 )
-from agentcore.workspace.protocol import WorkspaceError
+from agentcore.workspace.protocol import GrepQuery, WorkspaceError
 
 CodeAction = Literal[
     "symbols",
@@ -35,6 +35,7 @@ _INDEX_FILE_CAP = 1200
 _INDEX_CHAR_CAP = 300_000
 _INDEX_TOTAL_CHAR_CAP = 16_000_000
 _OUTPUT_LIMIT = 16_000
+_INDEX_TRUNCATED_NOTE = "… 索引达到文件或字符安全预算"
 _SYMBOL_RE = re.compile(
     r"(?:^|\n)\s*(?:export\s+)?(?:default\s+)?"
     r"(?:async\s+)?(?:function|class|interface|type|enum|const|let|var)\s+"
@@ -439,7 +440,9 @@ async def _build_code_intel_index_uncached(
         if tree is not None:
             scoped = [entry.path for entry in tree.entries if not entry.is_dir]
             paths = list(dict.fromkeys([*paths, *scoped]))
-    sources = [p for p in scoped if _is_source(p)][:_INDEX_FILE_CAP]
+    source_candidates = [p for p in scoped if _is_source(p)]
+    source_truncated = len(source_candidates) > _INDEX_FILE_CAP
+    sources = source_candidates[:_INDEX_FILE_CAP]
     all_paths = frozenset(paths)
     sem = asyncio.Semaphore(16)
 
@@ -508,7 +511,7 @@ async def _build_code_intel_index_uncached(
             set(diagnostics),
             key=lambda item: (item[0].lower(), item[1], item[2]),
         ),
-        truncated=bool(truncated or content_truncated),
+        truncated=bool(truncated or source_truncated or content_truncated),
     )
     context.cache_tool_result(
         kind="code_intel_index",
@@ -537,6 +540,81 @@ def _symbol_lines(index: CodeIntelIndex, query: str, path: str, limit: int) -> l
     if len(symbols) > limit:
         lines.append(f"… 另有 {len(symbols) - limit} 个符号")
     return lines
+
+
+def _symbol_kind(line: str) -> str:
+    stripped = line.strip()
+    if "class " in stripped:
+        return "class"
+    if "interface " in stripped or "enum " in stripped or " type " in stripped:
+        return "type"
+    if "def " in stripped or "function " in stripped:
+        return "function"
+    return "symbol"
+
+
+async def _grep_symbol_fallback(
+    context: ToolContext,
+    *,
+    query: str,
+    path: str,
+    limit: int,
+) -> list[str]:
+    needle = re.escape(query)
+    pattern = (
+        rf"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+        rf"(?:function|class|interface|type|enum|const|let|var)\s+"
+        rf"{needle}[A-Za-z0-9_$]*\b"
+        rf"|^\s*(?:async\s+)?(?:def|class)\s+{needle}[A-Za-z0-9_]*\b"
+    )
+    try:
+        result = await context.backend.grep(
+            GrepQuery(
+                pattern=pattern,
+                directory=path or ".",
+                max_results=min(limit * 4, 200),
+            )
+        )
+    except WorkspaceError:
+        return []
+    lines: list[str] = []
+    for hit in result.hits:
+        if not _is_source(hit.path):
+            continue
+        symbol = _SYMBOL_RE.search("\n" + hit.text)
+        if symbol is None:
+            match = re.search(r"\b(?:def|class)\s+([A-Za-z_]\w*)", hit.text)
+            name = match.group(1) if match else query
+        else:
+            name = symbol.group("name")
+        lines.append(f"{hit.path}:{hit.line_no}: {_symbol_kind(hit.text)} {name}")
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+async def _grep_references(
+    context: ToolContext,
+    *,
+    query: str,
+    path: str,
+    limit: int,
+) -> tuple[list[str], int] | None:
+    try:
+        result = await context.backend.grep(
+            GrepQuery(
+                pattern=rf"\b{re.escape(query)}\b",
+                directory=path or ".",
+                max_results=limit,
+            )
+        )
+    except WorkspaceError:
+        return None
+    lines = [
+        f"{hit.path}:{hit.line_no}: {hit.text.strip()[:180]}"
+        for hit in result.hits
+    ]
+    return lines or [f"未找到 {query} 的引用"], len(result.hits)
 
 
 def _reference_lines(
@@ -649,7 +727,7 @@ def _render(action: CodeAction, index: CodeIntelIndex, args: dict[str, Any]) -> 
         if not lines:
             lines = ["未发现可解析的语法/结构诊断"]
     if index.truncated:
-        lines.append("… 索引达到文件或字符安全预算")
+        lines.append(_INDEX_TRUNCATED_NOTE)
     return lines
 
 
@@ -726,13 +804,66 @@ class CodeIntelTool:
                 duration_ms=0,
                 contract_failure=True,
             )
+        limit = max(1, min(int(arguments.get("limit") or 50), 200))
+        query = str(arguments.get("query") or "").strip()
         path = str(arguments.get("path") or "").strip().replace("\\", "/")
+        if action == "references":
+            if not query:
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error="references 需要 query",
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    contract_failure=True,
+                )
+            grep_result = await _grep_references(
+                context,
+                query=query,
+                path=path,
+                limit=limit,
+            )
+            if grep_result is not None:
+                lines, match_count = grep_result
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output="\n".join(lines),
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    output_limit=_OUTPUT_LIMIT,
+                    metadata={
+                        "action": action,
+                        "match_count": match_count,
+                        "source": "grep",
+                    },
+                )
         scope = path if action in {"symbols", "references", "diagnostics"} else ""
         index = await build_code_intel_index(context, scope=scope)
         render_args = dict(arguments)
         if action == "affected_tests" and not render_args.get("paths"):
             render_args["paths"] = list(context.landed_artifact_kinds)
         lines = _render(cast(CodeAction, action), index, render_args)
+        if action == "symbols" and render_args.get("query"):
+            show_budget_note = bool(lines and lines[-1] == _INDEX_TRUNCATED_NOTE)
+            if show_budget_note:
+                lines = lines[:-1]
+            query = str(render_args["query"]).strip()
+            has_match = any(
+                query.lower() in symbol.name.lower()
+                and _matches_path(symbol.path, path)
+                for symbol in index.symbols
+            )
+            if index.truncated or not has_match:
+                fallback = await _grep_symbol_fallback(
+                    context,
+                    query=query,
+                    path=path,
+                    limit=max(1, min(int(arguments.get("limit") or 50), 200)),
+                )
+                if fallback:
+                    lines = list(dict.fromkeys([*lines, *fallback]))
+            if show_budget_note:
+                lines.append(_INDEX_TRUNCATED_NOTE)
         output = "\n".join(lines) if lines else "没有结果"
         return ToolResult(
             tool_call_id="",
