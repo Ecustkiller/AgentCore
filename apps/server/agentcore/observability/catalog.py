@@ -1575,6 +1575,43 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='handoff.reclaim_after_apply_failed'),
     EventSpec(name='handoff.snapshot_created'),
     EventSpec(
+        name='hook.denied',
+        description=(
+            'opt-in 生命周期钩子：pre_tool_use 命令明确 deny（stdout decision=deny 或 exit 2），'
+            '本次工具调用被拒且 policy_failure=True；allow 一律忽略，不绕过审批闸'
+        ),
+        fields={
+            'hook_event': FieldType('str'),
+            'reason': FieldType('str'),
+            'tool': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='hook.failed',
+        description=(
+            'opt-in 生命周期钩子：起子进程 / IO / 超时 / 排任务失败，一律 fail-open 记 warning；'
+            '钩子失败不等于工具调用失败'
+        ),
+        fields={
+            'error': FieldType('str'),
+            'hook_event': FieldType('str'),
+            'reason': FieldType('str'),
+            'tool': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='hook.invoked',
+        description=(
+            'opt-in 生命周期钩子：一次 pre/post 命令执行完成。decision=allow 仅代表钩子没拒，'
+            '不代表工具已获准执行；post 固定 observe'
+        ),
+        fields={
+            'decision': FieldType('str'),
+            'hook_event': FieldType('str'),
+            'tool': FieldType('str'),
+        },
+    ),
+    EventSpec(
         name='http.db_pool_exhausted',
         description='主库连接池耗尽（快失败 503，非 PG 宕机）',
         fields={

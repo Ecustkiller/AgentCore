@@ -16,6 +16,7 @@ from agentcore.config.paths import ENV_FILE  # AGENTCORE_ENV → see paths.resol
 from agentcore.config.persistence import PersistenceSettings
 from agentcore.config.platform import PlatformSettings
 from agentcore.config.quota import QuotaSettings
+from agentcore.config.runtime_hooks import RuntimeHooksSettings
 from agentcore.config.search import SearchSettings
 from agentcore.config.server import ServerSettings
 from agentcore.config.workspace import WorkspaceSettings
@@ -37,6 +38,7 @@ class Settings(
     KnowledgeSettings,
     LabScheduleSettings,
     LlmCandidateChainSettings,
+    RuntimeHooksSettings,
     DemoTapeSettings,
     BaseSettings,
 ):

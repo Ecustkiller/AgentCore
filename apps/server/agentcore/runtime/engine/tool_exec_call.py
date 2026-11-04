@@ -217,6 +217,57 @@ async def run_one_tool(
             )
         )
 
+    # Opt-in lifecycle hooks (#7). 命令只来自服务端 env；默认关时这里只是一次
+    # bool 判断 + 一次空 spec 解析，不起子进程、不改任何返回形状。
+    # 只能收窄：拿到 deny 才拒，拿到 allow 一律忽略，后面的审批闸照常跑。
+    from agentcore.runtime.hooks import run_pre_tool_hooks, tool_hook_payload
+
+    pre_hook = await run_pre_tool_hooks(
+        tool_name=name or raw_name,
+        payload=tool_hook_payload(
+            event="pre_tool_use",
+            tool_name=name or raw_name,
+            args=args,
+            tc_id=tc.id,
+            context=context,
+        ),
+    )
+    if pre_hook is not None:
+        deny_reason = pre_hook.reason
+        sink.emit(
+            tool_use_end(
+                tc.id,
+                name or raw_name,
+                success=False,
+                output=deny_reason,
+                failure=tool_failure_fields(code="hook_denied"),
+                run_id=event_run_id,
+            )
+        )
+        logger.info(
+            "tool.execute_end",
+            tool=name or raw_name,
+            status="hook_denied",
+            duration_ms=0,
+            reason=deny_reason,
+        )
+        return (
+            _failed_tool_message(tc.id, deny_reason),
+            None,
+            ToolAttempt(
+                fingerprint,
+                name or raw_name,
+                success=False,
+                policy_failure=True,
+                error_summary=deny_reason,
+                meta={
+                    "error_class": ERROR_CLASS_PERMISSION,
+                    "permission_kind": "hook_denied",
+                },
+            ),
+            [],
+        )
+
     # Legacy write-args projection bait: reject before allowlist/not_found.
     landed_name_err = landed_status_name_rejection(name or raw_name)
     if landed_name_err:
@@ -803,6 +854,22 @@ async def run_one_tool(
         end_fields["timeout_layer"] = meta["timeout_layer"]
     end_fields.update(_shell_observe_log_fields(name, args))
     logger.info("tool.execute_end", **end_fields)
+
+    # Opt-in post hook：只观测、fire-and-forget，拿不到也改不了 ToolResult，
+    # 更不能拖住工具结果回给模型。默认关 / 无匹配钩子时零开销。
+    from agentcore.runtime.hooks import schedule_post_tool_hooks, tool_hook_payload
+
+    schedule_post_tool_hooks(
+        tool_name=name or raw_name,
+        payload=tool_hook_payload(
+            event="post_tool_use",
+            tool_name=name or raw_name,
+            args=args,
+            tc_id=tc.id,
+            context=context,
+            success=bool(result.success),
+        ),
+    )
 
     citations = result.citations if (result.success and result.citations) else []
     # 落盘产物自报 + 执行层失败：两条机器尾注都只进 transcript（SSE 上文仍是无 marker 的
