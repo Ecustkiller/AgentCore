@@ -6,6 +6,11 @@ import {
 import { PageHeader } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import { hasLocalEngine } from "@/lib/capabilities";
+import {
+  LABS_HUMAN_DOCS_TABLES,
+  setLabsFlag,
+  useHumanDocsTablesEnabled,
+} from "@/lib/labsFlags";
 import { type Theme, resolveDark } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { clearSidecarHealth } from "@/services/sidecarHealth";
@@ -72,8 +77,37 @@ export function GeneralSettings() {
         </SettingsSection>
 
         {showAdvanced ? <AdvancedSection /> : null}
+        <LabsSection />
       </SettingsStack>
     </div>
+  );
+}
+
+/**
+ * opt-in 实验功能（最后修订 2026-11-04）。
+ *
+ * 上游 `98ea13bf` 明确卸掉「人侧文档/表格编辑器」，默认必须跟随上游关闭；
+ * 这里只给有需要的人一个可逆开关，不覆盖默认行为。见 lib/labsFlags.ts。
+ */
+function LabsSection() {
+  const enabled = useHumanDocsTablesEnabled();
+  return (
+    <SettingsSection title="实验功能" divider contentClassName="space-y-2">
+      <SettingRow
+        align="start"
+        label="人侧文档 / 表格编辑器"
+        description="上游已下架此功能，默认关闭。开启后侧栏出现「文档」「表格」，可编辑与分享；关闭时相关地址自动回到「文件」。切换即时生效。"
+        control={
+          <Switch
+            checked={enabled}
+            onCheckedChange={(next: boolean) =>
+              setLabsFlag(LABS_HUMAN_DOCS_TABLES, next)
+            }
+            label="人侧文档 / 表格编辑器"
+          />
+        }
+      />
+    </SettingsSection>
   );
 }
 

@@ -1,9 +1,12 @@
 import { ConversationRoute } from "@/components/chat/ConversationRoute";
 import { AppShell } from "@/components/layout/AppShell";
 import { RouteError } from "@/components/layout/RouteError";
+import { HumanDocsTablesGate } from "@/lib/labsGate";
 import { NarrowBlockedPage } from "@/lib/narrowLayout";
 import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ConversationsPreviewPage } from "@/pages/ConversationsPreviewPage";
+import { DocEditorPage } from "@/pages/DocEditorPage";
+import { DocsPage } from "@/pages/DocsPage";
 import { FilesPage } from "@/pages/FilesPage";
 import { FilesPreviewPage } from "@/pages/FilesPreviewPage";
 import { FloatWindowPage } from "@/pages/FloatWindowPage";
@@ -11,6 +14,9 @@ import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { OnboardingPreviewPage } from "@/pages/OnboardingPreviewPage";
 import { PreviewPage } from "@/pages/PreviewPage";
+import { TableEditorPage } from "@/pages/TableEditorPage";
+import { TablesPage } from "@/pages/TablesPage";
+import { TablesPreviewPage } from "@/pages/TablesPreviewPage";
 import { TurnDetailPage } from "@/pages/TurnDetailPage";
 import { LegalSettingsPage } from "@/pages/legal/LegalSettingsPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
@@ -69,6 +75,39 @@ export const router = createHashRouter([
         element: <ConversationsPage />,
       },
       { path: "files", element: <FilesPage /> },
+      // opt-in：人侧文档 / 表格编辑器。默认关闭时这些路径收向 /files（跟随上游）。
+      {
+        path: "docs",
+        element: (
+          <HumanDocsTablesGate>
+            <DocsPage />
+          </HumanDocsTablesGate>
+        ),
+      },
+      {
+        path: "docs/:docId",
+        element: (
+          <HumanDocsTablesGate>
+            <DocEditorPage />
+          </HumanDocsTablesGate>
+        ),
+      },
+      {
+        path: "tables",
+        element: (
+          <HumanDocsTablesGate>
+            <TablesPage />
+          </HumanDocsTablesGate>
+        ),
+      },
+      {
+        path: "tables/:tableId",
+        element: (
+          <HumanDocsTablesGate>
+            <TableEditorPage />
+          </HumanDocsTablesGate>
+        ),
+      },
       {
         path: "whiteboard",
         element: <Navigate to={APP_PATHS.toolbox.mine.skills} replace />,
@@ -206,6 +245,14 @@ export const router = createHashRouter([
       { path: "preview/conversations", element: <ConversationsPreviewPage /> },
       // Preview 文件页 AgentCore 扁平条目轨（常驻用量 · 徽章 · description）.
       { path: "preview/files", element: <FilesPreviewPage /> },
+      {
+        path: "preview/tables",
+        element: (
+          <HumanDocsTablesGate>
+            <TablesPreviewPage />
+          </HumanDocsTablesGate>
+        ),
+      },
       {
         path: "more",
         element: <MorePage />,

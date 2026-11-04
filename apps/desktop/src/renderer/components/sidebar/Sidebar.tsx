@@ -7,22 +7,28 @@ import {
 } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { isWebClient } from "@/lib/capabilities";
+import { useHumanDocsTablesEnabled } from "@/lib/labsFlags";
 import { startNewConversation } from "@/lib/newConversation";
 import { RailHotkeySlotsProvider } from "@/lib/railHotkeys";
 import { cn } from "@/lib/utils";
+import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { useUnreadTotal } from "@/stores/messaging";
 import { SIDEBAR_COLLAPSED_WIDTH, useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import {
+  FileText,
   Files,
+  type LucideIcon,
   Mail,
   MessageSquare,
   PanelLeft,
   PanelLeftClose,
+  Table2,
   Wrench,
   X,
 } from "lucide-react";
 import type { ReactNode, PointerEvent as ReactPointerEvent } from "react";
+import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { PinnedConversations } from "./PinnedConversations";
 import {
@@ -32,12 +38,20 @@ import {
 import { UserMenu } from "./UserMenu";
 import { WorkspaceGroups } from "./WorkspaceGroups";
 
-const NAV_ITEMS = [
+type NavItem = { icon: LucideIcon; label: string; route: string };
+
+const NAV_ITEMS: NavItem[] = [
   { icon: MessageSquare, label: "新对话", route: "/" },
-  { icon: Files, label: "文件", route: "/files" },
+  { icon: Files, label: "文件", route: APP_PATHS.files },
   { icon: Mail, label: "消息", route: "/messages" },
   { icon: Wrench, label: "工具箱", route: "/toolbox" },
-] as const;
+];
+
+/** opt-in 人侧文档/表格入口。上游默认下架，故只在开关打开时追加。 */
+const DOCS_TABLES_NAV: NavItem[] = [
+  { icon: FileText, label: "文档", route: APP_PATHS.docs },
+  { icon: Table2, label: "表格", route: APP_PATHS.tables },
+];
 
 /** 折叠侧栏图标按钮：右侧 tip，与 UserMenu 习惯一致。 */
 function CollapsedNavTip({
@@ -77,9 +91,13 @@ export function Sidebar({
   // 浏览器版没有桌面顶栏（AppShell 已隐藏），品牌 / 折叠按钮改由侧栏顶部承载。
   // 搜索假入口两端都在侧栏（桌面顶栏不再放）。桌面 & 离线预览仍用顶栏放品牌/折叠。
   const webClient = isWebClient();
-  const navItems = overlay
-    ? NAV_ITEMS.filter((item) => item.route !== "/toolbox")
-    : NAV_ITEMS;
+  const docsTablesEnabled = useHumanDocsTablesEnabled();
+  const navItems = useMemo(() => {
+    const base: NavItem[] = overlay
+      ? NAV_ITEMS.filter((item) => item.route !== "/toolbox")
+      : [...NAV_ITEMS];
+    return docsTablesEnabled ? [...base, ...DOCS_TABLES_NAV] : base;
+  }, [overlay, docsTablesEnabled]);
 
   // 顶栏区段跟路由；对话行选中态也跟路由（`conversationLocationId`），避免非对话页
   // 与上场会话双高亮。`/` 兼「新建」与对话区段指示：仅空白草稿与「全部对话」页高亮，
