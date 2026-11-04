@@ -716,15 +716,21 @@ def _infer_test_candidates(source_path: str) -> list[str]:
     return []
 
 
-async def _resolve_affected_paths(backend: WorkspaceBackend) -> list[str]:
+async def _resolve_affected_paths(
+    backend: WorkspaceBackend,
+    *,
+    changed_paths: list[str] | None = None,
+) -> list[str]:
     index = getattr(backend, "index_files", None)
-    if index is None:
-        return []
-
-    try:
-        paths, _ = await index(cap=50, order="recent")
-    except Exception:
-        return []
+    paths: list[str] = list(changed_paths or [])
+    if changed_paths is None:
+        if index is None:
+            return []
+        try:
+            recent, _ = await index(cap=50, order="recent")
+        except Exception:
+            return []
+        paths = list(recent)
 
     sources = [p for p in paths if _is_source_file(p) and not _is_test_file(p)]
     test_paths: list[str] = []
@@ -968,6 +974,7 @@ async def _resolve_test_argv(
     backend: WorkspaceBackend,
     profile: WorkspaceProfile,
     arguments: dict[str, Any],
+    changed_paths: list[str] | None = None,
 ) -> tuple[list[str] | None, Framework | None, str | None]:
     scope: Scope = arguments.get("scope", "affected")  # type: ignore[assignment]
     test_file = (arguments.get("test_file") or "").strip()
@@ -1005,7 +1012,10 @@ async def _resolve_test_argv(
     if scope == "file":
         argv = _extend_test_targets(argv, [test_file])
     elif scope == "affected":
-        affected = await _resolve_affected_paths(backend)
+        affected = await _resolve_affected_paths(
+            backend,
+            changed_paths=changed_paths,
+        )
         if affected:
             argv = _extend_test_targets(argv, affected)
         elif framework == "pytest":
@@ -1103,6 +1113,7 @@ async def execute_verify(arguments: dict[str, Any], context: ToolContext) -> Too
             backend=context.backend,
             profile=profile,
             arguments=arguments,
+            changed_paths=list(context.landed_artifact_kinds) or None,
         )
 
     if err:

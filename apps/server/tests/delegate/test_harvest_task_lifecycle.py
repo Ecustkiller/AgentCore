@@ -86,6 +86,31 @@ async def test_run_settle_logs_cancelled(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
+async def test_session_close_cancels_pending_settle_tasks():
+    session = _detached_session("exec-settle-close")
+    hang = asyncio.Event()
+
+    async def _block(*_a: object, **_k: object) -> None:
+        await hang.wait()
+
+    with patch(
+        "agentcore.runtime.coordination.harvest.settle_detached_execution",
+        _block,
+    ):
+        session_mod._arm_settle_now(session)
+        task = next(iter(session._settle_tasks))
+        await asyncio.sleep(0)
+        assert not task.done()
+
+        session.close()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    await asyncio.sleep(0)
+    assert session._settle_tasks == set()
+
+
+@pytest.mark.asyncio
 async def test_run_settle_logs_cancelled_after_start(
     monkeypatch: pytest.MonkeyPatch,
 ):

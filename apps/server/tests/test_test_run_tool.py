@@ -1260,6 +1260,32 @@ def test_verify_coalesce_fingerprint_stable_on_resolved_argv():
     assert a != c
 
 
+async def test_affected_scope_prefers_turn_changed_sources(tmp_path):
+    from agentcore.tools.builtin.run_verify import _resolve_affected_paths
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.server import ServerWorkspace
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "src" / "other.py").write_text("y = 2\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_app.py").write_text("", encoding="utf-8")
+    (tmp_path / "tests" / "test_other.py").write_text("", encoding="utf-8")
+    backend = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+
+    affected = await _resolve_affected_paths(
+        backend,
+        changed_paths=["src/app.py"],
+    )
+    no_code = await _resolve_affected_paths(
+        backend,
+        changed_paths=["README.md"],
+    )
+
+    assert affected == ["tests/test_app.py"]
+    assert no_code == []
+
+
 async def test_single_agent_verify_reuses_turn_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):

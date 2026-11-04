@@ -178,6 +178,11 @@ class SessionQueueMixin:
         was_active = self.active
         self.active = False
         self.cancel_all_timeouts()
+        current = asyncio.current_task()
+        for task in tuple(self._settle_tasks):
+            if task is current or task.done():
+                continue
+            task.cancel()
         # 未消化插话升格对话 FIFO（或终局已答 → addressed）。仅从 active→inactive
         # 触发一次，避免重复 close 双入队。
         if was_active and self.pending_interjections:
