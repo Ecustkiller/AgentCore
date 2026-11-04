@@ -252,6 +252,10 @@ class SidecarClient:
                 return  # noisy
             print(f"  evt {label}", flush=True)
 
+    def structured_events(self) -> list[dict[str, Any]]:
+        """Structured log lines emitted by the sidecar (not JSON-RPC events)."""
+        return [line for line in self._lines if isinstance(line.get("event"), str)]
+
     async def _read_loop(self) -> None:
         """Desktop-homologous chunked framing — do **not** use ``readline()``.
 

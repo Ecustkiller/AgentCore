@@ -525,9 +525,10 @@ async def _run_one_card(
     row["delegated"] = bool(row["run_plan"] or row["tool_counts"].get("delegate"))
     turn_complete = next(
         (
-            (e.get("payload") or {})
-            for e in unwrapped
-            if e.get("type") == "chat.turn_complete"
+            event
+            for event in sc.structured_events()
+            if event.get("event") == "chat.turn_complete"
+            and event.get("trace_id") == trace_id
         ),
         {},
     )
