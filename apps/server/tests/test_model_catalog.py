@@ -28,6 +28,20 @@ pytestmark = pytest.mark.anyio
 # --- helpers -----------------------------------------------------------------
 
 
+class _NoHealthSession:
+    """A session with no probe verdicts.
+
+    ``resolve_model_catalog`` reads ``llm_model_health`` (see
+    ``llm/model_health.py``); these tests drive the catalog without a database, so
+    they hand it a session whose only job is to answer "no verdicts recorded".
+    """
+
+    async def execute(self, *_args, **_kwargs):
+        return SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [])
+        )
+
+
 def _prov(
     pid: str,
     *,
@@ -155,7 +169,7 @@ async def test_catalog_with_key_mixes_byok_and_platform(monkeypatch):
         selection=ModelSelection(model="deepseek-v4-flash", origin="byok", provider_id="prov-1"),
         discovered={"prov-1": ["deepseek-v4-flash", "some-endpoint-model"]},
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     assert cat.byok_configured is True
     assert cat.current.id == "deepseek-v4-flash"
     assert cat.current.origin == "byok"
@@ -188,7 +202,7 @@ async def test_catalog_discovery_failed_keeps_vendor_presets(monkeypatch):
         ),
         discovered={"prov-ds": None},
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     byok_ids = {m.id for m in cat.models if m.origin == "byok" and m.provider_id == "prov-ds"}
     assert byok_ids == {"deepseek-flash"}
 
@@ -218,7 +232,7 @@ async def test_catalog_discovery_unions_with_vendor_presets(monkeypatch):
             ]
         },
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     byok_ids = {m.id for m in cat.models if m.origin == "byok" and m.provider_id == "prov-ds"}
     assert "deepseek-flash" in byok_ids
     assert "endpoint-only-model" in byok_ids
@@ -244,7 +258,7 @@ async def test_catalog_custom_base_url_has_no_presets(monkeypatch):
         selection=ModelSelection(model="my-default", origin="byok", provider_id="prov-custom"),
         discovered={"prov-custom": None},
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     byok_ids = [m.id for m in cat.models if m.origin == "byok"]
     assert byok_ids == []
 
@@ -262,7 +276,7 @@ async def test_catalog_same_model_id_under_two_providers(monkeypatch):
         selection=ModelSelection(model="deepseek-v4-flash", origin="byok", provider_id="provA"),
         discovered={"provA": ["shared-model"], "provB": ["shared-model"]},
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     keys = {(m.id, m.origin, m.provider_id) for m in cat.models}
     assert ("shared-model", "byok", "provA") in keys
     assert ("shared-model", "byok", "provB") in keys
@@ -280,7 +294,7 @@ async def test_catalog_keyless_platform_on_hides_guide_rows(monkeypatch):
         providers=[],
         selection=ModelSelection(model="glm-5.2", origin="platform", provider_id=None),
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     assert cat.byok_configured is False
     assert cat.current.origin == "platform"
     keys = {(m.id, m.origin) for m in cat.models}
@@ -297,7 +311,7 @@ async def test_catalog_keyless_platform_off_returns_empty(monkeypatch):
         providers=[],
         selection=ModelSelection(model="deepseek-v4-flash", origin="byok", provider_id=None),
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     assert cat.byok_configured is False
     assert cat.models == []
 
@@ -316,7 +330,7 @@ async def test_catalog_dormant_hides_platform_despite_key(monkeypatch):
         selection=ModelSelection(model="deepseek-v4-flash", origin="byok", provider_id="provA"),
         discovered={"provA": ["deepseek-v4-flash"]},
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     assert all(m.origin == "byok" for m in cat.models)
     assert not any(m.origin == "platform" for m in cat.models)
 
@@ -335,7 +349,7 @@ async def test_catalog_platform_allowlist_drives_rows(monkeypatch):
         providers=[],
         selection=ModelSelection(model="glm-5.2", origin="platform", provider_id=None),
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     platform_ids = [m.id for m in cat.models if m.origin == "platform"]
     assert platform_ids == ["glm-5.2", "doubao/doubao-seed-2-1-turbo-260628"]
     assert all(m.available and m.price is not None for m in cat.models if m.origin == "platform")
@@ -357,7 +371,7 @@ async def test_catalog_platform_allowlist_marks_off_protocol_unselectable(monkey
         providers=[],
         selection=ModelSelection(model="glm-5.2", origin="platform", provider_id=None),
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     platform = {m.id: m for m in cat.models if m.origin == "platform"}
 
     glm = platform["glm-5.2"]
@@ -381,9 +395,9 @@ async def test_catalog_platform_allowlist_marks_off_protocol_unselectable(monkey
     assert catalog.is_platform_listable("glm-5.2") is True
     assert catalog.is_platform_listable("grok-4.5") is False
 
-    assert await validate_model_choice(None, "u1", "grok-4.5", "platform") is False
-    assert await validate_model_choice(None, "u1", "union-alpha", "platform") is False
-    assert await validate_model_choice(None, "u1", "glm-5.2", "platform") is True
+    assert await validate_model_choice(_NoHealthSession(), "u1", "grok-4.5", "platform") is False
+    assert await validate_model_choice(_NoHealthSession(), "u1", "union-alpha", "platform") is False
+    assert await validate_model_choice(_NoHealthSession(), "u1", "glm-5.2", "platform") is True
 
 
 async def test_catalog_excludes_models_without_curated_pricing(monkeypatch):
@@ -401,7 +415,7 @@ async def test_catalog_excludes_models_without_curated_pricing(monkeypatch):
         providers=[],
         selection=ModelSelection(model="glm-5.2", origin="platform", provider_id=None),
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     platform_ids = [m.id for m in cat.models if m.origin == "platform"]
     assert platform_ids == ["glm-5.2"]
     assert "totally-unknown-relay-model" not in platform_ids
@@ -445,7 +459,7 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
             ]
         },
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     grok = _byok_off_protocol_row("grok-4.5", cat.models)
     assert grok.available is False
     assert grok.unavailable_reason is not None
@@ -481,17 +495,17 @@ async def test_opencode_go_catalog_marks_off_protocol_unselectable(monkeypatch):
     assert glm.unavailable_reason is None
 
     assert (
-        await validate_model_choice(None, "u1", "grok-4.5", "byok", "prov-go") is False
+        await validate_model_choice(_NoHealthSession(), "u1", "grok-4.5", "byok", "prov-go") is False
     )
     assert (
-        await validate_model_choice(None, "u1", "union-alpha", "byok", "prov-go") is True
+        await validate_model_choice(_NoHealthSession(), "u1", "union-alpha", "byok", "prov-go") is True
     )
     assert (
-        await validate_model_choice(None, "u1", "minimax-m2.7", "byok", "prov-go")
+        await validate_model_choice(_NoHealthSession(), "u1", "minimax-m2.7", "byok", "prov-go")
         is True
     )
     assert (
-        await validate_model_choice(None, "u1", "deepseek-v4.1-flash", "byok", "prov-go")
+        await validate_model_choice(_NoHealthSession(), "u1", "deepseek-v4.1-flash", "byok", "prov-go")
         is True
     )
 
@@ -522,14 +536,14 @@ async def test_opencode_go_hides_official_deepseek_flash_from_picker(monkeypatch
             ]
         },
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     byok_ids = {m.id for m in cat.models if m.origin == "byok" and m.provider_id == "prov-go"}
     assert "deepseek-flash" not in byok_ids
     assert "deepseek-v4-flash" not in byok_ids
     assert "deepseek-v4-pro" not in byok_ids
     assert "deepseek-v4.1-flash" in byok_ids
     assert (
-        await validate_model_choice(None, "u1", "deepseek-flash", "byok", "prov-go")
+        await validate_model_choice(_NoHealthSession(), "u1", "deepseek-flash", "byok", "prov-go")
         is False
     )
 
@@ -552,7 +566,7 @@ async def test_opencode_zen_catalog_marks_grok_unselectable(monkeypatch):
         ),
         discovered={"prov-zen": ["kimi-k2.6", "grok-4.5", "claude-haiku-4-5"]},
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     grok = _byok_off_protocol_row("grok-4.5", cat.models)
     assert grok.available is False
     assert grok.unavailable_reason is not None
@@ -565,10 +579,10 @@ async def test_opencode_zen_catalog_marks_grok_unselectable(monkeypatch):
     assert kimi.available is True
     assert kimi.unavailable_reason is None
     assert (
-        await validate_model_choice(None, "u1", "grok-4.5", "byok", "prov-zen") is False
+        await validate_model_choice(_NoHealthSession(), "u1", "grok-4.5", "byok", "prov-zen") is False
     )
     assert (
-        await validate_model_choice(None, "u1", "claude-haiku-4-5", "byok", "prov-zen")
+        await validate_model_choice(_NoHealthSession(), "u1", "claude-haiku-4-5", "byok", "prov-zen")
         is True
     )
 
@@ -590,12 +604,12 @@ async def test_non_opencode_relay_grok_stays_selectable(monkeypatch):
         selection=ModelSelection(model="glm-5.2", origin="byok", provider_id="prov-relay"),
         discovered={"prov-relay": ["grok-4.5"]},
     )
-    cat = await resolve_model_catalog(None, "u1")
+    cat = await resolve_model_catalog(_NoHealthSession(), "u1")
     grok = _byok_off_protocol_row("grok-4.5", cat.models)
     assert grok.available is True
     assert grok.unavailable_reason is None
     assert (
-        await validate_model_choice(None, "u1", "grok-4.5", "byok", "prov-relay") is True
+        await validate_model_choice(_NoHealthSession(), "u1", "grok-4.5", "byok", "prov-relay") is True
     )
 
 
@@ -643,15 +657,15 @@ async def test_validate_platform_allowlist_membership(monkeypatch):
         providers=[],
         selection=ModelSelection(model="glm-5.2", origin="platform", provider_id=None),
     )
-    assert await validate_model_choice(None, "u1", "glm-5.2", "platform") is True
+    assert await validate_model_choice(_NoHealthSession(), "u1", "glm-5.2", "platform") is True
     assert (
         await validate_model_choice(
             None, "u1", "doubao/doubao-seed-2-1-turbo-260628", "platform"
         )
         is True
     )
-    assert await validate_model_choice(None, "u1", "gpt-4o", "platform") is False
-    assert await validate_model_choice(None, "u1", "deepseek-v4-flash", "platform") is False
+    assert await validate_model_choice(_NoHealthSession(), "u1", "gpt-4o", "platform") is False
+    assert await validate_model_choice(_NoHealthSession(), "u1", "deepseek-v4-flash", "platform") is False
 
 
 async def test_validate_model_choice_is_provider_scoped(monkeypatch):
@@ -667,11 +681,11 @@ async def test_validate_model_choice_is_provider_scoped(monkeypatch):
         selection=ModelSelection(model="deepseek-v4-flash", origin="byok", provider_id="provA"),
         discovered={"provA": ["shared-model"], "provB": ["other-model"]},
     )
-    assert await validate_model_choice(None, "u1", "shared-model", "byok", "provA") is True
+    assert await validate_model_choice(_NoHealthSession(), "u1", "shared-model", "byok", "provA") is True
     # shared-model is not under provB → rejected when that provider is specified.
-    assert await validate_model_choice(None, "u1", "shared-model", "byok", "provB") is False
+    assert await validate_model_choice(_NoHealthSession(), "u1", "shared-model", "byok", "provB") is False
     # byok choice with no provider specified never matches a provider-tagged row.
-    assert await validate_model_choice(None, "u1", "shared-model", "byok", None) is False
+    assert await validate_model_choice(_NoHealthSession(), "u1", "shared-model", "byok", None) is False
 
 
 def test_has_curated_pricing_flags_uncurated():

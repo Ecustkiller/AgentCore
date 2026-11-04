@@ -72,11 +72,15 @@ def test_to_response_includes_unavailable_reason() -> None:
     assert grok["unavailable_reason"] == {
         "code": "upstream_protocol_unsupported",
         "required_protocol": "openai_responses",
+        # ``detail`` belongs to the model_unavailable code (probe verdict); it is
+        # present-but-null here so clients can read one shape.
+        "detail": None,
     }
     haiku = next(m for m in dumped["models"] if m["id"] == "claude-haiku-4-5")
     assert haiku["unavailable_reason"] == {
         "code": "upstream_protocol_unsupported",
         "required_protocol": "anthropic_messages",
+        "detail": None,
     }
     kimi = next(m for m in dumped["models"] if m["id"] == "kimi-k2.5")
     assert kimi["available"] is True
@@ -116,6 +120,7 @@ async def test_list_user_models_includes_unavailable_reason(monkeypatch) -> None
         assert grok["unavailable_reason"] == {
             "code": "upstream_protocol_unsupported",
             "required_protocol": "openai_responses",
+            "detail": None,
         }
         haiku = next(m for m in body["models"] if m["id"] == "claude-haiku-4-5")
         assert haiku["unavailable_reason"]["required_protocol"] == (

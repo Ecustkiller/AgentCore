@@ -157,6 +157,8 @@ from .llm_model_profiles import (
 )
 from .llm_provider import (
     CreateLlmProviderRequest,
+    LlmModelProbeResponse,
+    LlmModelProbeRow,
     LlmProvidersResponse,
     LlmProviderView,
     UpdateLlmProviderRequest,
@@ -256,6 +258,7 @@ from .model_catalog import (
     ModelCatalogItem,
     ModelCatalogResponse,
     ModelPriceCard,
+    ModelProbeHealth,
     ModelReasoningEffort,
     ModelUnavailableReason,
 )
@@ -448,6 +451,8 @@ __all__ = [
     # llm providers (多服务商列表)
     "CreateLlmProviderRequest",
     "UpdateLlmProviderRequest",
+    "LlmModelProbeResponse",
+    "LlmModelProbeRow",
     "LlmProviderView",
     "LlmProvidersResponse",
     # git credentials (G3 云私仓 PAT)
@@ -467,6 +472,7 @@ __all__ = [
     "ModelCatalogCurrent",
     "ModelCatalogItem",
     "ModelCatalogResponse",
+    "ModelProbeHealth",
     # workspaces
     "BindLocalWorkspaceRequest",
     "WorkspaceBindingResponse",

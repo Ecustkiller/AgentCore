@@ -1,5 +1,6 @@
 """Model catalog (模型目录 · 统一混排) response schemas."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -36,14 +37,45 @@ class ModelCatalogCurrent(BaseModel):
 class ModelUnavailableReason(BaseModel):
     """Why a listed catalog row cannot be selected. Clients render copy (i18n)."""
 
-    code: Literal["upstream_protocol_unsupported"] = Field(
+    code: Literal["upstream_protocol_unsupported", "model_unavailable"] = Field(
         description="Structured unavailability code — never a finished user-facing string.",
     )
-    required_protocol: Literal["openai_responses", "anthropic_messages"] = Field(
+    required_protocol: Literal["openai_responses", "anthropic_messages"] | None = Field(
+        default=None,
         description=(
             "Protocol this catalog row needs that is unavailable on this origin. "
-            "Platform greys both; BYOK OpenCode already speaks anthropic_messages."
+            "Platform greys both; BYOK OpenCode already speaks anthropic_messages. "
+            "Null for ``model_unavailable``."
         ),
+    )
+    detail: str | None = Field(
+        default=None,
+        description=(
+            "Short diagnosis for ``model_unavailable`` (e.g. ``model_retired``). A "
+            "stable token, not prose — clients own the sentence."
+        ),
+    )
+
+
+class ModelProbeHealth(BaseModel):
+    """Last reachability probe for this model (定时探测 · 选择器状态)."""
+
+    status: Literal["ok", "dead", "throttled", "error"] = Field(
+        description=(
+            "ok = answered; dead = the provider no longer serves this id (only this "
+            "one greys the row out); throttled = 429; error = auth / region / 5xx."
+        ),
+    )
+    detail: str | None = Field(
+        default=None,
+        description=(
+            "Why, as a stable token: model_retired / rate_limited / auth_rejected / "
+            "region_blocked / insufficient_balance / upstream_error / timeout / "
+            "unreachable / endpoint_404."
+        ),
+    )
+    checked_at: datetime | None = Field(
+        default=None, description="When the probe ran (UTC). Null if unknown."
     )
 
 
@@ -120,6 +152,13 @@ class ModelCatalogItem(BaseModel):
         description=(
             "Official vendor thinking-effort tokens for this model id "
             "(e.g. low/high/max). Null when the leaf does not send reasoning_effort."
+        ),
+    )
+    health: ModelProbeHealth | None = Field(
+        default=None,
+        description=(
+            "Last probe verdict. Null = never probed (not the same as healthy). Only "
+            "status=dead also sets available=false."
         ),
     )
 

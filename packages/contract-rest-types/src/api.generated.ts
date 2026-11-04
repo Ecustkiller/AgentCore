@@ -5255,6 +5255,31 @@ export interface paths {
         patch: operations["update_llm_provider_v1_users_me_llm_providers__provider_id__patch"];
         trace?: never;
     };
+    "/v1/users/me/llm-providers/{provider_id}/probe-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Probe Llm Provider Models
+         * @description Re-check every plausible model id on this endpoint, right now.
+         *
+         *     The periodic sweep (``llm/model_health.py``) already does this every half hour;
+         *     this is the「重新检测」path for when the user is looking at the picker and does
+         *     not want to wait. Returns the verdicts it just wrote, so the caller can repaint
+         *     without a second round-trip.
+         */
+        post: operations["probe_llm_provider_models_v1_users_me_llm_providers__provider_id__probe_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/llm-providers/{provider_id}/test": {
         parameters: {
             query?: never;
@@ -9481,6 +9506,40 @@ export interface components {
              */
             type: "down" | "up";
         };
+        /**
+         * LlmModelProbeResponse
+         * @description ``POST /users/me/llm-providers/{id}/probe-models`` — on-demand re-probe.
+         */
+        LlmModelProbeResponse: {
+            /** Models */
+            models: components["schemas"]["LlmModelProbeRow"][];
+            /** Provider Id */
+            provider_id: string;
+        };
+        /**
+         * LlmModelProbeRow
+         * @description One model's reachability verdict from a probe sweep.
+         */
+        LlmModelProbeRow: {
+            /**
+             * Detail
+             * @description Stable token explaining a non-ok status (model_retired, rate_limited, …).
+             */
+            detail?: string | null;
+            /**
+             * Latency Ms
+             * @description Round-trip of the probe call; null when it never answered.
+             */
+            latency_ms?: number | null;
+            /** Model Id */
+            model_id: string;
+            /**
+             * Status
+             * @description ok = answered; dead = the provider no longer serves this id; throttled = 429; error = auth / region / 5xx / unreachable.
+             * @enum {string}
+             */
+            status: "ok" | "dead" | "throttled" | "error";
+        };
         /** LlmModelProfileListResponse */
         LlmModelProfileListResponse: {
             /** Data */
@@ -10090,6 +10149,8 @@ export interface components {
             context_length?: number | null;
             /** Display Name */
             display_name: string;
+            /** @description Last probe verdict. Null = never probed (not the same as healthy). Only status=dead also sets available=false. */
+            health?: components["schemas"]["ModelProbeHealth"] | null;
             /** Id */
             id: string;
             /**
@@ -10179,6 +10240,28 @@ export interface components {
             output?: string | null;
         };
         /**
+         * ModelProbeHealth
+         * @description Last reachability probe for this model (定时探测 · 选择器状态).
+         */
+        ModelProbeHealth: {
+            /**
+             * Checked At
+             * @description When the probe ran (UTC). Null if unknown.
+             */
+            checked_at?: string | null;
+            /**
+             * Detail
+             * @description Why, as a stable token: model_retired / rate_limited / auth_rejected / region_blocked / insufficient_balance / upstream_error / timeout / unreachable / endpoint_404.
+             */
+            detail?: string | null;
+            /**
+             * Status
+             * @description ok = answered; dead = the provider no longer serves this id (only this one greys the row out); throttled = 429; error = auth / region / 5xx.
+             * @enum {string}
+             */
+            status: "ok" | "dead" | "throttled" | "error";
+        };
+        /**
          * ModelProfileSlot
          * @description One slot in a model combination (main / worker / background / vision).
          */
@@ -10221,15 +10304,19 @@ export interface components {
             /**
              * Code
              * @description Structured unavailability code — never a finished user-facing string.
-             * @constant
-             */
-            code: "upstream_protocol_unsupported";
-            /**
-             * Required Protocol
-             * @description Protocol this catalog row needs that is unavailable on this origin. Platform greys both; BYOK OpenCode already speaks anthropic_messages.
              * @enum {string}
              */
-            required_protocol: "openai_responses" | "anthropic_messages";
+            code: "upstream_protocol_unsupported" | "model_unavailable";
+            /**
+             * Detail
+             * @description Short diagnosis for ``model_unavailable`` (e.g. ``model_retired``). A stable token, not prose — clients own the sentence.
+             */
+            detail?: string | null;
+            /**
+             * Required Protocol
+             * @description Protocol this catalog row needs that is unavailable on this origin. Platform greys both; BYOK OpenCode already speaks anthropic_messages. Null for ``model_unavailable``.
+             */
+            required_protocol?: ("openai_responses" | "anthropic_messages") | null;
         };
         /**
          * MouseInputEvent
@@ -12147,16 +12234,29 @@ export interface components {
          *     Rebuilt from the ``cost_events`` ledger by message_id, so it replays a past
          *     turn's payroll on reload. ``agents`` is empty when the turn has no ledger
          *     rows (e.g. unknown / non-owned message — never leaks existence).
+         *
+         *     R-07 实时状态：``live``/``status`` 标记该回合是否仍在执行——进行中查询到的账是
+         *     **部分账**（多 worker 并行时聚合持续增长），前端据此显示「进行中」而非终态。
          */
         TurnCost: {
             /** Agents */
             agents: components["schemas"]["AgentCostLine"][];
             cost: components["schemas"]["CostBreakdown"];
             estimated_cost?: components["schemas"]["CostBreakdown"] | null;
+            /**
+             * Live
+             * @default false
+             */
+            live: boolean;
             /** Message Id */
             message_id: string;
             /** Rounds */
             rounds: number;
+            /**
+             * Status
+             * @default terminal
+             */
+            status: string;
             usage: components["schemas"]["UsageBreakdown"];
         };
         /**
@@ -23034,6 +23134,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmProviderView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_llm_provider_models_v1_users_me_llm_providers__provider_id__probe_models_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                provider_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmModelProbeResponse"];
                 };
             };
             /** @description Validation Error */

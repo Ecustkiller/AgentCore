@@ -8419,6 +8419,78 @@
         "title": "KeyInputEvent",
         "type": "object"
       },
+      "LlmModelProbeResponse": {
+        "description": "``POST /users/me/llm-providers/{id}/probe-models`` — on-demand re-probe.",
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/LlmModelProbeRow"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "models"
+        ],
+        "title": "LlmModelProbeResponse",
+        "type": "object"
+      },
+      "LlmModelProbeRow": {
+        "description": "One model's reachability verdict from a probe sweep.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable token explaining a non-ok status (model_retired, rate_limited, …).",
+            "title": "Detail"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Round-trip of the probe call; null when it never answered.",
+            "title": "Latency Ms"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "ok = answered; dead = the provider no longer serves this id; throttled = 429; error = auth / region / 5xx / unreachable.",
+            "enum": [
+              "ok",
+              "dead",
+              "throttled",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "status"
+        ],
+        "title": "LlmModelProbeRow",
+        "type": "object"
+      },
       "LlmModelProfileListResponse": {
         "properties": {
           "data": {
@@ -9853,6 +9925,17 @@
             "title": "Display Name",
             "type": "string"
           },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelProbeHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last probe verdict. Null = never probed (not the same as healthy). Only status=dead also sets available=false."
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -10050,6 +10133,52 @@
         "title": "ModelPriceCard",
         "type": "object"
       },
+      "ModelProbeHealth": {
+        "description": "Last reachability probe for this model (定时探测 · 选择器状态).",
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the probe ran (UTC). Null if unknown.",
+            "title": "Checked At"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why, as a stable token: model_retired / rate_limited / auth_rejected / region_blocked / insufficient_balance / upstream_error / timeout / unreachable / endpoint_404.",
+            "title": "Detail"
+          },
+          "status": {
+            "description": "ok = answered; dead = the provider no longer serves this id (only this one greys the row out); throttled = 429; error = auth / region / 5xx.",
+            "enum": [
+              "ok",
+              "dead",
+              "throttled",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ModelProbeHealth",
+        "type": "object"
+      },
       "ModelProfileSlot": {
         "description": "One slot in a model combination (main / worker / background / vision).",
         "properties": {
@@ -10115,24 +10244,45 @@
         "description": "Why a listed catalog row cannot be selected. Clients render copy (i18n).",
         "properties": {
           "code": {
-            "const": "upstream_protocol_unsupported",
             "description": "Structured unavailability code — never a finished user-facing string.",
+            "enum": [
+              "upstream_protocol_unsupported",
+              "model_unavailable"
+            ],
             "title": "Code",
             "type": "string"
           },
-          "required_protocol": {
-            "description": "Protocol this catalog row needs that is unavailable on this origin. Platform greys both; BYOK OpenCode already speaks anthropic_messages.",
-            "enum": [
-              "openai_responses",
-              "anthropic_messages"
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Required Protocol",
-            "type": "string"
+            "description": "Short diagnosis for ``model_unavailable`` (e.g. ``model_retired``). A stable token, not prose — clients own the sentence.",
+            "title": "Detail"
+          },
+          "required_protocol": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai_responses",
+                  "anthropic_messages"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Protocol this catalog row needs that is unavailable on this origin. Platform greys both; BYOK OpenCode already speaks anthropic_messages. Null for ``model_unavailable``.",
+            "title": "Required Protocol"
           }
         },
         "required": [
-          "code",
-          "required_protocol"
+          "code"
         ],
         "title": "ModelUnavailableReason",
         "type": "object"
@@ -14289,7 +14439,7 @@
         "type": "object"
       },
       "TurnCost": {
-        "description": "A turn's cost + per-Agent payroll (``GET /messages/{id}/cost``).\n\nRebuilt from the ``cost_events`` ledger by message_id, so it replays a past\nturn's payroll on reload. ``agents`` is empty when the turn has no ledger\nrows (e.g. unknown / non-owned message — never leaks existence).",
+        "description": "A turn's cost + per-Agent payroll (``GET /messages/{id}/cost``).\n\nRebuilt from the ``cost_events`` ledger by message_id, so it replays a past\nturn's payroll on reload. ``agents`` is empty when the turn has no ledger\nrows (e.g. unknown / non-owned message — never leaks existence).\n\nR-07 实时状态：``live``/``status`` 标记该回合是否仍在执行——进行中查询到的账是\n**部分账**（多 worker 并行时聚合持续增长），前端据此显示「进行中」而非终态。",
         "properties": {
           "agents": {
             "items": {
@@ -14311,6 +14461,11 @@
               }
             ]
           },
+          "live": {
+            "default": false,
+            "title": "Live",
+            "type": "boolean"
+          },
           "message_id": {
             "title": "Message Id",
             "type": "string"
@@ -14318,6 +14473,11 @@
           "rounds": {
             "title": "Rounds",
             "type": "integer"
+          },
+          "status": {
+            "default": "terminal",
+            "title": "Status",
+            "type": "string"
           },
           "usage": {
             "$ref": "#/components/schemas/UsageBreakdown"
@@ -38358,6 +38518,81 @@
           }
         },
         "summary": "Update Llm Provider",
+        "tags": [
+          "llm-providers"
+        ]
+      }
+    },
+    "/v1/users/me/llm-providers/{provider_id}/probe-models": {
+      "post": {
+        "description": "Re-check every plausible model id on this endpoint, right now.\n\nThe periodic sweep (``llm/model_health.py``) already does this every half hour;\nthis is the「重新检测」path for when the user is looking at the picker and does\nnot want to wait. Returns the verdicts it just wrote, so the caller can repaint\nwithout a second round-trip.",
+        "operationId": "probe_llm_provider_models_v1_users_me_llm_providers__provider_id__probe_models_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmModelProbeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Probe Llm Provider Models",
         "tags": [
           "llm-providers"
         ]

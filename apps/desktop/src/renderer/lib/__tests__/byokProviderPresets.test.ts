@@ -226,12 +226,14 @@ describe("getByokProviderPreset", () => {
   it("returns OpenRouter metadata with :free models", () => {
     const preset = getByokProviderPreset("openrouter");
     expect(preset.defaultModel).toBe("openrouter/auto");
-    expect(preset.models).toContain("anthropic/claude-sonnet-4");
+    expect(preset.models).toContain("anthropic/claude-sonnet-5.5");
     expect(preset.models).toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
     expect(preset.models).toContain("nvidia/nemotron-3.5-super-vl:free");
+    expect(preset.models).toContain("nvidia/nemotron-3.5-lightning:free");
     expect(preset.models).toContain("cohere/north-mini-code:free");
     expect(preset.models).toContain("dots-studio/dots-3-note-preview:free");
-    expect(preset.models).toContain("poolside/laguna-s-2.1:free");
+    // Retired upstream: keeping it seeded would list a model no provider serves.
+    expect(preset.models).not.toContain("poolside/laguna-s-2.1:free");
   });
 
   it("returns the OpenVeer free lane with a single tested model", () => {

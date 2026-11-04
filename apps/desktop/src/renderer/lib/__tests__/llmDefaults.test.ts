@@ -4,6 +4,7 @@ import {
   catalogItemBadge,
   decodePointer,
   encodePointer,
+  modelHealthCopy,
   modelInChannelCatalog,
   pointerValue,
   unavailableReasonCopy,
@@ -385,5 +386,76 @@ describe("unavailableReasonCopy", () => {
     ).toBe("需要 Anthropic /messages 协议，当前接入不支持");
     expect(unavailableReasonCopy(null)).toBeNull();
     expect(unavailableReasonCopy(undefined)).toBeNull();
+  });
+});
+
+describe("modelHealthCopy", () => {
+  it("stays silent for a healthy or never-probed model", () => {
+    expect(modelHealthCopy(null)).toBeNull();
+    expect(modelHealthCopy(undefined)).toBeNull();
+    expect(modelHealthCopy({ status: "ok", detail: null })).toBeNull();
+  });
+
+  it("names the transient failures instead of a generic error", () => {
+    expect(
+      modelHealthCopy({ status: "throttled", detail: "rate_limited" }),
+    ).toBe("限流中，可能稍后才可用");
+    expect(modelHealthCopy({ status: "error", detail: "region_blocked" })).toBe(
+      "本机所在地区被该服务商限制",
+    );
+    expect(modelHealthCopy({ status: "error", detail: "auth_rejected" })).toBe(
+      "密钥被拒，请检查 API Key",
+    );
+    expect(modelHealthCopy({ status: "error", detail: "endpoint_404" })).toBe(
+      "端点路径可能不对（通常需含 /v1）",
+    );
+  });
+
+  it("separates an empty daily allowance from a busy minute", () => {
+    // "Retry soon" would be wrong advice here: the pool is gone until the reset.
+    expect(
+      modelHealthCopy({ status: "throttled", detail: "free_quota_exhausted" }),
+    ).toBe("免费额度已用完，重置后恢复");
+  });
+
+  it("falls back to a neutral line for unknown tokens", () => {
+    expect(modelHealthCopy({ status: "error", detail: "http_418" })).toBe(
+      "最近一次检测未通过",
+    );
+  });
+});
+
+describe("catalog health reaches the picker options", () => {
+  it("carries the probe verdict onto the option it came from", () => {
+    const groups = buildDefaultProviderGroups(
+      [provider({ id: "p1", label: "OpenRouter" })],
+      catalog([
+        catalogItem({
+          id: "nvidia/nemotron-3.5-lightning:free",
+          health: { status: "ok", detail: null, checked_at: null },
+        }),
+        catalogItem({
+          id: "z-ai/glm-5.2:free",
+          available: false,
+          unavailable_reason: {
+            code: "model_unavailable",
+            detail: "model_retired",
+          },
+          health: { status: "dead", detail: "model_retired", checked_at: null },
+        }),
+      ]),
+    );
+    const byModel = Object.fromEntries(
+      groups.flatMap((g) => g.models).map((m) => [m.model, m]),
+    );
+    expect(byModel["nvidia/nemotron-3.5-lightning:free"]?.health?.status).toBe(
+      "ok",
+    );
+    const retired = byModel["z-ai/glm-5.2:free"];
+    expect(retired?.available).toBe(false);
+    expect(retired?.health?.status).toBe("dead");
+    expect(unavailableReasonCopy(retired?.unavailableReason)).toBe(
+      "上游已下架该模型，请换一个",
+    );
   });
 });

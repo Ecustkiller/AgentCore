@@ -117,15 +117,17 @@
       "defaultModel": "openrouter/auto",
       "models": [
         "openrouter/auto",
-        "anthropic/claude-sonnet-4",
+        "anthropic/claude-sonnet-5.5",
         "google/gemini-2.5-pro",
         "nvidia/nemotron-3-ultra-550b-a55b:free",
         "nvidia/nemotron-3.5-super-vl:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
         "cohere/north-mini-code:free",
-        "dots-studio/dots-3-note-preview:free",
-        "poolside/laguna-s-2.1:free"
+        "dots-studio/dots-3-note-preview:free"
       ],
-      "keyHelpUrl": "https://openrouter.ai/keys"
+      "keyHelpUrl": "https://openrouter.ai/keys",
+      "note": "Free seeds are the ones that answered a tool-calling round on 2026-11-04, not a copy of anyone's menu: lightning 0.39s / super-vl 0.40s / north-mini-code 0.43s / dots 0.55s / nano-omni 0.56s / ultra 0.80s first byte. Dropped poolside/laguna-s-2.1:free (404 'no provider serves this model anymore') and claude-sonnet-4 (404 'no longer available... no provider serves this model anymore'). Also live today but unusable here: gemma-4-26b/31b, liquid/lfm-2.5, xingchen/xing4.0 all 429 at the upstream provider; nemotron-3.5-content-safety is a classifier with no tool support; recursive/flint 503; both thinkingmachines/inkling 403 (agentic-channel only). claude-sonnet-5.5 and gemini-2.5-pro 403 with 'violation of provider Terms Of Service' = this egress region is blocked, not a bad key. Free ids rotate without notice, so a seed is a convenience floor, not a promise — llm/model_health.py re-probes what the picker offers, labels what is degraded, and greys out what stopped answering. Mind the allowance those six share: without a topped-up balance the key gets 50 free requests per DAY, so anything that loops over free ids (a health sweep included) can drain it in an afternoon and leave all six answering 429 'free-models-per-day'. Hence free probes are serial, held off until the reset once the pool is proven empty, and re-asked at most twice a day."
     },
     {
       "id": "groq",

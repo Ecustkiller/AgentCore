@@ -103,6 +103,11 @@ def test_llm_gateway_does_not_import_db() -> None:
     - ``model_profiles`` — combo CRUD + expand (derived from catalog 上架; not metadata owner)
     - ``factory`` — ``build_turn_router`` may open a session to inject a cross-provider
       worker (agent provider_id ≠ chat provider)
+    - ``model_health_store`` — the ``llm_model_health`` table: reads the user's
+      profiles and last verdicts, writes new ones, runs the sweep loop. Same shape
+      as ``platform_credential_service``: everything that needs a session lives
+      here, while the decisions (classification, freshness window, free-pool hold)
+      stay in db-free ``model_health``.
     """
     bridge = {
         "provider_service.py",
@@ -110,6 +115,7 @@ def test_llm_gateway_does_not_import_db() -> None:
         "platform_credential_service.py",
         "model_profiles.py",
         "factory.py",
+        "model_health_store.py",
     }
     files = [f for f in _py_files("llm") if f.name not in bridge]
     assert _violations(files, ("agentcore.db",)) == {}

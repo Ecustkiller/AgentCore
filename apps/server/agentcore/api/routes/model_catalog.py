@@ -14,6 +14,7 @@ from agentcore.api.schemas import (
     ModelCatalogItem,
     ModelCatalogResponse,
     ModelPriceCard,
+    ModelProbeHealth,
     ModelReasoningEffort,
     ModelUnavailableReason,
 )
@@ -29,6 +30,7 @@ def _unavailable_reason(item: ModelCatalogEntry) -> ModelUnavailableReason | Non
     return ModelUnavailableReason(
         code=reason.code,
         required_protocol=reason.required_protocol,
+        detail=reason.detail,
     )
 
 
@@ -70,6 +72,15 @@ def _to_response(catalog: ModelCatalog) -> ModelCatalogResponse:
                         default=item.reasoning_effort.default,
                     )
                     if item.reasoning_effort
+                    else None
+                ),
+                health=(
+                    ModelProbeHealth(
+                        status=item.health.status,
+                        detail=item.health.detail,
+                        checked_at=item.health.checked_at,
+                    )
+                    if item.health
                     else None
                 ),
             )

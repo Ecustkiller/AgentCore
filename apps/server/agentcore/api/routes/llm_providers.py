@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.api.dependencies import AuthUser, get_db
 from agentcore.api.schemas import (
     CreateLlmProviderRequest,
+    LlmModelProbeResponse,
+    LlmModelProbeRow,
     LlmProvidersResponse,
     LlmProviderView,
     StatusResponse,
@@ -144,3 +146,37 @@ async def test_llm_provider(
         has_message=bool(view.message),
     )
     return _provider_to_response(view)
+
+
+@router.post("/{provider_id}/probe-models", response_model=LlmModelProbeResponse)
+async def probe_llm_provider_models(
+    provider_id: str,
+    user: AuthUser,
+    service: LlmProviderService = Depends(get_llm_provider_service),
+):
+    """Re-check every plausible model id on this endpoint, right now.
+
+    The periodic sweep (``llm/model_health.py``) already does this every half hour;
+    this is the「重新检测」path for when the user is looking at the picker and does
+    not want to wait. Returns the verdicts it just wrote, so the caller can repaint
+    without a second round-trip.
+    """
+    outcomes = await service.probe_models(user.user_id, provider_id)
+    logger.info(
+        "llm_provider.models_probed",
+        user_id=user.user_id,
+        provider_id=provider_id,
+        probed=len(outcomes),
+    )
+    return LlmModelProbeResponse(
+        provider_id=provider_id,
+        models=[
+            LlmModelProbeRow(
+                model_id=model_id,
+                status=outcome.status,
+                detail=outcome.detail,
+                latency_ms=outcome.latency_ms,
+            )
+            for model_id, outcome in sorted(outcomes.items())
+        ],
+    )

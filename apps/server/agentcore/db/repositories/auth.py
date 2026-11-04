@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
 from agentcore.core.types import new_id
-from agentcore.db.models import Credentials, RefreshToken, UserLlmProvider
+from agentcore.db.models import (
+    Credentials,
+    LlmModelHealth,
+    RefreshToken,
+    UserLlmProvider,
+)
 from agentcore.db.repositories._base import _UNSET, commit_or_flush
 
 
@@ -231,11 +236,21 @@ class UserLlmProviderRepository:
         await self._session.commit()
 
     async def delete(self, provider_id: str, *, user_id: str) -> bool:
-        """Owner-scoped delete; returns True when a row was removed."""
+        """Owner-scoped delete; returns True when a row was removed.
+
+        Also drops this provider's probe verdicts: a re-added endpoint starts with
+        no history rather than inheriting a dead row from a previous key.
+        """
         result = await self._session.execute(
             delete(UserLlmProvider).where(
                 UserLlmProvider.id == provider_id,
                 UserLlmProvider.user_id == user_id,
+            )
+        )
+        await self._session.execute(
+            delete(LlmModelHealth).where(
+                LlmModelHealth.provider_id == provider_id,
+                LlmModelHealth.user_id == user_id,
             )
         )
         await self._session.commit()
@@ -245,6 +260,9 @@ class UserLlmProviderRepository:
         """Drop every provider for an account (注销 cascade)."""
         await self._session.execute(
             delete(UserLlmProvider).where(UserLlmProvider.user_id == user_id)
+        )
+        await self._session.execute(
+            delete(LlmModelHealth).where(LlmModelHealth.user_id == user_id)
         )
         await self._session.commit()
 

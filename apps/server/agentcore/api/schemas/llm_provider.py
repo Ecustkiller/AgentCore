@@ -6,6 +6,7 @@ Account / conversation model selection uses **model combination profiles**
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -87,3 +88,29 @@ class LlmProvidersResponse(BaseModel):
     platform_model: str | None = Field(
         default=None, description="Operator platform model id when platform is available"
     )
+
+
+class LlmModelProbeRow(BaseModel):
+    """One model's reachability verdict from a probe sweep."""
+
+    model_id: str
+    status: Literal["ok", "dead", "throttled", "error"] = Field(
+        description=(
+            "ok = answered; dead = the provider no longer serves this id; "
+            "throttled = 429; error = auth / region / 5xx / unreachable."
+        ),
+    )
+    detail: str | None = Field(
+        default=None,
+        description="Stable token explaining a non-ok status (model_retired, rate_limited, …).",
+    )
+    latency_ms: int | None = Field(
+        default=None, description="Round-trip of the probe call; null when it never answered."
+    )
+
+
+class LlmModelProbeResponse(BaseModel):
+    """``POST /users/me/llm-providers/{id}/probe-models`` — on-demand re-probe."""
+
+    provider_id: str
+    models: list[LlmModelProbeRow]

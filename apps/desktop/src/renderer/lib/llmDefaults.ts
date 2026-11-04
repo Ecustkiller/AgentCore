@@ -37,6 +37,8 @@ export type DefaultModelOption = {
   /** False = listed but not selectable (grey + reason). Default true. */
   available?: boolean;
   unavailableReason?: ModelCatalogItem["unavailable_reason"];
+  /** Last reachability probe (定时探测). Null = never probed. */
+  health?: ModelCatalogItem["health"];
 };
 
 /** Client-side copy for a structured catalog unavailability. Null if unknown/absent. */
@@ -53,7 +55,49 @@ export function unavailableReasonCopy(
     }
     return "当前接入不支持该模型所需协议";
   }
+  if (reason.code === "model_unavailable") {
+    return reason.detail === "model_retired"
+      ? "上游已下架该模型，请换一个"
+      : "上游不再提供该模型，请换一个";
+  }
   return null;
+}
+
+/**
+ * Copy for a probe verdict that does NOT grey the row out.
+ *
+ * `dead` is answered by `unavailableReasonCopy` (the row is already greyed);
+ * `ok` and "never probed" show nothing — a green dot that cannot be backed is
+ * worth less than no dot at all.
+ */
+export function modelHealthCopy(
+  health: ModelCatalogItem["health"] | undefined | null,
+): string | null {
+  if (!health || health.status === "ok") return null;
+  // The daily-allowance case is not "busy", it is "gone until the window turns
+  // over" — telling the user to retry in a minute would be wrong.
+  if (health.detail === "free_quota_exhausted") {
+    return "免费额度已用完，重置后恢复";
+  }
+  if (health.status === "throttled") return "限流中，可能稍后才可用";
+  switch (health.detail) {
+    case "region_blocked":
+      return "本机所在地区被该服务商限制";
+    case "auth_rejected":
+      return "密钥被拒，请检查 API Key";
+    case "insufficient_balance":
+      return "余额不足";
+    case "upstream_error":
+      return "上游异常，稍后再试";
+    case "timeout":
+      return "检测超时";
+    case "unreachable":
+      return "连不上该服务商";
+    case "endpoint_404":
+      return "端点路径可能不对（通常需含 /v1）";
+    default:
+      return "最近一次检测未通过";
+  }
 }
 
 export type DefaultProviderGroup = {
@@ -169,6 +213,7 @@ function optionFromCatalogItem(item: ModelCatalogItem): DefaultModelOption {
     custom: false,
     available: item.available !== false,
     unavailableReason: item.unavailable_reason ?? null,
+    health: item.health ?? null,
   };
 }
 

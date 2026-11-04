@@ -1826,6 +1826,50 @@ EVENTS: list[EventSpec] = [
         },
     ),
     EventSpec(name='llm.retry_patience_ignored'),
+    EventSpec(
+        name='llm.model_probe_decrypt_failed',
+        description='模型探测取不到该服务商的已存 Key（密文损坏或主密钥轮换），本轮跳过',
+        fields={'provider_id': FieldType('str')},
+    ),
+    EventSpec(
+        name='llm.model_probe_done',
+        description='一个服务商的模型探测完成（写入 llm_model_health）',
+        fields={
+            'user_id': FieldType('str'),
+            'provider_id': FieldType('str'),
+            'probed': FieldType('int'),
+            'held': FieldType('int'),
+            'dead': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='llm.model_probe_quota_hold',
+        description='探测证明该账号的免费日额度已空，按住剩余免费模型直到上游给出的重置时刻',
+        fields={'until': FieldType('str')},
+    ),
+    EventSpec(
+        name='llm.model_probe_failed',
+        description='单个服务商的模型探测整体失败（不影响其它服务商）',
+        fields={'provider_id': FieldType('str')},
+    ),
+    EventSpec(
+        name='llm.model_probe_skipped',
+        description='模型探测跳过（无加密主密钥，无法解密已存 Key）',
+        fields={'reason': FieldType('str')},
+    ),
+    EventSpec(
+        name='llm.model_probe_sweep_failed',
+        description='模型探测整轮失败（循环继续，下个周期重试）',
+        fields={'error': FieldType('str')},
+    ),
+    EventSpec(
+        name='llm.model_probe_unreachable',
+        description='探测请求连不上（DNS/TLS/连接被拒），该模型记为 error 而非 dead',
+        fields={
+            'model': FieldType('str'),
+            'error': FieldType('str'),
+        },
+    ),
     EventSpec(name='llm.router.close_failed'),
     EventSpec(name='llm.stream_aborted'),
     EventSpec(
@@ -1903,6 +1947,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='llm_provider.test.probe_tools_failed'),
     EventSpec(name='llm_provider.test.start'),
     EventSpec(name='llm_provider.test.unhandled'),
+    EventSpec(name='llm_provider.models_probed'),
     EventSpec(name='llm_provider.tested'),
     EventSpec(name='md_export.exported'),
     EventSpec(name='memory.always_quota_card'),

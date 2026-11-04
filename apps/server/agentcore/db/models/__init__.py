@@ -34,6 +34,7 @@ from .devices import PushDeviceRow
 from .docs import Doc, DocShare
 from .documents import DisputedLine, Document
 from .email_auth import EmailChallenge, PendingRegistration
+from .llm_health import LlmModelHealth
 from .llm_profiles import LlmModelProfile
 from .notices import ProductNoticeDismissalRow, ProductNoticeRow
 from .platform import PlatformCredential
@@ -92,6 +93,7 @@ __all__ = [
     "HandoffJob",
     "JOURNAL_BAND_LIVE",
     "JOURNAL_BAND_OVERFLOW",
+    "LlmModelHealth",
     "LlmModelProfile",
     "MemoryUpdateRow",
     "Message",

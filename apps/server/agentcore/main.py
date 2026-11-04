@@ -373,6 +373,16 @@ async def lifespan(app: FastAPI):
     # path; this only catches the disconnected remainder. days<=0 disables.
     stream_state_retention_task = asyncio.create_task(stream_state_retention_loop())
 
+    # Per-model reachability sweep (llm/model_health.py). Free tiers rotate ids out
+    # from under a saved profile, and the catalog cannot tell a dead id from a live
+    # one. Best-effort outbound calls; disabled → the on-demand 「重新检测」 endpoint
+    # still works.
+    model_health_task: asyncio.Task | None = None
+    if settings.llm_model_health_probe_enabled:
+        from agentcore.llm.model_health_store import model_health_loop
+
+        model_health_task = asyncio.create_task(model_health_loop())
+
     # Durable RUNNING lease sweeper (crash recover): claim heartbeat-expired leases and
     # redrive unfinished DAG via recover_turn. The boot sweep is awaited here, before
     # the unstarted FIFO is reloaded, so a recovering turn still owns the slot.
@@ -497,6 +507,10 @@ async def lifespan(app: FastAPI):
             stream_state_retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await stream_state_retention_task
+            if model_health_task is not None:
+                model_health_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await model_health_task
             pool_refresh_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await pool_refresh_task

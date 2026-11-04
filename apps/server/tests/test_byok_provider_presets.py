@@ -172,14 +172,18 @@ def test_openrouter_preset_includes_free_models():
     assert preset.id == "openrouter"
     assert preset.default_model == "openrouter/auto"
     # Paid seed stays intact.
-    assert "anthropic/claude-sonnet-4" in preset.models
+    assert "anthropic/claude-sonnet-5.5" in preset.models
     assert "google/gemini-2.5-pro" in preset.models
     # ":free" models present for non-sensitive background/worker slots.
     assert "nvidia/nemotron-3-ultra-550b-a55b:free" in preset.models
     assert "nvidia/nemotron-3.5-super-vl:free" in preset.models
+    assert "nvidia/nemotron-3.5-lightning:free" in preset.models
     assert "cohere/north-mini-code:free" in preset.models
     assert "dots-studio/dots-3-note-preview:free" in preset.models
-    assert "poolside/laguna-s-2.1:free" in preset.models
+    # Dropped 2026-11-04: OpenRouter answers 404 'no provider serves this model
+    # anymore'. A seed that outlives its model is worse than no seed — the picker
+    # lists it as available and every turn fails on it.
+    assert "poolside/laguna-s-2.1:free" not in preset.models
 
 
 def test_openveer_preset_is_the_free_deepseek_lane():

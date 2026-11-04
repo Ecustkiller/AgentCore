@@ -33,6 +33,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.llm.byok_provider_presets import seed_model_for_base_url
 from agentcore.llm.factory import build_provider
+from agentcore.llm.model_health_store import probe_provider
 from agentcore.llm.model_profiles import ProfileSlot
 from agentcore.llm.model_reachability import (
     CONNECTIVITY_POLICY,
@@ -268,6 +269,25 @@ class LlmProviderService:
             )
         await self._profiles.clear_provider_refs(user_id, provider_id)
         invalidate_allowance(user_id, reason="byok_provider_changed")
+
+    async def probe_models(self, user_id: str, provider_id: str) -> dict:
+        """Re-probe this endpoint's plausible ids now (on-demand, 重新检测).
+
+        Same set the periodic sweep uses: the ids this account's profiles pin plus
+        the preset seeds for the endpoint. Never touches provider ``status`` — a
+        per-model verdict is not a verdict on the key.
+        """
+        row = await self._repo.get(provider_id, user_id=user_id)
+        if row is None:
+            raise NotFoundError("服务商不存在")
+        if not row.api_key_enc:
+            raise BYOKKeyMissingError("尚未配置 API Key，无法检测模型")
+        credentials = await resolve_provider_credentials(self._session, user_id, provider_id)
+        if credentials is None or not credentials.api_key:
+            raise BYOKKeyMissingError("无法解密已保存的 Key，请重新填写")
+        return await probe_provider(
+            self._session, row=row, api_key=credentials.api_key, force=True
+        )
 
     async def test_provider(self, user_id: str, provider_id: str) -> LlmProviderView:
         row = await self._repo.get(provider_id, user_id=user_id)

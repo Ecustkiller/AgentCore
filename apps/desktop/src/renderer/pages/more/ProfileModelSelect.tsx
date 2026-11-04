@@ -8,6 +8,7 @@ import {
   decodePointer,
   encodePointer,
   isPlatformGroupId,
+  modelHealthCopy,
   modelInChannelCatalog,
   unavailableReasonCopy,
 } from "@/lib/llmDefaults";
@@ -366,7 +367,7 @@ export function ProfileModelSelect({
       const reason =
         opt.available === false
           ? unavailableReasonCopy(opt.unavailableReason)
-          : null;
+          : modelHealthCopy(opt.health);
       return {
         title: opt.label,
         badge: opt.badge,
@@ -598,7 +599,10 @@ function ModelOptionRow({
   const reason = unavailable
     ? unavailableReasonCopy(option.unavailableReason)
     : null;
-  const secondary = reason ?? modelOptionSecondary(option);
+  // Selectable-but-flagged: a 429, a region block or a dead host is exactly what
+  // the user is standing here to find out, so it outranks context length.
+  const healthNote = unavailable ? null : modelHealthCopy(option.health);
+  const secondary = reason ?? healthNote ?? modelOptionSecondary(option);
   return (
     <button
       type="button"
@@ -631,6 +635,9 @@ function ModelOptionRow({
           </span>
           {option.badge ? <Badge tone="primary">{option.badge}</Badge> : null}
           {option.custom ? <Badge tone="muted">自定义</Badge> : null}
+          {healthNote && secondary !== healthNote ? (
+            <Badge tone="muted">未通过检测</Badge>
+          ) : null}
         </span>
         {secondary ? (
           <span className="mt-0.5 block truncate text-xs text-muted-foreground">

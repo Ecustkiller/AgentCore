@@ -51,10 +51,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from agentcore.llm.model_health import HealthStatus
 
 from agentcore.billing.preference import (
     platform_catalog_visible,
@@ -114,8 +117,20 @@ class ModelCatalogCurrent:
 class ModelUnavailableReason:
     """Why a listed catalog row is not selectable (never a silent drop)."""
 
-    code: Literal["upstream_protocol_unsupported"]
-    required_protocol: OffProtocolKind
+    code: Literal["upstream_protocol_unsupported", "model_unavailable"]
+    required_protocol: OffProtocolKind | None = None
+    # Short diagnosis for ``model_unavailable`` (e.g. ``model_retired``), already
+    # safe to show — our own code, never a raw upstream body.
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class ModelHealthView:
+    """Last probe verdict for one model, as the picker sees it."""
+
+    status: HealthStatus
+    detail: str | None = None
+    checked_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +162,10 @@ class ModelCatalogEntry:
     unavailable_reason: ModelUnavailableReason | None = None
     # Official vendor effort tokens when this id sends ``reasoning_effort``.
     reasoning_effort: CatalogReasoningEffort | None = None
+    # Last probe verdict (``llm/model_health.py``). None = never probed, which is
+    # NOT the same as healthy — the picker shows nothing rather than a green dot
+    # it cannot back.
+    health: ModelHealthView | None = None
 
     @property
     def ref(self) -> str:
@@ -182,6 +201,7 @@ def _entry(
     provider_id: str | None = None,
     provider_label: str | None = None,
     unavailable_reason: ModelUnavailableReason | None = None,
+    health: ModelHealthView | None = None,
 ) -> ModelCatalogEntry:
     meta = model_metadata_for(model_id)
     from agentcore.llm.provider.wire_dialect import reasoning_effort_spec
@@ -203,6 +223,7 @@ def _entry(
         reasoning_effort=(
             CatalogReasoningEffort(options=spec[0], default=spec[1]) if spec else None
         ),
+        health=health,
     )
 
 
@@ -268,7 +289,11 @@ async def _discover_provider_models(row, creds: LLMCredentials) -> list[str] | N
 
 
 def _provider_entries(
-    row, creds: LLMCredentials, discovered: list[str] | None
+    row,
+    creds: LLMCredentials,
+    discovered: list[str] | None,
+    *,
+    health: dict[tuple[str, str], object] | None = None,
 ) -> list[ModelCatalogEntry]:
     """One provider's byok rows: seed ∪ discovery (discovery only if unmatched)."""
     presets = preset_models_for_base_url(creds.base_url)
@@ -284,6 +309,23 @@ def _provider_entries(
     entries: list[ModelCatalogEntry] = []
     for mid in ids:
         reason = _off_protocol_reason(mid, creds.base_url)
+        view = None
+        probe = (health or {}).get((row.id, mid))
+        if probe is not None:
+            view = ModelHealthView(
+                status=probe.status,
+                detail=probe.detail,
+                checked_at=getattr(probe, "checked_at", None),
+            )
+            # A model the provider stopped serving is the one failure the user
+            # cannot recover from by retrying, so it is the one that greys out.
+            # Throttled / region-blocked stay selectable and merely labelled —
+            # neither is ours to declare permanent.
+            if probe.status == "dead":
+                reason = ModelUnavailableReason(
+                    code="model_unavailable",
+                    detail=probe.detail or "model_retired",
+                )
         entries.append(
             _entry(
                 mid,
@@ -293,6 +335,7 @@ def _provider_entries(
                 provider_id=row.id,
                 provider_label=label,
                 unavailable_reason=reason,
+                health=view,
             )
         )
     return entries
@@ -455,6 +498,13 @@ async def resolve_model_catalog(session: AsyncSession, user_id: str) -> ModelCat
     models: list[ModelCatalogEntry] = []
     seen: set[tuple[str, str, str | None]] = set()
 
+    # Last probe verdicts (empty until the first sweep or manual 「重新检测」).
+    # Loaded once for the whole catalog: a BYOK account with several endpoints
+    # would otherwise query per provider.
+    from agentcore.llm.model_health_store import health_for_user
+
+    health = await health_for_user(session, user_id)
+
     def _add(entry: ModelCatalogEntry) -> None:
         key = (entry.id, entry.origin, entry.provider_id)
         if key not in seen:
@@ -482,7 +532,7 @@ async def resolve_model_catalog(session: AsyncSession, user_id: str) -> ModelCat
             )
             continue
         discovered = await _discover_provider_models(row, creds)
-        for entry in _provider_entries(row, creds, discovered):
+        for entry in _provider_entries(row, creds, discovered, health=health):
             _add(entry)
 
     for entry in _platform_entries(require_visible=True):
