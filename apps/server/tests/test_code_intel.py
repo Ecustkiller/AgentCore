@@ -124,6 +124,23 @@ async def test_references_do_not_depend_on_parser_budget(tmp_path, monkeypatch):
     assert result.metadata["source"] == "grep"
 
 
+async def test_imports_focuses_file_beyond_parser_budget(tmp_path, monkeypatch):
+    from agentcore.tools.builtin import code_intel as module
+
+    (tmp_path / "a.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "z.py").write_text("from .a import value\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_INDEX_FILE_CAP", 1)
+
+    result = await CodeIntelTool().execute(
+        {"action": "imports", "path": "z.py"},
+        _ctx(tmp_path),
+    )
+
+    assert "z.py:1 -> .a" in result.output
+    assert "仅显示正向 import" in result.output
+    assert result.metadata["focused_import"] is True
+
+
 async def test_code_intel_imports_affected_tests_and_diagnostics(tmp_path: Path):
     _seed(tmp_path)
     tool = CodeIntelTool()

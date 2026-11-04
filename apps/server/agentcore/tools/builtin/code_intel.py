@@ -843,6 +843,15 @@ class CodeIntelTool:
         if action == "affected_tests" and not render_args.get("paths"):
             render_args["paths"] = list(context.landed_artifact_kinds)
         lines = _render(cast(CodeAction, action), index, render_args)
+        focused_import = False
+        result_index = index
+        if action == "imports" and path and path not in index.files:
+            focused = await build_code_intel_index(context, scope=path)
+            if path in focused.files:
+                lines = _import_lines(focused, path)
+                lines.append("… 全局解析预算不足，仅显示正向 import")
+                result_index = focused
+                focused_import = True
         if action == "symbols" and render_args.get("query"):
             show_budget_note = bool(lines and lines[-1] == _INDEX_TRUNCATED_NOTE)
             if show_budget_note:
@@ -873,7 +882,8 @@ class CodeIntelTool:
             output_limit=_OUTPUT_LIMIT,
             metadata={
                 "action": action,
-                "files": len(index.files),
-                "diagnostics": len(index.diagnostics),
+                "files": len(result_index.files),
+                "diagnostics": len(result_index.diagnostics),
+            "focused_import": focused_import,
             },
         )
