@@ -32,6 +32,7 @@ CodeAction = Literal[
 _SOURCE_EXTS = frozenset({".py", ".ts", ".tsx", ".js", ".jsx", ".mts", ".mjs", ".cts", ".cjs"})
 _INDEX_LIST_CAP = 6000
 _INDEX_FILE_CAP = 1200
+_TEST_INDEX_FILE_CAP = 1000
 _INDEX_CHAR_CAP = 300_000
 _INDEX_TOTAL_CHAR_CAP = 16_000_000
 _OUTPUT_LIMIT = 16_000
@@ -232,6 +233,11 @@ def _resolve_import(
             if candidate in available:
                 return candidate
         return None
+    module_path = module.replace(".", "/")
+    for suffix in (".py", "/__init__.py"):
+        candidate = f"{module_path}{suffix}"
+        if candidate in available:
+            return candidate
     for path, aliases in modules.items():
         for known in aliases:
             if module == known or module.startswith(known + "."):
@@ -376,12 +382,37 @@ def _js_intel(
     return symbols, imports, []
 
 
+def _imports_only_intel(
+    path: str,
+    text: str,
+) -> tuple[list[ImportRef], tuple[int, str] | None]:
+    if path.endswith(".py"):
+        try:
+            tree = ast.parse(text, filename=path)
+        except SyntaxError as e:
+            return [], (e.lineno or 1, e.msg)
+        collector = _PythonCollector(path)
+        collector.visit(tree)
+        return collector.imports, None
+    without_comments = _mask_js_noncode(text, mask_strings=False)
+    imports = [
+        ImportRef(
+            match.group("module"),
+            text.count("\n", 0, match.start()) + 1,
+        )
+        for match in _IMPORT_RE.finditer(without_comments)
+    ]
+    return imports, None
+
+
 async def build_code_intel_index(
     context: ToolContext,
     *,
     scope: str = "",
+    prioritize_tests: bool = False,
+    imports_only: bool = False,
 ) -> CodeIntelIndex:
-    cache_key = f"v1:{scope}"
+    cache_key = f"v3:{int(prioritize_tests)}:{int(imports_only)}:{scope}"
     cached = context.get_cached_tool_result(kind="code_intel_index", key=cache_key)
     if isinstance(cached, CodeIntelIndex):
         return cached
@@ -394,7 +425,12 @@ async def build_code_intel_index(
         if isinstance(shared, CodeIntelIndex):
             return shared
     try:
-        index = await _build_code_intel_index_uncached(context, scope)
+        index = await _build_code_intel_index_uncached(
+            context,
+            scope,
+            prioritize_tests=prioritize_tests,
+            imports_only=imports_only,
+        )
     except BaseException:
         future.cancel()
         raise
@@ -412,6 +448,9 @@ async def build_code_intel_index(
 async def _build_code_intel_index_uncached(
     context: ToolContext,
     scope: str,
+    *,
+    prioritize_tests: bool,
+    imports_only: bool,
 ) -> CodeIntelIndex:
     index_files = getattr(context.backend, "index_files", None)
     if index_files is None:
@@ -441,8 +480,24 @@ async def _build_code_intel_index_uncached(
             scoped = [entry.path for entry in tree.entries if not entry.is_dir]
             paths = list(dict.fromkeys([*paths, *scoped]))
     source_candidates = [p for p in scoped if _is_source(p)]
-    source_truncated = len(source_candidates) > _INDEX_FILE_CAP
-    sources = source_candidates[:_INDEX_FILE_CAP]
+    if prioritize_tests:
+        regular = [p for p in source_candidates if not _is_test(p)]
+        tests = [p for p in source_candidates if _is_test(p)]
+        source_truncated = (
+            len(regular) > _INDEX_FILE_CAP
+            or len(tests) > _TEST_INDEX_FILE_CAP
+        )
+        sources = list(
+            dict.fromkeys(
+                [
+                    *tests[:_TEST_INDEX_FILE_CAP],
+                    *regular[:_INDEX_FILE_CAP],
+                ]
+            )
+        )
+    else:
+        source_truncated = len(source_candidates) > _INDEX_FILE_CAP
+        sources = source_candidates[:_INDEX_FILE_CAP]
     all_paths = frozenset(paths)
     sem = asyncio.Semaphore(16)
 
@@ -471,39 +526,48 @@ async def _build_code_intel_index_uncached(
             file_truncated = True
             content_truncated = True
         chars_used += len(text)
-        if path.endswith(".py"):
+        symbols: list[SymbolDef]
+        if imports_only:
+            imports, import_error = _imports_only_intel(path, text)
+            symbols = []
+            if import_error is not None and not file_truncated:
+                diagnostics.append((path, import_error[0], import_error[1]))
+        elif path.endswith(".py"):
             symbols, imports, error = _python_intel(path, text)
+            if not file_truncated:
+                diagnostics.extend((path, line, message) for line, message in error)
         else:
             symbols, imports, error = _js_intel(path, text)
-        if not file_truncated:
-            diagnostics.extend((path, line, message) for line, message in error)
+            if not file_truncated:
+                diagnostics.extend((path, line, message) for line, message in error)
         files[path] = FileIntel(path=path, text=text, imports=imports, symbols=symbols)
     modules = _path_modules(files)
-    all_modules = {
-        path: aliases
-        for path in all_paths
-        if (aliases := _module_aliases(path))
-    }
-    local_roots = {
-        alias.split(".", 1)[0]
-        for aliases in all_modules.values()
-        for alias in aliases
-    }
-    for path, file in files.items():
-        for ref in file.imports:
-            if ref.module.startswith("."):
-                resolved = _resolve_import(ref.module, path, modules, all_paths)
-                label = "unresolved relative import"
-            else:
-                root = ref.module.split(".", 1)[0]
-                if root not in local_roots:
-                    continue
-                resolved = _resolve_import(ref.module, path, all_modules, all_paths)
-                label = "unresolved local import"
-            if resolved is None:
-                diagnostics.append(
-                    (path, ref.line, f"{label} {ref.module}")
-                )
+    if not imports_only:
+        all_modules = {
+            path: aliases
+            for path in all_paths
+            if (aliases := _module_aliases(path))
+        }
+        local_roots = {
+            alias.split(".", 1)[0]
+            for aliases in all_modules.values()
+            for alias in aliases
+        }
+        for path, file in files.items():
+            for ref in file.imports:
+                if ref.module.startswith("."):
+                    resolved = _resolve_import(ref.module, path, modules, all_paths)
+                    label = "unresolved relative import"
+                else:
+                    root = ref.module.split(".", 1)[0]
+                    if root not in local_roots:
+                        continue
+                    resolved = _resolve_import(ref.module, path, all_modules, all_paths)
+                    label = "unresolved local import"
+                if resolved is None:
+                    diagnostics.append(
+                        (path, ref.line, f"{label} {ref.module}")
+                    )
     index = CodeIntelIndex(
         files=files,
         paths=all_paths,
@@ -515,7 +579,7 @@ async def _build_code_intel_index_uncached(
     )
     context.cache_tool_result(
         kind="code_intel_index",
-        key=f"v1:{scope}",
+        key=f"v3:{int(prioritize_tests)}:{int(imports_only)}:{scope}",
         value=index,
     )
     return index
@@ -838,7 +902,12 @@ class CodeIntelTool:
                     },
                 )
         scope = path if action in {"symbols", "references", "diagnostics"} else ""
-        index = await build_code_intel_index(context, scope=scope)
+        index = await build_code_intel_index(
+            context,
+            scope=scope,
+            prioritize_tests=action == "affected_tests",
+            imports_only=action == "affected_tests",
+        )
         render_args = dict(arguments)
         if action == "affected_tests" and not render_args.get("paths"):
             render_args["paths"] = list(context.landed_artifact_kinds)

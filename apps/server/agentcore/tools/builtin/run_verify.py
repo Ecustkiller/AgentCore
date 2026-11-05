@@ -753,7 +753,11 @@ async def _resolve_affected_paths(
             build_code_intel_index,
         )
 
-        index = await build_code_intel_index(context)
+        index = await build_code_intel_index(
+            context,
+            prioritize_tests=True,
+            imports_only=True,
+        )
         test_paths.extend(affected_test_paths(index, sources[:_MAX_AFFECTED_SOURCES]))
     return list(dict.fromkeys(test_paths))
 
