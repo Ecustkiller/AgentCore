@@ -445,7 +445,7 @@ def _protected_file_map(root: Path, rel_paths: list[str]) -> dict[str, str]:
 
 
 @dataclass
-class TestExitCodeCheck:
+class ExitCodeCheck:
     """在 ``outcome.workspace_root`` 跑约定测试命令，断言进程退出码（真仓 Fix 硬判据）.
 
     ``command`` 为 argv 列表（Windows 友好：不经 shell）。缺省期望 ``expected_exit=0``。
@@ -578,7 +578,7 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
         flags=a.get("flags", ""),
     ),
     "DeliverableIntegrity": lambda a: DeliverableIntegrityCheck(),
-    "TestExitCode": lambda a: TestExitCodeCheck(
+    "TestExitCode": lambda a: ExitCodeCheck(
         command=list(a.get("command") or []),
         expected_exit=int(a.get("expected_exit", 0)),
         timeout_sec=int(a.get("timeout_sec", 120)),

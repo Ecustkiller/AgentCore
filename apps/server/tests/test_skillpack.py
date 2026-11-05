@@ -99,7 +99,9 @@ class TestRejectedPackages:
         data = build_pack(name="s", description="d", body="b")
         # 手工拼一个含两个同名 member 的 zip。
         buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
+        with pytest.warns(UserWarning, match="Duplicate name"), zipfile.ZipFile(
+            buf, "w"
+        ) as zf:
             zf.writestr(PACK_ENTRY, _valid_md())
             zf.writestr(PACK_ENTRY, _valid_md())
         assert len(data) > 0

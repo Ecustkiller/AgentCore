@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agentcore.evals.checks import TestExitCodeCheck
+from agentcore.evals.checks import ExitCodeCheck
 from agentcore.evals.types import EvalCase, TurnOutcome
 from agentcore.tools.sandbox.pythonpath import (
     default_pythonpath_rels,
@@ -81,7 +81,7 @@ def test_fixed_click_copy_green_with_shared_pythonpath(tmp_path: Path):
         workspace_root=str(ws),
         reference_root=str(ws),
     )
-    check = TestExitCodeCheck(
+    check = ExitCodeCheck(
         command=cmd,
         expected_exit=0,
         timeout_sec=120,
