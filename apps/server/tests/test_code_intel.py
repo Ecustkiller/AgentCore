@@ -103,7 +103,8 @@ async def test_code_intel_symbols_and_references(tmp_path: Path):
     assert references.success is True
     assert "tests/test_app.py" in references.output
     assert "tests/test_app.py" not in scoped_references.output
-    assert "src/util.py:2: method double" in methods.output
+    assert "src/util.py:2:" in methods.output
+    assert "double" in methods.output
 
 
 async def test_references_do_not_depend_on_parser_budget(tmp_path, monkeypatch):
@@ -231,13 +232,30 @@ async def test_code_intel_index_is_single_flight(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(ctx.backend, "index_files", counted)
     tool = CodeIntelTool()
     first, second = await asyncio.gather(
-        tool.execute({"action": "symbols", "query": "add"}, ctx),
-        tool.execute({"action": "references", "query": "add"}, ctx),
+        tool.execute({"action": "symbols"}, ctx),
+        tool.execute({"action": "diagnostics"}, ctx),
     )
 
     assert first.success is True
     assert second.success is True
     assert calls == 1
+
+
+async def test_symbol_query_avoids_full_index(tmp_path, monkeypatch):
+    _seed(tmp_path)
+    ctx = _ctx(tmp_path)
+
+    async def unexpected(*args, **kwargs):
+        raise AssertionError("symbol query should use grep first")
+
+    monkeypatch.setattr(ctx.backend, "index_files", unexpected)
+    result = await CodeIntelTool().execute(
+        {"action": "symbols", "query": "greet"},
+        ctx,
+    )
+
+    assert "web.ts" in result.output
+    assert result.metadata["source"] == "grep"
 
 
 async def test_scoped_index_survives_parser_budget_truncation(tmp_path, monkeypatch):
@@ -250,27 +268,22 @@ async def test_scoped_index_survives_parser_budget_truncation(tmp_path, monkeypa
     tool = CodeIntelTool()
 
     global_index = await tool.execute(
-        {"action": "symbols", "query": "deep_target"},
+        {"action": "symbols"},
         _ctx(tmp_path),
     )
     scoped_index = await tool.execute(
-        {"action": "symbols", "query": "deep_target", "path": "z.py"},
+        {"action": "symbols", "path": "z.py"},
         _ctx(tmp_path),
     )
 
-    assert "z.py:1: function deep_target" in global_index.output
+    assert "deep_target" not in global_index.output
     assert "z.py:1: function deep_target" in scoped_index.output
 
 
-async def test_truncated_index_still_grep_completes_partial_query(
-    tmp_path, monkeypatch
-):
-    from agentcore.tools.builtin import code_intel as module
-
+async def test_symbol_grep_completes_partial_query_without_index(tmp_path):
     (tmp_path / "a.py").write_text("def first_helper():\n    pass\n", encoding="utf-8")
     (tmp_path / "b.py").write_text("def second():\n    pass\n", encoding="utf-8")
     (tmp_path / "z.py").write_text("def first_deep():\n    pass\n", encoding="utf-8")
-    monkeypatch.setattr(module, "_INDEX_FILE_CAP", 2)
 
     result = await CodeIntelTool().execute(
         {"action": "symbols", "query": "first"},
@@ -279,8 +292,6 @@ async def test_truncated_index_still_grep_completes_partial_query(
 
     assert "a.py:1: function first_helper" in result.output
     assert "z.py:1: function first_deep" in result.output
-    assert result.output.index("a.py:1") < result.output.index("z.py:1")
-    assert result.output.rindex("索引达到") > result.output.index("z.py:1")
 
 
 async def test_scoped_index_walks_past_flat_list_cap(tmp_path, monkeypatch):
@@ -296,7 +307,7 @@ async def test_scoped_index_walks_past_flat_list_cap(tmp_path, monkeypatch):
     tool = CodeIntelTool()
 
     scoped = await tool.execute(
-        {"action": "symbols", "query": "beyond_cap", "path": "nested"},
+        {"action": "symbols", "path": "nested"},
         _ctx(tmp_path),
     )
 

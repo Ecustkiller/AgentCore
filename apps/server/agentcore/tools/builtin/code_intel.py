@@ -612,7 +612,9 @@ def _symbol_kind(line: str) -> str:
         return "class"
     if "interface " in stripped or "enum " in stripped or " type " in stripped:
         return "type"
-    if "def " in stripped or "function " in stripped:
+    if "def " in stripped:
+        return "method" if line[:1].isspace() else "function"
+    if "function " in stripped:
         return "function"
     return "symbol"
 
@@ -623,7 +625,7 @@ async def _grep_symbol_fallback(
     query: str,
     path: str,
     limit: int,
-) -> list[str]:
+) -> tuple[list[str], int] | None:
     needle = re.escape(query)
     pattern = (
         rf"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
@@ -640,7 +642,7 @@ async def _grep_symbol_fallback(
             )
         )
     except WorkspaceError:
-        return []
+        return None
     lines: list[str] = []
     for hit in result.hits:
         if not _is_source(hit.path):
@@ -654,7 +656,7 @@ async def _grep_symbol_fallback(
         lines.append(f"{hit.path}:{hit.line_no}: {_symbol_kind(hit.text)} {name}")
         if len(lines) >= limit:
             break
-    return lines
+    return lines, len(result.hits)
 
 
 async def _grep_references(
@@ -901,6 +903,29 @@ class CodeIntelTool:
                         "source": "grep",
                     },
                 )
+        symbol_grep_checked = False
+        if action == "symbols" and query:
+            grep_symbols = await _grep_symbol_fallback(
+                context,
+                query=query,
+                path=path,
+                limit=limit,
+            )
+            symbol_grep_checked = True
+            if grep_symbols is not None and grep_symbols[0]:
+                lines, match_count = grep_symbols
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output="\n".join(lines),
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    output_limit=_OUTPUT_LIMIT,
+                    metadata={
+                        "action": action,
+                        "match_count": match_count,
+                        "source": "grep",
+                    },
+                )
         scope = path if action in {"symbols", "references", "diagnostics"} else ""
         index = await build_code_intel_index(
             context,
@@ -931,15 +956,15 @@ class CodeIntelTool:
                 and _matches_path(symbol.path, path)
                 for symbol in index.symbols
             )
-            if index.truncated or not has_match:
-                fallback = await _grep_symbol_fallback(
+            if not symbol_grep_checked and (index.truncated or not has_match):
+                fallback_result = await _grep_symbol_fallback(
                     context,
                     query=query,
                     path=path,
-                    limit=max(1, min(int(arguments.get("limit") or 50), 200)),
+                    limit=limit,
                 )
-                if fallback:
-                    lines = list(dict.fromkeys([*lines, *fallback]))
+                if fallback_result is not None and fallback_result[0]:
+                    lines = list(dict.fromkeys([*lines, *fallback_result[0]]))
             if show_budget_note:
                 lines.append(_INDEX_TRUNCATED_NOTE)
         output = "\n".join(lines) if lines else "没有结果"
