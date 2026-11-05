@@ -106,6 +106,12 @@ jobs:
       - name: Bundle sidecar Python runtime
         run: pnpm bundle:sidecar
 
+      - name: Bundle local voice engine
+        run: |
+          brew install whisper-cpp ggml libomp
+          pnpm bundle:whisper
+          file resources/voice/mac-arm64/whisper-cli | grep -q arm64
+
       # 不走 electron-builder --publish：已转正的 release 与 releaseType=draft 冲突会整批跳过
       # （见 electron-builder#2393）。改为本地出包 + gh release upload，draft/已发布均可补传。
       - name: Build macOS arm64 package
