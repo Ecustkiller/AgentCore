@@ -84,7 +84,7 @@ def render_task_mode_block(decision: TaskModeDecision) -> str:
             "当前是单 Agent 快路径。默认由你直接完成定位、修改和验证；不要为了"
             "形式调用 delegate。定位符号、引用、import 和语法诊断时优先用 "
             "code_intel，再按需 read/grep；跨文件多处修改优先用 apply_patch，"
-            "只有任务实际跨越多个独立模块、需要"
+            "改动后可用 project_diagnostics 跑项目原生类型检查。只有任务实际跨越多个独立模块、需要"
             "并行取证或独立审查时才升级 Team。完成后以实际命令和测试结果为准。\n"
             "</任务模式>"
         )

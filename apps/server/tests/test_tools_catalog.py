@@ -29,6 +29,7 @@ _EXPECTED_NAMES = {
     "md_export",
     "grep",
     "code_intel",
+    "project_diagnostics",
     "run",
 }
 
@@ -47,6 +48,7 @@ _CEO_DEFAULT_NAMES = {
     "md_export",
     "grep",
     "code_intel",
+    "project_diagnostics",
     "run",
 }
 _MUTATION_NAMES = {
@@ -94,6 +96,7 @@ def test_write_and_exec_tools_are_grantable():
     assert approvals["write"] is ToolApproval.GRANTABLE
     assert approvals["edit"] is ToolApproval.GRANTABLE
     assert approvals["apply_patch"] is ToolApproval.GRANTABLE
+    assert approvals["project_diagnostics"] is ToolApproval.GRANTABLE
     assert approvals["run"] is ToolApproval.GRANTABLE
     # Destructive / mutating file ops require the same consent as writes.
     assert approvals["file_delete"] is ToolApproval.GRANTABLE

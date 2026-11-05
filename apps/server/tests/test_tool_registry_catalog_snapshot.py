@@ -40,6 +40,7 @@ _BUILTIN_ORDER = [
     "md_export",
     "grep",
     "code_intel",
+    "project_diagnostics",
     "run",
 ]
 
@@ -87,6 +88,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "glob": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "grep": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "code_intel": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "project_diagnostics": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     # Write / execute: CEO + worker (same GRANTABLE ApprovalGate)
     "write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "edit": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
@@ -188,6 +190,7 @@ def test_tool_registry_grant_sets_snapshot():
     assert delegation_grantable_tool_names() == approval_class_tool_names() | frozenset(
         {
             "run",
+                "project_diagnostics",
             # L3 团队浏览器 (D11): execution_class → covered by a delegation grant.
             "browser",
         }
