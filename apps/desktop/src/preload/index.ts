@@ -69,6 +69,10 @@ import {
   type WindowApi,
   type WindowFramePreset,
 } from "@shared/window-contract";
+import {
+  WORKBUDDY_IMPORT_CHANNELS,
+  type WorkBuddyImportApi,
+} from "@shared/workbuddy-import-contract";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const deviceIdentityApi: DeviceIdentityApi = {
@@ -436,6 +440,12 @@ const mcpApi: McpApi = {
   testServer: (id) => ipcRenderer.invoke(MCP_CHANNELS.testServer, id),
 };
 
+const workbuddyImportApi: WorkBuddyImportApi = {
+  scan: () => ipcRenderer.invoke(WORKBUDDY_IMPORT_CHANNELS.scan),
+  readSkills: (ids) =>
+    ipcRenderer.invoke(WORKBUDDY_IMPORT_CHANNELS.readSkills, ids),
+};
+
 const browserApi: BrowserApi = {
   show: (input) => ipcRenderer.invoke(BROWSER_CHANNELS.show, input),
   setBounds: (bounds) => ipcRenderer.send(BROWSER_CHANNELS.setBounds, bounds),
@@ -515,6 +525,7 @@ try {
   contextBridge.exposeInMainWorld("notificationApi", notificationApi);
   contextBridge.exposeInMainWorld("hostApi", hostApi);
   contextBridge.exposeInMainWorld("mcpApi", mcpApi);
+  contextBridge.exposeInMainWorld("workbuddyImportApi", workbuddyImportApi);
   contextBridge.exposeInMainWorld("browserApi", browserApi);
   contextBridge.exposeInMainWorld("windowApi", windowApi);
   contextBridge.exposeInMainWorld("floatWindowApi", floatWindowApi);

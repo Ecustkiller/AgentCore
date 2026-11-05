@@ -16,6 +16,7 @@ import type { SidecarApi } from "@shared/sidecar-contract";
 import type { TerminalApi } from "@shared/terminal-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
 import type { WindowApi } from "@shared/window-contract";
+import type { WorkBuddyImportApi } from "@shared/workbuddy-import-contract";
 
 declare global {
   interface ImportMetaEnv {
@@ -52,6 +53,8 @@ declare global {
     hostApi?: HostApi;
     /** 本机 MCP Client（stdio Server 配置 + ClientTool 回填）；纯浏览器 / 单测可能缺失。 */
     mcpApi?: McpApi;
+    /** Local WorkBuddy / SkillHub discovery; Electron only. */
+    workbuddyImportApi?: WorkBuddyImportApi;
     /** 右坞本机浏览器（LocalChromiumHost + openWorkspaceHtml）；仅 Electron；web / 单测可 mock。 */
     browserApi?: BrowserApi;
     windowApi: WindowApi;

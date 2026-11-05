@@ -15,6 +15,7 @@ import {
   PromptOverview,
 } from "@/components/tools/PromptOverview";
 import { PromptReadDialog } from "@/components/tools/PromptReadDialog";
+import { WorkBuddyImportDialog } from "@/components/tools/WorkBuddyImportDialog";
 import { Button, SearchField } from "@/components/ui";
 import {
   ContextMenu,
@@ -93,6 +94,10 @@ import {
   publishSkillVersion,
   unpublishSkill,
 } from "@/services/skillStore";
+import {
+  importWorkBuddyMcp,
+  importWorkBuddySkills,
+} from "@/services/workbuddyImport";
 import { Pencil, Trash2 } from "lucide-react";
 import {
   type DragEvent,
@@ -161,6 +166,9 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
     SkillStoreListing[]
   >([]);
   const [busy, setBusy] = useState(false);
+  const [workBuddyImportOpen, setWorkBuddyImportOpen] = useState(false);
+  const canImportWorkBuddy =
+    typeof window !== "undefined" && Boolean(window.workbuddyImportApi);
   const [error, setError] = useState<string | null>(null);
   const [rulesDirId, setRulesDirId] = useState<string | null>(null);
   const [promptFolders, setPromptFolders] = useState<
@@ -354,6 +362,38 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
       setSelectedId(mineCatalogId(created.id));
       return catalog;
     });
+  }
+
+  async function importFromWorkBuddy(
+    skills: Parameters<typeof importWorkBuddySkills>[0],
+    mcpServers: Parameters<typeof importWorkBuddyMcp>[0],
+  ): Promise<{ failures: readonly string[] }> {
+    setBusy(true);
+    setError(null);
+    try {
+      const failures: string[] = [];
+      if (skills.length > 0) {
+        const parentId = await ensureNamedFolder("WorkBuddy 导入");
+        const existing = items
+          .filter((item) => item.kind === "mine")
+          .map((item) => String(item.label || ""));
+        const result = await importWorkBuddySkills(skills, {
+          parentId,
+          existingNames: existing,
+        });
+        failures.push(...result.failures);
+      }
+      if (mcpServers.length > 0) {
+        const result = await importWorkBuddyMcp(mcpServers);
+        failures.push(...result.failures);
+      }
+      setOverlay(await loadAccountLayer());
+      return { failures };
+    } catch (err) {
+      return { failures: [overlayErrorMessage(err)] };
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createUntitledPromptFolder() {
@@ -664,13 +704,25 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
               className="w-52"
             />
             {pane === "mine" ? (
-              <Button
-                size="md"
-                disabled={busy}
-                onClick={() => void onCreateMine()}
-              >
-                新建
-              </Button>
+              <>
+                {canImportWorkBuddy ? (
+                  <Button
+                    variant="outline"
+                    size="md"
+                    disabled={busy}
+                    onClick={() => setWorkBuddyImportOpen(true)}
+                  >
+                    从 WorkBuddy 导入
+                  </Button>
+                ) : null}
+                <Button
+                  size="md"
+                  disabled={busy}
+                  onClick={() => void onCreateMine()}
+                >
+                  新建
+                </Button>
+              </>
             ) : null}
           </>
         }
@@ -799,6 +851,12 @@ export function PromptCatalog({ data }: { data: Capabilities }) {
             return undefined;
           })
         }
+      />
+      <WorkBuddyImportDialog
+        open={workBuddyImportOpen}
+        busy={busy}
+        onOpenChange={setWorkBuddyImportOpen}
+        onImport={importFromWorkBuddy}
       />
       <PromptCatalogBatchDialogs
         confirm={deleteConfirm}

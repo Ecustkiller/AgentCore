@@ -63,6 +63,7 @@ import { registerTerminalIpc } from "./terminal-service";
 import { initUpdater } from "./updater";
 import { registerWindowFrameIpc } from "./window-frame";
 import { loadWindowState, manageWindowState } from "./window-state";
+import { registerWorkBuddyImportIpc } from "./workbuddy-import";
 
 /** 主 BrowserWindow（真窗 closed 事件目标；窗控按 sender 路由后不再闭包绑死它）。 */
 let mainWindowRef: BrowserWindow | null = null;
@@ -440,6 +441,7 @@ app.whenReady().then(async () => {
   registerNotificationIpc();
   registerHostIpc();
   registerMcpIpc();
+  registerWorkBuddyImportIpc();
   registerBrowserIpc();
   registerFloatWindowIpc({
     getMainWindow: () => mainWindowRef,
