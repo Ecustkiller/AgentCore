@@ -83,6 +83,7 @@ const config = {
   // 主进程 opGrep 与 sidecar（AGENTCORE_RG_PATH）共用，不依赖 PATH。
   extraResources: [
     { from: "resources/sidecar", to: "sidecar" },
+    { from: "resources/voice", to: "voice" },
     {
       from: "resources/rg",
       to: "rg",

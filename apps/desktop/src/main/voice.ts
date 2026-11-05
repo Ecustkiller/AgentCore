@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { constants as fsConstants } from "node:fs";
 import {
   access,
@@ -10,7 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   VOICE_CHANNELS,
@@ -31,6 +33,8 @@ const MODEL_URLS = [
 ] as const;
 const MODEL_MIN_BYTES = 100_000_000;
 const MODEL_MAX_BYTES = 200_000_000;
+const MODEL_SHA256 =
+  "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
 const WAV_MAX_BYTES = 32 * 1024 * 1024;
 const TRANSCRIBE_TIMEOUT_MS = 120_000;
 const WHISPER_PROMPT = "以下是普通话内容。";
@@ -58,6 +62,9 @@ async function resolveWhisperBinary(): Promise<string | null> {
   const candidates = [
     process.env.NEXUS_WHISPER_BIN,
     join(process.resourcesPath, "voice", "whisper-cli"),
+    join(process.resourcesPath, "voice", "mac-arm64", "whisper-cli"),
+    join(app.getAppPath(), "resources", "voice", "mac-arm64", "whisper-cli"),
+    join(app.getAppPath(), "resources", "voice", "whisper-cli"),
     "/opt/homebrew/bin/whisper-cli",
     "/usr/local/bin/whisper-cli",
   ].filter((value): value is string => Boolean(value?.trim()));
@@ -74,6 +81,22 @@ async function readModelBytes(): Promise<number> {
     return info.isFile() ? info.size : 0;
   } catch {
     return 0;
+  }
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -140,6 +163,9 @@ async function prepareModelWith(
       const downloaded = (await stat(partial)).size;
       if (downloaded < MODEL_MIN_BYTES || downloaded > MODEL_MAX_BYTES) {
         throw new Error("下载的语音模型大小异常");
+      }
+      if ((await sha256File(partial)) !== MODEL_SHA256) {
+        throw new Error("下载的语音模型校验失败");
       }
       await rename(partial, destination);
       return { ok: true };
@@ -224,6 +250,10 @@ export async function transcribeVoiceWav(
   const wavPath = join(dir, "speech.wav");
   try {
     await writeFile(wavPath, bytes);
+    const backendDir = join(dirname(binary), "libexec");
+    const env = (await isDirectory(backendDir))
+      ? { ...process.env, GGML_BACKEND_PATH: backendDir }
+      : process.env;
     const { stdout } = await execFileAsync(
       binary,
       [
@@ -244,6 +274,7 @@ export async function transcribeVoiceWav(
         timeout: TRANSCRIBE_TIMEOUT_MS,
         maxBuffer: 4 * 1024 * 1024,
         windowsHide: true,
+        env,
       },
     );
     const text = parseWhisperText(stdout);
