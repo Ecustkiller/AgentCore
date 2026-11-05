@@ -1,3 +1,4 @@
+import { probeServerHealth } from "@/services/serverHealth";
 import { useServerHealthStore } from "@/stores/serverHealth";
 import { Loader2 } from "lucide-react";
 
@@ -17,15 +18,26 @@ function isWebPreview(): boolean {
  */
 export function ComposerConnectionNotice() {
   const status = useServerHealthStore((s) => s.status);
+  const reason = useServerHealthStore((s) => s.reason);
   if (isWebPreview() || status !== "offline") return null;
   return (
     <div
       aria-live="polite"
-      className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2 text-xs text-muted-foreground"
     >
       <Loader2 size={12} className="shrink-0 animate-spin" />
-      与服务器断开连接。可浏览已缓存的对话与本机文件（只读）；不能发送或跑
-      AI，恢复连接后再试。
+      <span className="min-w-0 flex-1">
+        与服务器断开连接。可浏览已缓存的对话与本机文件（只读）；暂不能发送或运行
+        AI。
+      </span>
+      <button
+        type="button"
+        title={reason ?? undefined}
+        onClick={() => void probeServerHealth()}
+        className="shrink-0 font-medium text-primary hover:underline"
+      >
+        立即重试
+      </button>
     </div>
   );
 }
