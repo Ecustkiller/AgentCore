@@ -19,6 +19,7 @@ Split axes (implementation modules):
 Public import path stays ``agentcore.tools.builtin.file_ops``.
 """
 
+from agentcore.tools.builtin.file_ops.apply_patch import ApplyPatchTool
 from agentcore.tools.builtin.file_ops.batch import FileBatchTool
 from agentcore.tools.builtin.file_ops.errors import _outside_workspace_msg
 from agentcore.tools.builtin.file_ops.glob import GlobTool
@@ -53,6 +54,7 @@ from agentcore.tools.builtin.file_ops.read import (
 )
 
 __all__ = [
+    "ApplyPatchTool",
     "FileBatchTool",
     "FileDeleteTool",
     "FileListTool",

@@ -400,6 +400,7 @@ def file_mutation_tool_names() -> frozenset[str]:
         {
             "write",
             "edit",
+            "apply_patch",
             "file_delete",
             "file_batch",
             "md_export",
@@ -414,6 +415,7 @@ def file_only_tool_names() -> frozenset[str]:
             "read",
             "write",
             "edit",
+            "apply_patch",
             "file_list",
             "glob",
             "file_delete",

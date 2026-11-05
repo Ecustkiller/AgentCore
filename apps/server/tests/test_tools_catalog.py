@@ -21,6 +21,7 @@ _EXPECTED_NAMES = {
     "read",
     "write",
     "edit",
+    "apply_patch",
     "file_list",
     "glob",
     "file_delete",
@@ -38,6 +39,7 @@ _CEO_DEFAULT_NAMES = {
     "read",
     "write",
     "edit",
+    "apply_patch",
     "file_list",
     "glob",
     "file_delete",
@@ -50,6 +52,7 @@ _CEO_DEFAULT_NAMES = {
 _MUTATION_NAMES = {
     "write",
     "edit",
+    "apply_patch",
     "file_delete",
     "file_batch",
     "md_export",
@@ -90,6 +93,7 @@ def test_write_and_exec_tools_are_grantable():
     approvals = {s.name: s.approval for s in build_builtin_registry().list_all()}
     assert approvals["write"] is ToolApproval.GRANTABLE
     assert approvals["edit"] is ToolApproval.GRANTABLE
+    assert approvals["apply_patch"] is ToolApproval.GRANTABLE
     assert approvals["run"] is ToolApproval.GRANTABLE
     # Destructive / mutating file ops require the same consent as writes.
     assert approvals["file_delete"] is ToolApproval.GRANTABLE
@@ -111,6 +115,7 @@ def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
     assert names == {
         "write",
         "edit",
+        "apply_patch",
         "file_delete",
         "file_batch",
         "md_export",

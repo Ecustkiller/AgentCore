@@ -32,6 +32,7 @@ _BUILTIN_ORDER = [
     "read",
     "write",
     "edit",
+    "apply_patch",
     "file_list",
     "glob",
     "file_delete",
@@ -89,6 +90,7 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     # Write / execute: CEO + worker (same GRANTABLE ApprovalGate)
     "write": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "edit": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
+    "apply_patch": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "file_delete": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "file_batch": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
     "md_export": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
@@ -176,6 +178,7 @@ def test_tool_registry_grant_sets_snapshot():
         {
             "write",
             "edit",
+            "apply_patch",
             "file_delete",
             "file_batch",
             "md_export",

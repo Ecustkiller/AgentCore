@@ -51,6 +51,7 @@ import pytest
 
 from agentcore.core.types import ToolApproval
 from agentcore.tools.builtin.file_ops import (
+    ApplyPatchTool,
     FileBatchTool,
     FileWriteTool,
     StrReplaceTool,
@@ -155,6 +156,31 @@ async def _run_str_replace(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
     )
 
 
+def _seed_patch_files(root: Path) -> None:
+    (root / "patch-a.txt").write_text("alpha\n", encoding="utf-8")
+    (root / "patch-b.txt").write_text("beta\n", encoding="utf-8")
+
+
+async def _run_apply_patch(root: Path, _mp: pytest.MonkeyPatch) -> ToolResult:
+    return await ApplyPatchTool().execute(
+        {
+            "edits": [
+                {
+                    "file_path": "patch-a.txt",
+                    "old_string": "alpha",
+                    "new_string": "one",
+                },
+                {
+                    "file_path": "patch-b.txt",
+                    "old_string": "beta",
+                    "new_string": "two",
+                },
+            ]
+        },
+        _ctx(root),
+    )
+
+
 def _seed_batch_sources(root: Path) -> None:
     (root / "a.md").write_text("batch\n", encoding="utf-8")
     (root / "keep.md").write_text("keep\n", encoding="utf-8")
@@ -234,6 +260,12 @@ class _Case:
 _CASES: tuple[_Case, ...] = (
     _Case("write", _run_file_write, (("报告.md", "md", None),)),
     _Case("edit", _run_str_replace, (("src.txt", "txt", None),), _seed_src_txt),
+    _Case(
+        "apply_patch",
+        _run_apply_patch,
+        (("patch-a.txt", "txt", None), ("patch-b.txt", "txt", None)),
+        _seed_patch_files,
+    ),
     _Case(
         "file_batch",
         _run_file_batch,

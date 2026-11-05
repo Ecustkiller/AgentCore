@@ -3153,6 +3153,7 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='workspaces.cloud_unreachable'),
     EventSpec(name='write.collision'),
+    EventSpec(name='write.patch_applied'),
     EventSpec(name='write.scope_rejected'),
     EventSpec(name='write.stale_overwrite_rejected'),
 ]

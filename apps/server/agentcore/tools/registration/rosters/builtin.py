@@ -12,6 +12,7 @@ def load_roster() -> tuple[type, ...]:
     from agentcore.tools.builtin.browser import BrowserTool
     from agentcore.tools.builtin.code_intel import CodeIntelTool
     from agentcore.tools.builtin.file_ops import (
+        ApplyPatchTool,
         FileBatchTool,
         FileDeleteTool,
         FileListTool,
@@ -34,6 +35,7 @@ def load_roster() -> tuple[type, ...]:
         FileReadTool,
         FileWriteTool,
         StrReplaceTool,
+        ApplyPatchTool,
         FileListTool,
         GlobTool,
         FileDeleteTool,
