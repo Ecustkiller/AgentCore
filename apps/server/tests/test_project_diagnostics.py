@@ -105,6 +105,27 @@ async def test_project_diagnostics_reports_unavailable_provider():
     assert "mypy" in (result.error or "")
 
 
+async def test_project_diagnostics_reuses_turn_cache():
+    backend = _ExecBackend(
+        {
+            "kind": "completed",
+            "language": "typescript",
+            "exit_code": 0,
+            "output": "",
+        }
+    )
+    ctx = _ctx(backend)
+    tool = ProjectDiagnosticsTool()
+
+    first = await tool.execute({"language": "typescript"}, ctx)
+    second = await tool.execute({"language": "typescript"}, ctx)
+
+    assert first.success is True
+    assert second.success is True
+    assert len(backend.requests) == 1
+    assert second.metadata["turn_cache_hit"] is True
+
+
 async def test_project_diagnostics_rejects_unsafe_path():
     result = await ProjectDiagnosticsTool().execute(
         {"language": "python", "path": "../outside"},

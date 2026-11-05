@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from agentcore.core.types import ToolApproval, ToolFace
@@ -201,6 +201,27 @@ class ProjectDiagnosticsTool:
             5,
             min(int(arguments.get("timeout_seconds") or 120), 300),
         )
+        cache_key = json.dumps(
+            {
+                "language": language,
+                "path": target,
+                "timeout_seconds": timeout_seconds,
+            },
+            sort_keys=True,
+        )
+        cached = context.get_cached_tool_result(
+            kind="project_diagnostics",
+            key=cache_key,
+        )
+        if isinstance(cached, ToolResult):
+            context.note_tool_cache_saved_chars(len(cached.output or ""))
+            metadata = dict(cached.metadata or {})
+            metadata["turn_cache_hit"] = True
+            return replace(
+                cached,
+                duration_ms=int((time.monotonic() - start) * 1000),
+                metadata=metadata,
+            )
         request = ExecutionRequest(
             code=_driver_code(
                 language=language,
@@ -248,7 +269,7 @@ class ProjectDiagnosticsTool:
                 if int(payload.get("exit_code") or 0) == 0
                 else output.strip()[:8000] or "诊断命令未通过，但未返回可解析错误。"
             ]
-        return ToolResult(
+        final = ToolResult(
             tool_call_id="",
             success=True,
             output="\n".join(lines),
@@ -261,6 +282,12 @@ class ProjectDiagnosticsTool:
                 "exit_code": int(payload.get("exit_code") or 0),
             },
         )
+        context.cache_tool_result(
+            kind="project_diagnostics",
+            key=cache_key,
+            value=replace(final, metadata=dict(final.metadata or {})),
+        )
+        return final
 
     @staticmethod
     def _error(message: str, start: float) -> ToolResult:
