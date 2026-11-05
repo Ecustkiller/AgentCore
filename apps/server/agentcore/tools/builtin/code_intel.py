@@ -80,6 +80,7 @@ class SymbolDef:
 class ImportRef:
     module: str
     line: int
+    submodule_candidate: bool = False
 
 
 @dataclass
@@ -287,7 +288,15 @@ class _PythonCollector(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         dots = "." * int(node.level or 0)
         if node.module:
-            self.imports.append(ImportRef(f"{dots}{node.module}", node.lineno))
+            base = f"{dots}{node.module}"
+            self.imports.append(ImportRef(base, node.lineno))
+            # ``from pkg import child`` may import a child module. Keep both
+            # edges; path resolution drops symbol-only candidates.
+            self.imports.extend(
+                ImportRef(f"{base}.{alias.name}", node.lineno, True)
+                for alias in node.names
+                if alias.name != "*"
+            )
             return
         # ``from . import util`` imports the child module, not the package itself.
         self.imports.extend(
@@ -565,6 +574,8 @@ async def _build_code_intel_index_uncached(
                     resolved = _resolve_import(ref.module, path, all_modules, all_paths)
                     label = "unresolved local import"
                 if resolved is None:
+                    if ref.submodule_candidate:
+                        continue
                     diagnostics.append(
                         (path, ref.line, f"{label} {ref.module}")
                     )
@@ -681,6 +692,97 @@ async def _grep_references(
         for hit in result.hits
     ]
     return lines or [f"未找到 {query} 的引用"], len(result.hits)
+
+
+async def _targeted_imports(
+    context: ToolContext,
+    *,
+    path: str,
+    limit: int,
+) -> tuple[list[str], dict[str, Any]] | None:
+    """Read one target and validate reverse importers from grep candidates."""
+    if not path or not _is_source(path):
+        return None
+    try:
+        target_text = await context.backend.read(path)
+    except WorkspaceError:
+        return None
+    target_imports, _ = _imports_only_intel(path, target_text)
+    lines = [f"{path}:{ref.line} -> {ref.module}" for ref in target_imports]
+
+    stem = PurePosixPath(path).stem
+    aliases = list(_module_aliases(path))
+    if not aliases:
+        aliases = [PurePosixPath(path).with_suffix("").as_posix(), stem]
+    terms = sorted({term for term in aliases if term}, key=len, reverse=True)
+    term_pattern = r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b"
+    stem_pattern = rf"\b{re.escape(stem)}\b"
+    if path.endswith(".py"):
+        parents = [
+            alias.rsplit(".", 1)[0]
+            for alias in aliases
+            if "." in alias
+        ]
+        alternatives = [
+            rf"^\s*(?:from|import)\s+.*{term_pattern}",
+            rf"^\s*from\s+\.+[A-Za-z0-9_.]*{stem_pattern}",
+            rf"^\s*from\s+\.+\s+import\s+.*{stem_pattern}",
+            *(
+                rf"^\s*from\s+{re.escape(parent)}\s+import\s+.*{stem_pattern}"
+                for parent in parents
+            ),
+        ]
+    else:
+        alternatives = [
+            rf"^\s*(?:import|export)\b.*[\"'][^\"']*{term_pattern}[\"']",
+            rf"require\s*\(\s*[\"'][^\"']*{term_pattern}[\"']",
+        ]
+    pattern = "|".join(alternatives)
+    try:
+        candidates = await context.backend.grep(
+            GrepQuery(
+                pattern=pattern,
+                directory=".",
+                max_results=500,
+            )
+        )
+    except WorkspaceError:
+        return None
+
+    candidate_paths = list(
+        dict.fromkeys(
+            hit.path
+            for hit in candidates.hits
+            if hit.path != path and _is_source(hit.path)
+        )
+    )[:500]
+    available = frozenset({path})
+    target_modules = {path: tuple(aliases)} if path.endswith(".py") else {}
+    sem = asyncio.Semaphore(16)
+
+    async def _imports_target(candidate: str) -> str | None:
+        async with sem:
+            try:
+                text = await context.backend.read(candidate)
+            except WorkspaceError:
+                return None
+        imports, _ = _imports_only_intel(candidate, text[:_INDEX_CHAR_CAP])
+        for ref in imports:
+            if _resolve_import(ref.module, candidate, target_modules, available) == path:
+                return candidate
+        return None
+
+    importers = await asyncio.gather(
+        *(_imports_target(candidate) for candidate in candidate_paths)
+    )
+    lines.extend(f"{path} <- {item}" for item in sorted(x for x in importers if x))
+    unique = list(dict.fromkeys(lines))
+    return unique[:limit], {
+        "source": "targeted",
+        "reverse_truncated": bool(
+            candidates.truncated or len(candidate_paths) >= 500
+        ),
+    }
 
 
 def _reference_lines(
@@ -902,6 +1004,24 @@ class CodeIntelTool:
                         "match_count": match_count,
                         "source": "grep",
                     },
+                )
+        if action == "imports" and path:
+            targeted = await _targeted_imports(
+                context,
+                path=path,
+                limit=limit,
+            )
+            if targeted is not None:
+                lines, metadata = targeted
+                if metadata.pop("reverse_truncated"):
+                    lines.append("… 反向依赖候选达到搜索预算")
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output="\n".join(lines) or f"{path} 没有可解析的 import",
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    output_limit=_OUTPUT_LIMIT,
+                    metadata={"action": action, **metadata},
                 )
         symbol_grep_checked = False
         if action == "symbols" and query:

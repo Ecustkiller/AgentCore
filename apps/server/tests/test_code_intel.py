@@ -125,7 +125,7 @@ async def test_references_do_not_depend_on_parser_budget(tmp_path, monkeypatch):
     assert result.metadata["source"] == "grep"
 
 
-async def test_imports_focuses_file_beyond_parser_budget(tmp_path, monkeypatch):
+async def test_imports_do_not_depend_on_parser_budget(tmp_path, monkeypatch):
     from agentcore.tools.builtin import code_intel as module
 
     (tmp_path / "a.py").write_text("value = 1\n", encoding="utf-8")
@@ -138,8 +138,38 @@ async def test_imports_focuses_file_beyond_parser_budget(tmp_path, monkeypatch):
     )
 
     assert "z.py:1 -> .a" in result.output
-    assert "仅显示正向 import" in result.output
-    assert result.metadata["focused_import"] is True
+    assert "z.py <- " not in result.output
+    assert result.metadata["source"] == "targeted"
+
+
+async def test_targeted_imports_finds_reverse_importer(tmp_path):
+    (tmp_path / "a.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "z.py").write_text("from a import value\n", encoding="utf-8")
+
+    result = await CodeIntelTool().execute(
+        {"action": "imports", "path": "a.py"},
+        _ctx(tmp_path),
+    )
+
+    assert "a.py <- z.py" in result.output
+    assert result.metadata["source"] == "targeted"
+
+
+async def test_targeted_imports_tracks_from_package_submodule(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "worker.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        "from pkg import worker\n",
+        encoding="utf-8",
+    )
+
+    result = await CodeIntelTool().execute(
+        {"action": "imports", "path": "pkg/worker.py"},
+        _ctx(tmp_path),
+    )
+
+    assert "pkg/worker.py <- consumer.py" in result.output
 
 
 async def test_affected_tests_prioritizes_test_directory(tmp_path, monkeypatch):
