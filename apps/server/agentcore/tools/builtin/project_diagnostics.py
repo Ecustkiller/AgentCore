@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -27,6 +28,8 @@ _MYPY_DIAGNOSTIC = re.compile(
     r"^(?P<path>.+?):(?P<line>\d+)(?::(?P<col>\d+))?: "
     r"(?P<severity>error|warning|note): (?P<message>.+?)(?: \[(?P<code>[^\]]+)\])?$"
 )
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -217,6 +220,13 @@ class ProjectDiagnosticsTool:
             context.note_tool_cache_saved_chars(len(cached.output or ""))
             metadata = dict(cached.metadata or {})
             metadata["turn_cache_hit"] = True
+            logger.info(
+                "project_diagnostics.completed",
+                language=str(metadata.get("language") or language),
+                source="cache",
+                duration_ms=int((time.monotonic() - start) * 1000),
+                diagnostics=int(metadata.get("diagnostics") or 0),
+            )
             return replace(
                 cached,
                 duration_ms=int((time.monotonic() - start) * 1000),
@@ -281,6 +291,14 @@ class ProjectDiagnosticsTool:
                 "diagnostics": len(diagnostics),
                 "exit_code": int(payload.get("exit_code") or 0),
             },
+        )
+        logger.info(
+            "project_diagnostics.completed",
+            language=resolved_language,
+            source="compiler",
+            duration_ms=final.duration_ms,
+            diagnostics=len(diagnostics),
+            exit_code=int(payload.get("exit_code") or 0),
         )
         context.cache_tool_result(
             kind="project_diagnostics",

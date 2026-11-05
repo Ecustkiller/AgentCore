@@ -13,6 +13,7 @@ from functools import cached_property
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
+from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolFace
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
@@ -22,6 +23,8 @@ from agentcore.tools.registration import (
     ToolSurface,
 )
 from agentcore.workspace.protocol import GrepQuery, WorkspaceError
+
+logger = get_logger(__name__)
 
 CodeAction = Literal[
     "symbols",
@@ -201,6 +204,30 @@ def _backend_index_identity(backend: object) -> str:
     if ws_id:
         return f"remote:{ws_id}"
     return f"object:{id(backend)}"
+
+
+def _log_completed(
+    action: str,
+    start: float,
+    *,
+    source: str,
+    files: int = 0,
+    diagnostics: int = 0,
+    matches: int = 0,
+    persistent_hits: int = 0,
+    truncated: bool = False,
+) -> None:
+    logger.info(
+        "code_intel.completed",
+        action=action,
+        source=source,
+        duration_ms=int((time.monotonic() - start) * 1000),
+        files=files,
+        diagnostics=diagnostics,
+        matches=matches,
+        persistent_hits=persistent_hits,
+        truncated=truncated,
+    )
 
 
 def _is_source(path: str) -> bool:
@@ -1441,6 +1468,12 @@ class CodeIntelTool:
             )
             if grep_result is not None:
                 lines, match_count = grep_result
+                _log_completed(
+                    action,
+                    start,
+                    source="grep",
+                    matches=match_count,
+                )
                 return ToolResult(
                     tool_call_id="",
                     success=True,
@@ -1461,8 +1494,17 @@ class CodeIntelTool:
             )
             if targeted is not None:
                 lines, metadata = targeted
-                if metadata.pop("reverse_truncated"):
+                reverse_truncated = bool(metadata.pop("reverse_truncated"))
+                if reverse_truncated:
                     lines.append("… 反向依赖候选达到搜索预算")
+                _log_completed(
+                    action,
+                    start,
+                    source=str(metadata.get("source") or "targeted"),
+                    files=1,
+                    matches=max(0, len(lines) - 1),
+                    truncated=reverse_truncated,
+                )
                 return ToolResult(
                     tool_call_id="",
                     success=True,
@@ -1482,6 +1524,12 @@ class CodeIntelTool:
             symbol_grep_checked = True
             if grep_symbols is not None and grep_symbols[0]:
                 lines, match_count = grep_symbols
+                _log_completed(
+                    action,
+                    start,
+                    source="grep",
+                    matches=match_count,
+                )
                 return ToolResult(
                     tool_call_id="",
                     success=True,
@@ -1557,6 +1605,16 @@ class CodeIntelTool:
             if show_budget_note:
                 lines.append(_INDEX_TRUNCATED_NOTE)
         output = "\n".join(lines) if lines else "没有结果"
+        _log_completed(
+            action,
+            start,
+            source="index",
+            files=len(result_index.files),
+            diagnostics=len(result_index.diagnostics),
+            matches=sum(1 for line in lines if not line.startswith("…")),
+            persistent_hits=result_index.persistent_hits,
+            truncated=result_index.truncated,
+        )
         return ToolResult(
             tool_call_id="",
             success=True,

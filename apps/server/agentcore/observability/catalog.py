@@ -533,6 +533,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='citations.out_of_range'),
     EventSpec(name='client_tool.cancel_pushed'),
     EventSpec(name='client_tool.rehang'),
+    EventSpec(name='code_intel.completed'),
     EventSpec(name='compaction.cooldown_skip'),
     EventSpec(
         name='compaction.done',
@@ -2178,6 +2179,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='presence.audience_failed'),
     EventSpec(name='presence.broadcast'),
     EventSpec(name='presence.broadcast_failed'),
+    EventSpec(name='project_diagnostics.completed'),
     EventSpec(
         name='push.fcm_configured',
         description='FCM sender 装配成功；project_id 须与真机注册的 Firebase 项目一致',
