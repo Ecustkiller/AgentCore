@@ -3,10 +3,22 @@
 import asyncio
 from pathlib import Path
 
-from agentcore.tools.builtin.code_intel import CodeIntelTool
+import pytest
+
+from agentcore.tools.builtin.code_intel import (
+    CodeIntelTool,
+    reset_persistent_index_cache,
+)
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+
+
+@pytest.fixture(autouse=True)
+def _clear_persistent_index():
+    reset_persistent_index_cache()
+    yield
+    reset_persistent_index_cache()
 
 
 def _ctx(root: Path) -> ToolContext:
@@ -286,6 +298,49 @@ async def test_symbol_query_avoids_full_index(tmp_path, monkeypatch):
 
     assert "web.ts" in result.output
     assert result.metadata["source"] == "grep"
+
+
+async def test_full_index_is_reused_across_turn_backends(tmp_path):
+    _seed(tmp_path)
+    first = await CodeIntelTool().execute({"action": "symbols"}, _ctx(tmp_path))
+    second_ctx = _ctx(tmp_path)
+    original_read = second_ctx.backend.read
+    read_paths: list[str] = []
+
+    async def counted_read(path: str) -> str:
+        read_paths.append(path)
+        return await original_read(path)
+
+    second_ctx.backend.read = counted_read  # type: ignore[method-assign]
+    second = await CodeIntelTool().execute({"action": "symbols"}, second_ctx)
+
+    assert first.success is True
+    assert second.success is True
+    assert second.metadata["persistent_hits"] > 0
+    assert read_paths == []
+
+
+async def test_incremental_index_reparses_only_changed_file(tmp_path):
+    _seed(tmp_path)
+    await CodeIntelTool().execute({"action": "symbols"}, _ctx(tmp_path))
+    (tmp_path / "src" / "util.py").write_text(
+        "class Calc:\n    def triple(self, value):\n        return value * 3\n",
+        encoding="utf-8",
+    )
+    second_ctx = _ctx(tmp_path)
+    original_read = second_ctx.backend.read
+    read_paths: list[str] = []
+
+    async def counted_read(path: str) -> str:
+        read_paths.append(path)
+        return await original_read(path)
+
+    second_ctx.backend.read = counted_read  # type: ignore[method-assign]
+    second = await CodeIntelTool().execute({"action": "symbols"}, second_ctx)
+
+    assert read_paths == ["src/util.py"]
+    assert "method triple" in second.output
+    assert second.metadata["persistent_hits"] > 0
 
 
 async def test_scoped_index_survives_parser_budget_truncation(tmp_path, monkeypatch):

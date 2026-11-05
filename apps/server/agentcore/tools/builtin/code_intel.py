@@ -6,9 +6,10 @@ import ast
 import asyncio
 import re
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from functools import cached_property
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
 from agentcore.core.types import ToolApproval, ToolFace
@@ -97,6 +98,7 @@ class CodeIntelIndex:
     paths: frozenset[str]
     diagnostics: list[tuple[str, int, str]]
     truncated: bool
+    persistent_hits: int = 0
 
     @cached_property
     def symbols(self) -> list[SymbolDef]:
@@ -112,6 +114,52 @@ class CodeIntelIndex:
                 if resolved:
                     reverse.setdefault(resolved, set()).add(importer)
         return reverse
+
+
+@dataclass(frozen=True)
+class _CachedFileIntel:
+    fingerprint: tuple[int, int]
+    imports: tuple[ImportRef, ...]
+    symbols: tuple[SymbolDef, ...]
+    diagnostics: tuple[tuple[int, str], ...]
+
+
+@dataclass
+class _WorkspaceIndexCache:
+    files: dict[str, _CachedFileIntel]
+    last_used: float
+
+
+_PERSISTENT_INDEX_MAX_WORKSPACES = 8
+_PERSISTENT_INDEX_CACHE: OrderedDict[
+    tuple[str, str, str], _WorkspaceIndexCache
+] = OrderedDict()
+
+
+def reset_persistent_index_cache() -> None:
+    """Clear process-wide incremental index state (test isolation / shutdown)."""
+    _PERSISTENT_INDEX_CACHE.clear()
+
+
+def _backend_index_identity(backend: object) -> str:
+    """Stable across turn backends that point at the same workspace."""
+    root = getattr(backend, "_root", None) or getattr(backend, "root", None)
+    if root is not None:
+        try:
+            return f"path:{Path(root).resolve()}"
+        except (OSError, TypeError, ValueError):
+            pass
+    channel = getattr(backend, "_channel", None)
+    if channel is not None:
+        return (
+            f"local:{getattr(channel, 'user_id', '')}:"
+            f"{getattr(channel, 'root_id', '')}:"
+            f"{getattr(backend, 'base_subpath', '')}"
+        )
+    ws_id = getattr(backend, "_ws_id", None)
+    if ws_id:
+        return f"remote:{ws_id}"
+    return f"object:{id(backend)}"
 
 
 def _is_source(path: str) -> bool:
@@ -465,9 +513,16 @@ async def _build_code_intel_index_uncached(
     if index_files is None:
         return CodeIntelIndex({}, frozenset(), [], False)
     try:
-        paths, truncated = await index_files(cap=_INDEX_LIST_CAP, order="path")
+        index_result = await index_files(cap=_INDEX_LIST_CAP, order="path")
     except Exception:
         return CodeIntelIndex({}, frozenset(), [], False)
+    if hasattr(index_result, "paths"):
+        paths = list(index_result.paths)
+        truncated = bool(index_result.truncated)
+        fingerprints = index_result.fingerprints()
+    else:  # historical lightweight test doubles returned a tuple
+        paths, truncated = index_result
+        fingerprints = {}
     scoped = [p for p in paths if _matches_path(p, scope)]
     if scope and not scoped:
         # A very large tree can exhaust the flat-list cap before a deep scope.
@@ -509,6 +564,37 @@ async def _build_code_intel_index_uncached(
         sources = source_candidates[:_INDEX_FILE_CAP]
     all_paths = frozenset(paths)
     sem = asyncio.Semaphore(16)
+    cache_key = (
+        _backend_index_identity(context.backend),
+        "imports" if imports_only else "full",
+        scope,
+    )
+    cached_workspace = _PERSISTENT_INDEX_CACHE.get(cache_key)
+    cached_files = cached_workspace.files if cached_workspace is not None else {}
+    next_cache: dict[str, _CachedFileIntel] = {}
+    files: dict[str, FileIntel] = {}
+    diagnostics: list[tuple[str, int, str]] = []
+    persistent_hits = 0
+    read_sources: list[str] = []
+    source_fingerprints: dict[str, tuple[int, int]] = {}
+
+    for path in sources:
+        fingerprint = fingerprints.get(path)
+        cached = cached_files.get(path)
+        if fingerprint is not None and cached is not None and cached.fingerprint == fingerprint:
+            files[path] = FileIntel(
+                path=path,
+                text="",
+                imports=list(cached.imports),
+                symbols=list(cached.symbols),
+            )
+            diagnostics.extend((path, line, message) for line, message in cached.diagnostics)
+            next_cache[path] = cached
+            persistent_hits += 1
+            continue
+        read_sources.append(path)
+        if fingerprint is not None:
+            source_fingerprints[path] = fingerprint
 
     async def _read(path: str) -> tuple[str, str | None, bool]:
         async with sem:
@@ -518,9 +604,7 @@ async def _build_code_intel_index_uncached(
                 return path, None, False
         return path, text[:_INDEX_CHAR_CAP], len(text) > _INDEX_CHAR_CAP
 
-    pairs = await asyncio.gather(*(_read(path) for path in sources))
-    files: dict[str, FileIntel] = {}
-    diagnostics: list[tuple[str, int, str]] = []
+    pairs = await asyncio.gather(*(_read(path) for path in read_sources))
     chars_used = 0
     content_truncated = False
     for path, text, file_truncated in pairs:
@@ -539,17 +623,32 @@ async def _build_code_intel_index_uncached(
         if imports_only:
             imports, import_error = _imports_only_intel(path, text)
             symbols = []
+            file_diagnostics: list[tuple[int, str]] = []
             if import_error is not None and not file_truncated:
-                diagnostics.append((path, import_error[0], import_error[1]))
+                file_diagnostics.append(import_error)
         elif path.endswith(".py"):
             symbols, imports, error = _python_intel(path, text)
+            file_diagnostics = [] if file_truncated else list(error)
             if not file_truncated:
                 diagnostics.extend((path, line, message) for line, message in error)
         else:
             symbols, imports, error = _js_intel(path, text)
+            file_diagnostics = [] if file_truncated else list(error)
             if not file_truncated:
                 diagnostics.extend((path, line, message) for line, message in error)
+        if imports_only:
+            diagnostics.extend(
+                (path, line, message) for line, message in file_diagnostics
+            )
         files[path] = FileIntel(path=path, text=text, imports=imports, symbols=symbols)
+        fingerprint = source_fingerprints.get(path)
+        if fingerprint is not None and not file_truncated:
+            next_cache[path] = _CachedFileIntel(
+                fingerprint=fingerprint,
+                imports=tuple(imports),
+                symbols=tuple(symbols),
+                diagnostics=tuple(file_diagnostics),
+            )
     modules = _path_modules(files)
     if not imports_only:
         all_modules = {
@@ -587,7 +686,16 @@ async def _build_code_intel_index_uncached(
             key=lambda item: (item[0].lower(), item[1], item[2]),
         ),
         truncated=bool(truncated or source_truncated or content_truncated),
+        persistent_hits=persistent_hits,
     )
+    if next_cache:
+        _PERSISTENT_INDEX_CACHE[cache_key] = _WorkspaceIndexCache(
+            files=next_cache,
+            last_used=time.monotonic(),
+        )
+        _PERSISTENT_INDEX_CACHE.move_to_end(cache_key)
+        while len(_PERSISTENT_INDEX_CACHE) > _PERSISTENT_INDEX_MAX_WORKSPACES:
+            _PERSISTENT_INDEX_CACHE.popitem(last=False)
     context.cache_tool_result(
         kind="code_intel_index",
         key=f"v3:{int(prioritize_tests)}:{int(imports_only)}:{scope}",
@@ -1098,6 +1206,7 @@ class CodeIntelTool:
                 "action": action,
                 "files": len(result_index.files),
                 "diagnostics": len(result_index.diagnostics),
-            "focused_import": focused_import,
+                "focused_import": focused_import,
+                "persistent_hits": result_index.persistent_hits,
             },
         )
