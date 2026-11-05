@@ -13,6 +13,10 @@ export interface ComposerCommand {
   description: string;
   keywords: string[];
   shortcut?: string;
+  status?: {
+    label: string;
+    tone: "muted" | "success" | "destructive";
+  };
 }
 
 export const COMPOSER_COMMANDS: ComposerCommand[] = [

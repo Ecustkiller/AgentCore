@@ -2,7 +2,7 @@ import { Badge, Button, Input, Select, Textarea } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import type { McpServerConfig, McpServerListItem } from "@shared/mcp-contract";
 import { RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 export const NEW_CONNECTOR_ID = "connector:new";
 
@@ -80,32 +80,6 @@ export function ConnectorStatusBadge({
     );
   }
   return null;
-}
-
-export function useMcpConnectors() {
-  const api = typeof window !== "undefined" ? window.mcpApi : undefined;
-  const [servers, setServers] = useState<McpServerListItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(!api?.listServers);
-
-  const reload = useCallback(async () => {
-    if (!api?.listServers) return;
-    const res = await api.listServers();
-    if (!res.ok) {
-      setError(res.error.detail);
-      setLoaded(true);
-      return;
-    }
-    setError(null);
-    setServers(res.servers);
-    setLoaded(true);
-  }, [api]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  return { api, servers, error, loaded, reload, setError };
 }
 
 /**

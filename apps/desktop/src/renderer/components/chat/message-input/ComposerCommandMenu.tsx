@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui";
 import {
   Bot,
   ListChecks,
@@ -79,6 +80,11 @@ export function ComposerCommandMenu({
             >
               {commandIcon(command.id)}
               <span className="shrink-0">{command.label}</span>
+              {command.status ? (
+                <Badge tone={command.status.tone} className="px-1 py-0">
+                  {command.status.label}
+                </Badge>
+              ) : null}
               <span className="ml-auto truncate text-xs text-muted-foreground">
                 {command.description}
               </span>

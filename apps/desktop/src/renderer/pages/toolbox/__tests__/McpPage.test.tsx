@@ -129,4 +129,13 @@ describe("MCP 栏", () => {
     expect(alert.className).not.toContain("destructive");
     expect(screen.queryByTestId("mcp-list")).toBeNull();
   });
+
+  it("listServers 通道异常时结束加载并显示原因", async () => {
+    stubApi(async () => {
+      throw new Error("IPC 不可用");
+    });
+    renderPage();
+    expect(await screen.findByText("IPC 不可用")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe("IPC 不可用");
+  });
 });

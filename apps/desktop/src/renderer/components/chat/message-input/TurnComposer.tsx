@@ -3,6 +3,7 @@ import { MentionMenu } from "@/components/chat/MentionMenu";
 import { IconButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
+import { useMcpConnectors } from "@/hooks/useMcpConnectors";
 import {
   COMPOSER_CONTINUE_PLACEHOLDER,
   isContinuableAssistant,
@@ -20,6 +21,7 @@ import {
   migrateLegacyDraft,
   plainText,
 } from "@/lib/inlineBody";
+import { describeMcpAvailability } from "@/lib/mcpAvailability";
 import { startNewConversation } from "@/lib/newConversation";
 import {
   assistantHasTeamStrip,
@@ -338,9 +340,27 @@ export function TurnComposer({
     query: string;
   } | null>(null);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
+  const mcp = useMcpConnectors();
+  const mcpAvailability = useMemo(
+    () =>
+      describeMcpAvailability({
+        desktop: Boolean(mcp.api),
+        loaded: mcp.loaded,
+        error: mcp.error,
+        servers: mcp.servers,
+      }),
+    [mcp.api, mcp.error, mcp.loaded, mcp.servers],
+  );
   const commandItems = useMemo(
-    () => (commandRange ? matchComposerCommands(commandRange.query) : []),
-    [commandRange],
+    () =>
+      commandRange
+        ? matchComposerCommands(commandRange.query).map((command) =>
+            command.id === "mcp"
+              ? { ...command, status: mcpAvailability }
+              : command,
+          )
+        : [],
+    [commandRange, mcpAvailability],
   );
   const folders = useFolders();
   const conversations = useConversations();

@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useMcpConnectors } from "@/hooks/useMcpConnectors";
 import { artifactColorVar } from "@/lib/catalogColors";
 import { promptConnectorShelfCopy } from "@/lib/promptShelfTile";
 import { cn } from "@/lib/utils";
@@ -22,7 +23,6 @@ import {
   ConnectorStatusBadge,
   NEW_CONNECTOR_ID,
   connectorCatalogId,
-  useMcpConnectors,
 } from "@/pages/toolbox/ConnectorsPage";
 import { ToolboxSourceTabs } from "@/pages/toolbox/ToolboxSourceTabs";
 import type { McpServerListItem } from "@shared/mcp-contract";
