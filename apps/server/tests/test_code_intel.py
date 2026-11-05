@@ -184,6 +184,48 @@ async def test_targeted_imports_tracks_from_package_submodule(tmp_path):
     assert "pkg/worker.py <- consumer.py" in result.output
 
 
+async def test_tsconfig_paths_and_extends_resolve_alias_dependencies(tmp_path):
+    (tmp_path / "src" / "lib").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tsconfig.base.json").write_text(
+        """
+        {
+          // inherited path aliases
+          "compilerOptions": {
+            "baseUrl": ".",
+            "paths": {
+              "~lib/*": ["src/lib/*"],
+            },
+          },
+        }
+        """,
+        encoding="utf-8",
+    )
+    (tmp_path / "tsconfig.json").write_text(
+        '{"extends":"./tsconfig.base.json","compilerOptions":{"strict":true}}',
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "lib" / "value.ts").write_text(
+        "export const value = 1;\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "use.ts").write_text(
+        'import { value } from "~lib/value";\nexport const used = value;\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "use.test.ts").write_text(
+        'import { used } from "@/use";\n',
+        encoding="utf-8",
+    )
+
+    result = await CodeIntelTool().execute(
+        {"action": "affected_tests", "paths": ["src/lib/value.ts"]},
+        _ctx(tmp_path),
+    )
+
+    assert "tests/use.test.ts" in result.output
+
+
 async def test_affected_tests_prioritizes_test_directory(tmp_path, monkeypatch):
     from agentcore.tools.builtin import code_intel as module
 

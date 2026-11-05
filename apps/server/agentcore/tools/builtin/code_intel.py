@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import re
 import time
 from collections import OrderedDict
@@ -84,6 +85,13 @@ class ImportRef:
     submodule_candidate: bool = False
 
 
+@dataclass(frozen=True)
+class TsPathAlias:
+    pattern: str
+    target: str
+    base_url: str
+
+
 @dataclass
 class FileIntel:
     path: str
@@ -99,6 +107,7 @@ class CodeIntelIndex:
     diagnostics: list[tuple[str, int, str]]
     truncated: bool
     persistent_hits: int = 0
+    ts_aliases: dict[str, tuple[TsPathAlias, ...]] = field(default_factory=dict)
 
     @cached_property
     def symbols(self) -> list[SymbolDef]:
@@ -110,7 +119,13 @@ class CodeIntelIndex:
         reverse: dict[str, set[str]] = {}
         for importer, file in self.files.items():
             for ref in file.imports:
-                resolved = _resolve_import(ref.module, importer, modules, self.paths)
+                resolved = _resolve_import(
+                    ref.module,
+                    importer,
+                    modules,
+                    self.paths,
+                    self.ts_aliases.get(importer, ()),
+                )
                 if resolved:
                     reverse.setdefault(resolved, set()).add(importer)
         return reverse
@@ -208,10 +223,19 @@ def _resolve_import(
     importer: str,
     modules: dict[str, tuple[str, ...]],
     available: frozenset[str],
+    ts_aliases: tuple[TsPathAlias, ...] = (),
 ) -> str | None:
     module = raw.strip()
     if not module:
         return None
+    for alias in ts_aliases:
+        matched = _match_ts_alias(module, alias)
+        if matched is None:
+            continue
+        for suffix in _SOURCE_SUFFIXES:
+            candidate = f"{matched}{suffix}"
+            if candidate in available:
+                return candidate
     if module.startswith("@/") or module.startswith("~/"):
         base = PurePosixPath(module[2:])
         for prefix in ("", "src/"):
@@ -295,6 +319,193 @@ def _resolve_import(
         if any(known.startswith(module + ".") for known in aliases):
             return path
     return None
+
+
+_SOURCE_SUFFIXES = (
+    "",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".mjs",
+    ".cts",
+    ".cjs",
+    "/__init__.py",
+    "/index.ts",
+    "/index.tsx",
+    "/index.js",
+    "/index.jsx",
+)
+
+
+def _match_ts_alias(module: str, alias: TsPathAlias) -> str | None:
+    pattern = alias.pattern
+    target = alias.target
+    if "*" in pattern:
+        prefix, suffix = pattern.split("*", 1)
+        if not module.startswith(prefix) or not module.endswith(suffix):
+            return None
+        middle = module[len(prefix) : len(module) - len(suffix) if suffix else None]
+        target = target.replace("*", middle)
+    elif module != pattern:
+        return None
+    return (PurePosixPath(alias.base_url) / target).as_posix()
+
+
+def _strip_jsonc(text: str) -> str:
+    """Remove comments and trailing commas without touching string contents."""
+    out: list[str] = []
+    i = 0
+    quote: str | None = None
+    while i < len(text):
+        char = text[i]
+        if quote is not None:
+            out.append(char)
+            if char == "\\" and i + 1 < len(text):
+                i += 1
+                out.append(text[i])
+            elif char == quote:
+                quote = None
+            i += 1
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            out.append(char)
+            i += 1
+            continue
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = len(text) if end < 0 else end + 2
+            continue
+        out.append(char)
+        i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+
+
+def _resolved_tsconfig_aliases(
+    config_paths: list[str],
+    texts: dict[str, str],
+) -> dict[str, tuple[TsPathAlias, ...]]:
+    cache: dict[str, tuple[TsPathAlias, ...]] = {}
+
+    def resolve(path: str, stack: set[str]) -> tuple[TsPathAlias, ...]:
+        if path in cache:
+            return cache[path]
+        if path in stack or path not in texts:
+            return ()
+        stack.add(path)
+        try:
+            data = json.loads(_strip_jsonc(texts[path]))
+        except (json.JSONDecodeError, TypeError):
+            return ()
+        if not isinstance(data, dict):
+            return ()
+        parent_aliases: tuple[TsPathAlias, ...] = ()
+        raw_extends = data.get("extends")
+        extends = raw_extends if isinstance(raw_extends, list) else [raw_extends]
+        for parent in extends:
+            if not isinstance(parent, str) or not parent.startswith("."):
+                continue
+            parent_path = (PurePosixPath(path).parent / parent).as_posix()
+            if not parent_path.endswith(".json"):
+                parent_path += ".json"
+            parent_aliases = (*parent_aliases, *resolve(parent_path, stack))
+        compiler = data.get("compilerOptions")
+        compiler = compiler if isinstance(compiler, dict) else {}
+        base_dir = PurePosixPath(path).parent
+        raw_base_url = compiler.get("baseUrl")
+        base_url = (
+            (base_dir / str(raw_base_url)).as_posix()
+            if isinstance(raw_base_url, str) and raw_base_url
+            else base_dir.as_posix()
+        )
+        current: list[TsPathAlias] = []
+        if isinstance(raw_base_url, str) and raw_base_url:
+            current.append(TsPathAlias("*", "*", base_url))
+        raw_paths = compiler.get("paths")
+        if isinstance(raw_paths, dict):
+            for pattern, targets in raw_paths.items():
+                if not isinstance(pattern, str) or not isinstance(targets, list):
+                    continue
+                for target in targets:
+                    if isinstance(target, str) and target:
+                        current.append(TsPathAlias(pattern, target, base_url))
+        overridden = {alias.pattern for alias in current}
+        aliases = [
+            *[alias for alias in parent_aliases if alias.pattern not in overridden],
+            *current,
+        ]
+        # More specific patterns win over wildcard/baseUrl rules.
+        ordered = tuple(
+            sorted(
+                dict.fromkeys(aliases),
+                key=lambda alias: (
+                    "*" in alias.pattern,
+                    -len(alias.pattern.replace("*", "")),
+                    alias.pattern,
+                ),
+            )
+        )
+        cache[path] = ordered
+        return ordered
+
+    out: dict[str, tuple[TsPathAlias, ...]] = {}
+    for path in config_paths:
+        if path not in out:
+            out[path] = resolve(path, set())
+    return out
+
+
+async def _build_ts_alias_map(
+    context: ToolContext,
+    all_paths: frozenset[str],
+    sources: list[str],
+) -> dict[str, tuple[TsPathAlias, ...]]:
+    ts_sources = [
+        path
+        for path in sources
+        if PurePosixPath(path).suffix.lower() in {".ts", ".tsx", ".js", ".jsx"}
+    ]
+    if not ts_sources:
+        return {}
+    config_paths = [
+        path
+        for path in all_paths
+        if PurePosixPath(path).name.startswith("tsconfig")
+        and path.endswith(".json")
+    ][:32]
+    if not config_paths:
+        return {}
+    sem = asyncio.Semaphore(8)
+
+    async def read_config(path: str) -> tuple[str, str | None]:
+        async with sem:
+            try:
+                return path, await context.backend.read(path)
+            except WorkspaceError:
+                return path, None
+
+    pairs = await asyncio.gather(*(read_config(path) for path in config_paths))
+    texts = {path: text for path, text in pairs if text is not None}
+    aliases_by_config = _resolved_tsconfig_aliases(config_paths, texts)
+    out: dict[str, tuple[TsPathAlias, ...]] = {}
+    for source in ts_sources:
+        candidates = [
+            path
+            for path in config_paths
+            if _matches_path(source, PurePosixPath(path).parent.as_posix())
+        ]
+        if not candidates:
+            continue
+        nearest = max(candidates, key=lambda path: len(PurePosixPath(path).parts))
+        out[source] = aliases_by_config.get(nearest, ())
+    return out
 
 
 class _PythonCollector(ast.NodeVisitor):
@@ -649,6 +860,7 @@ async def _build_code_intel_index_uncached(
                 symbols=tuple(symbols),
                 diagnostics=tuple(file_diagnostics),
             )
+    ts_aliases = await _build_ts_alias_map(context, all_paths, list(files))
     modules = _path_modules(files)
     if not imports_only:
         all_modules = {
@@ -664,13 +876,25 @@ async def _build_code_intel_index_uncached(
         for path, file in files.items():
             for ref in file.imports:
                 if ref.module.startswith("."):
-                    resolved = _resolve_import(ref.module, path, modules, all_paths)
+                    resolved = _resolve_import(
+                        ref.module,
+                        path,
+                        modules,
+                        all_paths,
+                        ts_aliases.get(path, ()),
+                    )
                     label = "unresolved relative import"
                 else:
                     root = ref.module.split(".", 1)[0]
                     if root not in local_roots:
                         continue
-                    resolved = _resolve_import(ref.module, path, all_modules, all_paths)
+                    resolved = _resolve_import(
+                        ref.module,
+                        path,
+                        all_modules,
+                        all_paths,
+                        ts_aliases.get(path, ()),
+                    )
                     label = "unresolved local import"
                 if resolved is None:
                     if ref.submodule_candidate:
@@ -687,6 +911,7 @@ async def _build_code_intel_index_uncached(
         ),
         truncated=bool(truncated or source_truncated or content_truncated),
         persistent_hits=persistent_hits,
+        ts_aliases=ts_aliases,
     )
     if next_cache:
         _PERSISTENT_INDEX_CACHE[cache_key] = _WorkspaceIndexCache(
@@ -705,7 +930,7 @@ async def _build_code_intel_index_uncached(
 
 
 def _matches_path(path: str, scope: str) -> bool:
-    if not scope:
+    if not scope or scope == ".":
         return True
     scope = scope.rstrip("/")
     return path == scope or path.startswith(scope + "/")
@@ -1113,7 +1338,7 @@ class CodeIntelTool:
                         "source": "grep",
                     },
                 )
-        if action == "imports" and path:
+        if action == "imports" and path and path.endswith(".py"):
             targeted = await _targeted_imports(
                 context,
                 path=path,
