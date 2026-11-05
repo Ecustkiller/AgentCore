@@ -61,6 +61,7 @@ import {
 import { registerSidecarIpc } from "./sidecar-service";
 import { registerTerminalIpc } from "./terminal-service";
 import { initUpdater } from "./updater";
+import { registerVoiceIpc } from "./voice";
 import { registerWindowFrameIpc } from "./window-frame";
 import { loadWindowState, manageWindowState } from "./window-state";
 import { registerWorkBuddyImportIpc } from "./workbuddy-import";
@@ -430,6 +431,7 @@ app.whenReady().then(async () => {
   registerTerminalIpc();
   registerProcessIpc();
   registerPtyIpc();
+  registerVoiceIpc(() => mainWindowRef);
   configureShellPresence({
     getMainWindow: () => mainWindowRef,
     listFloatEntries,

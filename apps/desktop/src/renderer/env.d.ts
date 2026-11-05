@@ -15,6 +15,7 @@ import type { PtyApi } from "@shared/pty-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { TerminalApi } from "@shared/terminal-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
+import type { VoiceApi } from "@shared/voice-contract";
 import type { WindowApi } from "@shared/window-contract";
 import type { WorkBuddyImportApi } from "@shared/workbuddy-import-contract";
 
@@ -47,6 +48,8 @@ declare global {
     processApi?: ProcessApi;
     /** 用户交互 shell（终端 tab · M3）；纯浏览器 / 单测环境可能缺失。 */
     ptyApi?: PtyApi;
+    /** Electron local Whisper voice input; absent in web / tests. */
+    voiceApi?: VoiceApi;
     /** OS 原生通知（壳不在场时的系统栏出口）；纯浏览器 / 单测环境可能缺失。 */
     notificationApi?: NotificationApi;
     /** 本机 Host 能力（host_* ClientTool 回填）；纯浏览器 / 单测环境可能缺失。 */

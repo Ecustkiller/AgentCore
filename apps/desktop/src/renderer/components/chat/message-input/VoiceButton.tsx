@@ -20,6 +20,9 @@ export function VoiceButton({
       aria-label={
         isRecording ? "停止录音" : isProcessing ? "转写中" : "语音输入"
       }
+      title={
+        isRecording ? "停止录音" : isProcessing ? "本机转写中" : "语音输入"
+      }
       aria-pressed={isRecording}
       className={
         isRecording

@@ -110,6 +110,10 @@ const config = {
 
   mac: {
     icon: abs(identity.macIcon),
+    extendInfo: {
+      NSMicrophoneUsageDescription:
+        "Nexus 使用麦克风将语音转换为输入文本。录音仅在本机转写，不会上传。",
+    },
     // dmg = 首装与当前「下载安装包」路径；zip / latest-mac.yml 仍上传供版本检查。
     // 内测未签名：Gatekeeper 常报「已损坏」，首装/替换后须 xattr -cr；Squirrel.Mac 拒装未签名
     // 更新，主进程 codesign 探测到无签名身份即降级为引导手动下载（发布与门禁.md §1.6）。

@@ -65,6 +65,11 @@ import {
   type UpdaterStatus,
 } from "@shared/updater-contract";
 import {
+  VOICE_CHANNELS,
+  type VoiceApi,
+  type VoiceModelProgress,
+} from "@shared/voice-contract";
+import {
   WINDOW_CHANNELS,
   type WindowApi,
   type WindowFramePreset,
@@ -255,6 +260,18 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.consumeStagedBytes, { stagingId }),
   sweepStagingOrphans: (liveStagingIds) =>
     ipcRenderer.invoke(FS_CHANNELS.sweepStagingOrphans, { liveStagingIds }),
+};
+
+const voiceApi: VoiceApi = {
+  status: () => ipcRenderer.invoke(VOICE_CHANNELS.status),
+  prepare: () => ipcRenderer.invoke(VOICE_CHANNELS.prepare),
+  transcribe: (wav) => ipcRenderer.invoke(VOICE_CHANNELS.transcribe, wav),
+  onProgress: (cb) => {
+    const listener = (_event: unknown, progress: VoiceModelProgress) =>
+      cb(progress);
+    ipcRenderer.on(VOICE_CHANNELS.progress, listener);
+    return () => ipcRenderer.removeListener(VOICE_CHANNELS.progress, listener);
+  },
 };
 
 const sidecarApi: SidecarApi = {
@@ -522,6 +539,7 @@ try {
   contextBridge.exposeInMainWorld("terminalApi", terminalApi);
   contextBridge.exposeInMainWorld("processApi", processApi);
   contextBridge.exposeInMainWorld("ptyApi", ptyApi);
+  contextBridge.exposeInMainWorld("voiceApi", voiceApi);
   contextBridge.exposeInMainWorld("notificationApi", notificationApi);
   contextBridge.exposeInMainWorld("hostApi", hostApi);
   contextBridge.exposeInMainWorld("mcpApi", mcpApi);
