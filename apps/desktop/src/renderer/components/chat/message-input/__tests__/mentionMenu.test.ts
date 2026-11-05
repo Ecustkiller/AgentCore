@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { __setUiStorageBackendForTests } from "@/lib/uiStorage";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   parseMentionFilter,
   pickOnDemandSkills,
@@ -10,6 +11,25 @@ import {
   mentionMenuKeyAction,
   showMentionCategoryLevel,
 } from "../mentionMenuLevel";
+import { recordMentionRecent } from "../mentionRecents";
+
+beforeEach(() => {
+  const store = new Map<string, string>();
+  __setUiStorageBackendForTests({
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => {
+      store.set(k, v);
+    },
+    removeItem: (k) => {
+      store.delete(k);
+    },
+    keys: () => [...store.keys()],
+  });
+});
+
+afterEach(() => {
+  __setUiStorageBackendForTests(null);
+});
 
 describe("parseMentionFilter", () => {
   it("returns null section when no type prefix", () => {
@@ -265,6 +285,30 @@ describe("pickOnDemandSkills", () => {
   it("按名字或摘要过滤", () => {
     const items = pickOnDemandSkills(list, "短句");
     expect(items.map((i) => i.relPath)).toEqual(["d1"]);
+  });
+
+  it("最近使用的技能排在前面", () => {
+    const skills = [
+      ...list,
+      {
+        id: "d4",
+        name: "基金研究.md",
+        description: "分析基金",
+        applyMode: "on_demand",
+        disputedAt: null,
+        frontmatterError: null,
+        kind: "document",
+      },
+    ];
+    recordMentionRecent({
+      kind: "document",
+      sourceId: "skill",
+      relPath: "d4",
+    });
+    expect(pickOnDemandSkills(skills, "", 10).map((i) => i.relPath)).toEqual([
+      "d4",
+      "d1",
+    ]);
   });
 });
 

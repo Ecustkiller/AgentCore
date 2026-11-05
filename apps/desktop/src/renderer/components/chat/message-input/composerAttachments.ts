@@ -14,6 +14,7 @@ import {
   type WorkspaceBinding,
   getWorkspaceBinding,
 } from "@/services/workspaceBinding";
+import { mentionRecentKey, readMentionRecents } from "./mentionRecents";
 
 /** 已选附件（含正文，仅发送时携带；气泡只展示元信息）。 */
 export interface PendingAttachment {
@@ -216,14 +217,26 @@ export function pickOnDemandSkills(
         e.description.toLowerCase().includes(q),
     );
   }
-  return rows.slice(0, limit).map((e) => ({
-    sourceId: "skill",
-    sourceLabel: "技能",
-    relPath: e.id,
-    name: e.name.replace(/\.md$/i, ""),
-    display: e.description || "技能",
-    kind: "document" as const,
-  }));
+  const recents = readMentionRecents();
+  return rows
+    .map((e) => ({
+      sourceId: "skill",
+      sourceLabel: "技能",
+      relPath: e.id,
+      name: e.name.replace(/\.md$/i, ""),
+      display: e.description || "技能",
+      kind: "document" as const,
+    }))
+    .map((entry) => ({
+      ...entry,
+      lastUsedAt: recents.get(mentionRecentKey(entry)),
+    }))
+    .sort(
+      (a, b) =>
+        (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) ||
+        a.name.localeCompare(b.name, "zh"),
+    )
+    .slice(0, limit);
 }
 
 export async function buildMentionSources(
