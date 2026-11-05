@@ -105,6 +105,10 @@ async def test_code_intel_symbols_and_references(tmp_path: Path):
         {"action": "references", "query": "add", "path": "src"},
         _ctx(tmp_path),
     )
+    callers = await tool.execute(
+        {"action": "callers", "query": "add"},
+        _ctx(tmp_path),
+    )
     methods = await tool.execute(
         {"action": "symbols", "query": "double", "path": "src/util.py"},
         _ctx(tmp_path),
@@ -115,6 +119,7 @@ async def test_code_intel_symbols_and_references(tmp_path: Path):
     assert references.success is True
     assert "tests/test_app.py" in references.output
     assert "tests/test_app.py" not in scoped_references.output
+    assert "tests/test_app.py:4: calls add" in callers.output
     assert "src/util.py:2:" in methods.output
     assert "double" in methods.output
 
@@ -419,6 +424,24 @@ async def test_symbol_grep_completes_partial_query_without_index(tmp_path):
 
     assert "a.py:1: function first_helper" in result.output
     assert "z.py:1: function first_deep" in result.output
+
+
+async def test_callers_fallback_covers_files_beyond_index_budget(
+    tmp_path, monkeypatch
+):
+    from agentcore.tools.builtin import code_intel as module
+
+    (tmp_path / "a.py").write_text("def target():\n    pass\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "z.py").write_text("target()\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_INDEX_FILE_CAP", 2)
+
+    result = await CodeIntelTool().execute(
+        {"action": "callers", "query": "target"},
+        _ctx(tmp_path),
+    )
+
+    assert "z.py:1: calls target" in result.output
 
 
 async def test_scoped_index_walks_past_flat_list_cap(tmp_path, monkeypatch):

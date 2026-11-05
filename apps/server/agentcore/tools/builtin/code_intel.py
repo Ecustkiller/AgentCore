@@ -26,6 +26,7 @@ from agentcore.workspace.protocol import GrepQuery, WorkspaceError
 CodeAction = Literal[
     "symbols",
     "references",
+    "callers",
     "imports",
     "diagnostics",
     "affected_tests",
@@ -47,6 +48,10 @@ _SYMBOL_RE = re.compile(
 )
 _IMPORT_RE = re.compile(
     r"""(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["'](?P<module>[^"']+)["']"""
+)
+_JS_CALL_RE = re.compile(r"\b(?P<name>[A-Za-z_$][\w$]*)\s*\(")
+_JS_CALL_KEYWORDS = frozenset(
+    {"if", "for", "while", "switch", "catch", "function", "with"}
 )
 _PYFLAKES_CORRECTNESS = frozenset(
     {
@@ -86,6 +91,12 @@ class ImportRef:
 
 
 @dataclass(frozen=True)
+class CallRef:
+    name: str
+    line: int
+
+
+@dataclass(frozen=True)
 class TsPathAlias:
     pattern: str
     target: str
@@ -98,6 +109,7 @@ class FileIntel:
     text: str
     imports: list[ImportRef] = field(default_factory=list)
     symbols: list[SymbolDef] = field(default_factory=list)
+    calls: list[CallRef] = field(default_factory=list)
 
 
 @dataclass
@@ -130,12 +142,26 @@ class CodeIntelIndex:
                     reverse.setdefault(resolved, set()).add(importer)
         return reverse
 
+    def callers(self, query: str, scope: str) -> list[tuple[str, CallRef]]:
+        needle = query.lower()
+        out: list[tuple[str, CallRef]] = []
+        for path, file in self.files.items():
+            if not _matches_path(path, scope):
+                continue
+            out.extend(
+                (path, call)
+                for call in file.calls
+                if call.name.lower() == needle
+            )
+        return sorted(out, key=lambda item: (item[0].lower(), item[1].line))
+
 
 @dataclass(frozen=True)
 class _CachedFileIntel:
     fingerprint: tuple[int, int]
     imports: tuple[ImportRef, ...]
     symbols: tuple[SymbolDef, ...]
+    calls: tuple[CallRef, ...]
     diagnostics: tuple[tuple[int, str], ...]
 
 
@@ -513,6 +539,7 @@ class _PythonCollector(ast.NodeVisitor):
         self.path = path
         self.symbols: list[SymbolDef] = []
         self.imports: list[ImportRef] = []
+        self.calls: list[CallRef] = []
         self._containers: list[tuple[str, bool]] = []
 
     def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
@@ -562,14 +589,25 @@ class _PythonCollector(ast.NodeVisitor):
             ImportRef(f"{dots}{alias.name}", node.lineno) for alias in node.names
         )
 
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        name: str | None = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if name:
+            self.calls.append(CallRef(name, node.lineno))
+        self.generic_visit(node)
+
 
 def _python_intel(
     path: str, text: str
-) -> tuple[list[SymbolDef], list[ImportRef], list[tuple[int, str]]]:
+) -> tuple[list[SymbolDef], list[ImportRef], list[CallRef], list[tuple[int, str]]]:
     try:
         tree = ast.parse(text, filename=path)
     except SyntaxError as e:
-        return [], [], [(e.lineno or 1, e.msg)]
+        return [], [], [], [(e.lineno or 1, e.msg)]
     collector = _PythonCollector(path)
     collector.visit(tree)
     # pyflakes is a lightweight semantic pass (undefined names, redefinitions,
@@ -582,7 +620,7 @@ def _python_intel(
         for message in messages
         if type(message).__name__ in _PYFLAKES_CORRECTNESS
     ]
-    return collector.symbols, collector.imports, diagnostics
+    return collector.symbols, collector.imports, collector.calls, diagnostics
 
 
 def _mask_js_noncode(text: str, *, mask_strings: bool) -> str:
@@ -629,7 +667,7 @@ def _mask_js_noncode(text: str, *, mask_strings: bool) -> str:
 
 def _js_intel(
     path: str, text: str
-) -> tuple[list[SymbolDef], list[ImportRef], list[tuple[int, str]]]:
+) -> tuple[list[SymbolDef], list[ImportRef], list[CallRef], list[tuple[int, str]]]:
     code_only = _mask_js_noncode(text, mask_strings=True)
     without_comments = _mask_js_noncode(text, mask_strings=False)
     symbols = [
@@ -643,11 +681,22 @@ def _js_intel(
         )
         for match in _IMPORT_RE.finditer(without_comments)
     ]
+    declaration_lines = {(symbol.name, symbol.line) for symbol in symbols}
+    calls = [
+        CallRef(match.group("name"), text.count("\n", 0, match.start()) + 1)
+        for match in _JS_CALL_RE.finditer(code_only)
+        if match.group("name") not in _JS_CALL_KEYWORDS
+        and (
+            match.group("name"),
+            text.count("\n", 0, match.start()) + 1,
+        )
+        not in declaration_lines
+    ]
     if code_only.count("{") != code_only.count("}"):
-        return symbols, imports, [(1, "unbalanced braces")]
+        return symbols, imports, calls, [(1, "unbalanced braces")]
     if code_only.count("(") != code_only.count(")"):
-        return symbols, imports, [(1, "unbalanced parentheses")]
-    return symbols, imports, []
+        return symbols, imports, calls, [(1, "unbalanced parentheses")]
+    return symbols, imports, calls, []
 
 
 def _imports_only_intel(
@@ -680,7 +729,7 @@ async def build_code_intel_index(
     prioritize_tests: bool = False,
     imports_only: bool = False,
 ) -> CodeIntelIndex:
-    cache_key = f"v3:{int(prioritize_tests)}:{int(imports_only)}:{scope}"
+    cache_key = f"v4:{int(prioritize_tests)}:{int(imports_only)}:{scope}"
     cached = context.get_cached_tool_result(kind="code_intel_index", key=cache_key)
     if isinstance(cached, CodeIntelIndex):
         return cached
@@ -798,6 +847,7 @@ async def _build_code_intel_index_uncached(
                 text="",
                 imports=list(cached.imports),
                 symbols=list(cached.symbols),
+                calls=list(cached.calls),
             )
             diagnostics.extend((path, line, message) for line, message in cached.diagnostics)
             next_cache[path] = cached
@@ -834,16 +884,17 @@ async def _build_code_intel_index_uncached(
         if imports_only:
             imports, import_error = _imports_only_intel(path, text)
             symbols = []
+            calls: list[CallRef] = []
             file_diagnostics: list[tuple[int, str]] = []
             if import_error is not None and not file_truncated:
                 file_diagnostics.append(import_error)
         elif path.endswith(".py"):
-            symbols, imports, error = _python_intel(path, text)
+            symbols, imports, calls, error = _python_intel(path, text)
             file_diagnostics = [] if file_truncated else list(error)
             if not file_truncated:
                 diagnostics.extend((path, line, message) for line, message in error)
         else:
-            symbols, imports, error = _js_intel(path, text)
+            symbols, imports, calls, error = _js_intel(path, text)
             file_diagnostics = [] if file_truncated else list(error)
             if not file_truncated:
                 diagnostics.extend((path, line, message) for line, message in error)
@@ -851,13 +902,20 @@ async def _build_code_intel_index_uncached(
             diagnostics.extend(
                 (path, line, message) for line, message in file_diagnostics
             )
-        files[path] = FileIntel(path=path, text=text, imports=imports, symbols=symbols)
+        files[path] = FileIntel(
+            path=path,
+            text=text,
+            imports=imports,
+            symbols=symbols,
+            calls=calls,
+        )
         fingerprint = source_fingerprints.get(path)
         if fingerprint is not None and not file_truncated:
             next_cache[path] = _CachedFileIntel(
                 fingerprint=fingerprint,
                 imports=tuple(imports),
                 symbols=tuple(symbols),
+                calls=tuple(calls),
                 diagnostics=tuple(file_diagnostics),
             )
     ts_aliases = await _build_ts_alias_map(context, all_paths, list(files))
@@ -923,7 +981,7 @@ async def _build_code_intel_index_uncached(
             _PERSISTENT_INDEX_CACHE.popitem(last=False)
     context.cache_tool_result(
         kind="code_intel_index",
-        key=f"v3:{int(prioritize_tests)}:{int(imports_only)}:{scope}",
+        key=f"v4:{int(prioritize_tests)}:{int(imports_only)}:{scope}",
         value=index,
     )
     return index
@@ -1001,6 +1059,41 @@ async def _grep_symbol_fallback(
         if len(lines) >= limit:
             break
     return lines, len(result.hits)
+
+
+async def _grep_call_fallback(
+    context: ToolContext,
+    *,
+    query: str,
+    path: str,
+    limit: int,
+) -> list[str]:
+    try:
+        result = await context.backend.grep(
+            GrepQuery(
+                pattern=rf"\b{re.escape(query)}\s*\(",
+                directory=path or ".",
+                max_results=min(limit * 4, 200),
+            )
+        )
+    except WorkspaceError:
+        return []
+    declaration = re.compile(
+        rf"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+        rf"(?:function|class|def|interface|type|enum|const|let|var)\s+"
+        rf"{re.escape(query)}\b"
+    )
+    lines: list[str] = []
+    for hit in result.hits:
+        stripped = hit.text.strip()
+        if not _is_source(hit.path) or declaration.match(stripped):
+            continue
+        if stripped.startswith(("//", "/*", "*")):
+            continue
+        lines.append(f"{hit.path}:{hit.line_no}: calls {query}")
+        if len(lines) >= limit:
+            break
+    return lines
 
 
 async def _grep_references(
@@ -1136,6 +1229,24 @@ def _reference_lines(
     return lines or [f"未找到 {query} 的引用"]
 
 
+def _caller_lines(
+    index: CodeIntelIndex,
+    query: str,
+    scope: str,
+    limit: int,
+) -> list[str]:
+    if not query:
+        return ["callers 需要 query"]
+    callers = index.callers(query, scope)
+    lines = [
+        f"{path}:{call.line}: calls {call.name}"
+        for path, call in callers[:limit]
+    ]
+    if len(callers) > limit:
+        lines.append(f"… 另有 {len(callers) - limit} 个调用点")
+    return lines or [f"未找到 {query} 的直接调用点"]
+
+
 def _import_lines(index: CodeIntelIndex, path: str) -> list[str]:
     reverse = index.reverse_imports
     if path:
@@ -1215,6 +1326,8 @@ def _render(action: CodeAction, index: CodeIntelIndex, args: dict[str, Any]) -> 
         lines = _symbol_lines(index, query, path, limit)
     elif action == "references":
         lines = _reference_lines(index, query, path, limit)
+    elif action == "callers":
+        lines = _caller_lines(index, query, path, limit)
     elif action == "imports":
         lines = _import_lines(index, path)[:limit]
     elif action == "affected_tests":
@@ -1249,7 +1362,7 @@ class CodeIntelTool:
         return ToolSchema(
             name="code_intel",
             description=(
-                "只读代码导航：查声明、文本引用、依赖、静态诊断和受影响测试；"
+                "只读代码导航：查声明、引用、直接调用点、依赖和受影响测试；"
                 "Python 诊断含未定义名称，TS/JS 为轻量结构诊断，非完整 LSP。"
             ),
             parameters={
@@ -1260,6 +1373,7 @@ class CodeIntelTool:
                         "enum": [
                             "symbols",
                             "references",
+                            "callers",
                             "imports",
                             "diagnostics",
                             "affected_tests",
@@ -1267,11 +1381,11 @@ class CodeIntelTool:
                     },
                     "query": {
                         "type": "string",
-                        "description": "符号名称片段；references 按文本边界匹配。",
+                        "description": "符号名称；references 文本匹配，callers 精确匹配调用名。",
                     },
                     "path": {
                         "type": "string",
-                        "description": "限定 symbols/references/diagnostics 的文件或目录。",
+                        "description": "限定 symbols/references/callers/diagnostics 的文件或目录。",
                     },
                     "paths": {
                         "type": "array",
@@ -1292,6 +1406,7 @@ class CodeIntelTool:
         allowed = {
             "symbols",
             "references",
+            "callers",
             "imports",
             "diagnostics",
             "affected_tests",
@@ -1379,7 +1494,7 @@ class CodeIntelTool:
                         "source": "grep",
                     },
                 )
-        scope = path if action in {"symbols", "references", "diagnostics"} else ""
+        scope = path if action in {"symbols", "references", "callers", "diagnostics"} else ""
         index = await build_code_intel_index(
             context,
             scope=scope,
@@ -1418,6 +1533,27 @@ class CodeIntelTool:
                 )
                 if fallback_result is not None and fallback_result[0]:
                     lines = list(dict.fromkeys([*lines, *fallback_result[0]]))
+            if show_budget_note:
+                lines.append(_INDEX_TRUNCATED_NOTE)
+        if action == "callers" and query:
+            show_budget_note = bool(lines and lines[-1] == _INDEX_TRUNCATED_NOTE)
+            if show_budget_note:
+                lines = lines[:-1]
+            callers = index.callers(query, path)
+            if index.truncated or not callers:
+                fallback = await _grep_call_fallback(
+                    context,
+                    query=query,
+                    path=path,
+                    limit=limit,
+                )
+                if fallback:
+                    lines = [
+                        line
+                        for line in lines
+                        if not line.startswith("未找到 ")
+                    ]
+                    lines = list(dict.fromkeys([*lines, *fallback]))
             if show_budget_note:
                 lines.append(_INDEX_TRUNCATED_NOTE)
         output = "\n".join(lines) if lines else "没有结果"
