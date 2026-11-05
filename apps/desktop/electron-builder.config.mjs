@@ -26,6 +26,14 @@ const root = dirname(fileURLToPath(import.meta.url));
 const identity = resolveReleaseIdentity(
   parseReleaseChannel(process.env.DESKTOP_RELEASE_CHANNEL),
 );
+const hasAppleNotarization = Boolean(
+  (process.env.APPLE_API_KEY &&
+    process.env.APPLE_API_KEY_ID &&
+    process.env.APPLE_API_ISSUER) ||
+    (process.env.APPLE_ID &&
+      process.env.APPLE_APP_SPECIFIC_PASSWORD &&
+      process.env.APPLE_TEAM_ID),
+);
 
 /** @param {string} rel */
 function abs(rel) {
@@ -111,6 +119,11 @@ const config = {
 
   mac: {
     icon: abs(identity.macIcon),
+    hardenedRuntime: true,
+    gatekeeperAssess: false,
+    entitlements: abs("build/entitlements.mac.plist"),
+    entitlementsInherit: abs("build/entitlements.mac.plist"),
+    notarize: hasAppleNotarization,
     extendInfo: {
       NSMicrophoneUsageDescription:
         "Nexus 使用麦克风将语音转换为输入文本。录音仅在本机转写，不会上传。",

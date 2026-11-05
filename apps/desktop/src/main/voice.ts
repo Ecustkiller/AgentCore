@@ -59,11 +59,18 @@ async function isExecutable(path: string): Promise<boolean> {
 }
 
 async function resolveWhisperBinary(): Promise<string | null> {
+  const targetArch = process.arch === "x64" ? "x64" : "arm64";
   const candidates = [
     process.env.NEXUS_WHISPER_BIN,
     join(process.resourcesPath, "voice", "whisper-cli"),
-    join(process.resourcesPath, "voice", "mac-arm64", "whisper-cli"),
-    join(app.getAppPath(), "resources", "voice", "mac-arm64", "whisper-cli"),
+    join(process.resourcesPath, "voice", `mac-${targetArch}`, "whisper-cli"),
+    join(
+      app.getAppPath(),
+      "resources",
+      "voice",
+      `mac-${targetArch}`,
+      "whisper-cli",
+    ),
     join(app.getAppPath(), "resources", "voice", "whisper-cli"),
     "/opt/homebrew/bin/whisper-cli",
     "/usr/local/bin/whisper-cli",

@@ -2,26 +2,24 @@ name: Release Desktop
 
 # 桌面端安装包发布（docs/05-平台与运维/发布与门禁.md §1.6 双仓发布）。
 #
-# 触发与平台分工（为省 Actions 额度）：
-#   · 日常 Windows：Cursor 本地 `release:win` / 分步 electron-builder --win（见 cursor-deploy.mdc）
-#   · macOS：仅本 workflow（workflow_dispatch，platform=mac）— 紧急或常规 Mac 打包
-#   · 禁止用 GHA 打 Windows / 双平台（勿再加 win/all 选项）
+# 对外发布默认构建 macOS arm64 + Windows x64，并由最后一个 job 统一同步 CDN，
+# 避免两个平台各自生成 latest.json 时互相覆盖。
 #
 # 跨仓发布需 PAT：secrets.RELEASE_GH_TOKEN（对 Lawofall/AgentCore-releases 有写权）。
 
 # ⚠️ 已弃用 push desktop-v* 自动触发（2026-06）— tag 仅作发布点标记。
-# ⚠️ 已移除 GHA Windows job（2026-07）— Win 只走本地，避免误点烧额度。
-
 on:
   workflow_dispatch:
     inputs:
       platform:
-        description: "Build platform (GHA 仅 Mac；Win 请本地构建)"
+        description: "Build platform"
         required: true
-        default: mac
+        default: all
         type: choice
         options:
+          - all
           - mac
+          - win
       channel:
         description: "Release channel (stable=默认；beta=并列测试轨)"
         required: false
@@ -41,6 +39,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify hosted backend is ready
+        if: inputs.channel == 'stable'
+        env:
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL || 'https://app.fashitianxia.xyz/api' }}
+        run: node ../../scripts/check-release-readiness.mjs
 
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/')
@@ -69,8 +73,9 @@ jobs:
 
   release-mac:
     name: Build & publish (macOS arm64)
+    if: inputs.platform == 'all' || inputs.platform == 'mac'
     needs: precreate-release
-    runs-on: macos-latest
+    runs-on: macos-15
     defaults:
       run:
         working-directory: apps/desktop
@@ -109,8 +114,26 @@ jobs:
       - name: Bundle local voice engine
         run: |
           brew install whisper-cpp ggml libomp
-          pnpm bundle:whisper
+          VOICE_TARGET_ARCH=arm64 pnpm bundle:whisper
           file resources/voice/mac-arm64/whisper-cli | grep -q arm64
+
+      - name: Require signed stable release
+        if: inputs.channel == 'stable'
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          test -n "$MAC_CSC_LINK"
+          test -n "$MAC_CSC_KEY_PASSWORD"
+          test -n "$APPLE_API_KEY_P8"
+          test -n "$APPLE_API_KEY_ID"
+          test -n "$APPLE_API_ISSUER"
+          printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
 
       # 不走 electron-builder --publish：已转正的 release 与 releaseType=draft 冲突会整批跳过
       # （见 electron-builder#2393）。改为本地出包 + gh release upload，draft/已发布均可补传。
@@ -119,6 +142,10 @@ jobs:
           # electron-vite + large renderer OOMs on default Node heap (macos-latest)
           NODE_OPTIONS: --max-old-space-size=8192
           DESKTOP_RELEASE_CHANNEL: ${{ inputs.channel || 'stable' }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           pnpm build
           pnpm exec electron-builder --config electron-builder.config.mjs --mac --arm64 --publish never
@@ -147,10 +174,104 @@ jobs:
           echo "uploaded mac assets to ${repo} ${tag} (channel=${channel}, slug=${slug})"
           gh release view "$tag" --repo "$repo"
 
-      # Brand download host for electron-updater (发布与门禁 §1.6b). 官网首装 = GitHub.
-      # Uses same DEPLOY_SSH_* as other server deploys; skip if unset (local sync can backfill).
-      - name: Sync mac assets to download CDN
+  release-win:
+    name: Build & publish (Windows x64)
+    if: inputs.platform == 'all' || inputs.platform == 'win'
+    needs: precreate-release
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
         working-directory: .
+        run: pnpm install --frozen-lockfile --filter agentcore-desktop...
+
+      - name: Materialize sponsor posters
+        env:
+          SPONSOR_WECHAT_PNG_B64: ${{ secrets.SPONSOR_WECHAT_PNG_B64 }}
+          SPONSOR_ALIPAY_JPG_B64: ${{ secrets.SPONSOR_ALIPAY_JPG_B64 }}
+        run: node scripts/materialize-sponsor-posters.mjs
+
+      - name: Require signed stable release
+        if: inputs.channel == 'stable'
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          test -n "$WIN_CSC_LINK"
+          test -n "$WIN_CSC_KEY_PASSWORD"
+
+      - name: Build, upload, and verify Windows
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
+          DESKTOP_RELEASE_CHANNEL: ${{ inputs.channel || 'stable' }}
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: pnpm release:win -- --skip-draft --skip-cdn
+
+  sync-downloads:
+    name: Sync all desktop downloads
+    needs:
+      - precreate-release
+      - release-mac
+      - release-win
+    if: always() && !cancelled() && needs.precreate-release.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Require at least one built platform
+        env:
+          MAC_RESULT: ${{ needs.release-mac.result }}
+          WIN_RESULT: ${{ needs.release-win.result }}
+        run: |
+          if [[ "$MAC_RESULT" != "success" && "$WIN_RESULT" != "success" ]]; then
+            echo "::error::Neither macOS nor Windows release succeeded"
+            exit 1
+          fi
+          if [[ "$MAC_RESULT" == "failure" || "$WIN_RESULT" == "failure" ]]; then
+            echo "::error::A requested desktop release failed"
+            exit 1
+          fi
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
+        run: |
+          ver="$(node -p "require('./apps/desktop/package.json').version")"
+          mkdir -p "apps/desktop/release/${ver}"
+          gh release download "v${ver}" \
+            --repo Lawofall/AgentCore-releases \
+            --dir "apps/desktop/release/${ver}" \
+            --clobber
+
+      - name: Sync desktop download manifests
         env:
           DESKTOP_RELEASE_CHANNEL: ${{ inputs.channel || 'stable' }}
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
@@ -158,15 +279,14 @@ jobs:
           DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          ver="$(node -p "require('./apps/desktop/package.json').version")"
-          if [[ -z "${DEPLOY_SSH_HOST}" || -z "${DEPLOY_SSH_USER}" || -z "${DEPLOY_SSH_KEY}" ]]; then
-            echo "::warning::DEPLOY_SSH_* secrets missing — skip CDN sync; run: pnpm sync:release-cdn --desktop apps/desktop/release/${ver} --version ${ver} --channel ${DESKTOP_RELEASE_CHANNEL:-stable}"
-            exit 0
-          fi
+          test -n "$DEPLOY_SSH_HOST"
+          test -n "$DEPLOY_SSH_USER"
+          test -n "$DEPLOY_SSH_KEY"
           KEY_FILE="$(mktemp)"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
           export DEPLOY_SSH_KEY_PATH="$KEY_FILE"
+          ver="$(node -p "require('./apps/desktop/package.json').version")"
           channel="${DESKTOP_RELEASE_CHANNEL:-stable}"
           node deploy/scripts/sync-release-cdn.mjs \
             --desktop "apps/desktop/release/${ver}" \

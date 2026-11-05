@@ -15,6 +15,7 @@
     "bump-version": "node scripts/bump-version.mjs",
     "release:gate": "node scripts/release-gate.mjs",
     "release:gate:lite": "node scripts/release-gate.mjs --lite",
+    "release:readiness": "node scripts/check-release-readiness.mjs",
     "release:ship": "node scripts/release-ship.mjs",
     "release:notice": "node scripts/release-notice.mjs",
     "ports:free": "node scripts/free-listen-port.mjs",

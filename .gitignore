@@ -73,6 +73,7 @@ apps/server/bin/
 apps/desktop/build/*
 !apps/desktop/build/icon-mac.png
 !apps/desktop/build/icon-win.png
+!apps/desktop/build/entitlements.mac.plist
 
 # TS build info / lint cache
 *.tsbuildinfo

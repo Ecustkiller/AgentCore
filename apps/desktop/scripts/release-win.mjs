@@ -5,6 +5,7 @@
  *
  *   pnpm -C apps/desktop release:win
  *   pnpm -C apps/desktop release:win -- --skip-draft   # draft already exists
+ *   pnpm -C apps/desktop release:win -- --skip-cdn     # CI syncs all platforms later
  *   pnpm -C apps/desktop release:win -- --channel=beta
  *   DESKTOP_RELEASE_CHANNEL=beta pnpm -C apps/desktop release:win
  *
@@ -38,6 +39,7 @@ const DESKTOP_DIR = join(__dir, "..");
 const RELEASES_REPO = "Lawofall/AgentCore-releases";
 
 const skipDraft = process.argv.includes("--skip-draft");
+const skipCdn = process.argv.includes("--skip-cdn");
 const channel = resolveChannelFromArgv(process.argv.slice(2));
 const identity = resolveReleaseIdentity(channel);
 process.env[RELEASE_CHANNEL_ENV] = channel;
@@ -208,22 +210,24 @@ function main() {
   const paths = assertLocalAssets(releaseDir, version);
   uploadAndVerify(tag, version, paths);
 
-  // Brand host (nginx) — electron-updater feed；官网首装走 GitHub Releases。
-  // CDN 分目录（…/desktop/{channel}）由 sync-release-cdn 块落地；此处仍传本地产物目录。
-  run(
-    "sync:release-cdn (desktop)",
-    process.execPath,
-    [
-      join(REPO_ROOT, "deploy/scripts/sync-release-cdn.mjs"),
-      "--desktop",
-      releaseDir,
-      "--version",
-      version,
-      "--channel",
-      channel,
-    ],
-    { cwd: REPO_ROOT, env: process.env },
-  );
+  if (!skipCdn) {
+    // Brand host (nginx) — electron-updater feed；官网首装走 GitHub Releases。
+    // CDN 分目录（…/desktop/{channel}）由 sync-release-cdn 块落地。
+    run(
+      "sync:release-cdn (desktop)",
+      process.execPath,
+      [
+        join(REPO_ROOT, "deploy/scripts/sync-release-cdn.mjs"),
+        "--desktop",
+        releaseDir,
+        "--version",
+        version,
+        "--channel",
+        channel,
+      ],
+      { cwd: REPO_ROOT, env: process.env },
+    );
+  }
 
   console.log("");
   console.log(`✓ Win release ${tag} built and uploaded to ${RELEASES_REPO}`);

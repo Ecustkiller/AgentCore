@@ -1,6 +1,7 @@
 # Bundled voice engine
 
-`pnpm bundle:whisper` generates `mac-arm64/` from Homebrew `whisper.cpp`.
+`pnpm bundle:whisper` generates `mac-arm64/` or `mac-x64/` from Homebrew
+`whisper.cpp`, matching the build machine architecture.
 The generated binaries and dylibs are intentionally excluded from git and are
 copied into the packaged app as `Resources/voice/`.
 

@@ -16,7 +16,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputRoot = join(desktopRoot, "resources", "voice", "mac-arm64");
+const requestedArch = process.env.VOICE_TARGET_ARCH?.trim();
+if (requestedArch && requestedArch !== process.arch) {
+  throw new Error(
+    `[whisper] target ${requestedArch} must be built on a ${requestedArch} macOS host`,
+  );
+}
+const targetArch = process.arch === "x64" ? "x64" : "arm64";
+const outputRoot = join(
+  desktopRoot,
+  "resources",
+  "voice",
+  `mac-${targetArch}`,
+);
 const backendDir = join(outputRoot, "libexec");
 
 function run(command, args, opts = {}) {
@@ -44,9 +56,12 @@ function sign(path) {
   run("codesign", ["--force", "--sign", "-", path]);
 }
 
-if (process.platform !== "darwin" || process.arch !== "arm64") {
-  console.log("[whisper] skip: bundled voice engine is macOS arm64 only");
+if (process.platform !== "darwin") {
+  console.log("[whisper] skip: bundled voice engine is macOS only");
   process.exit(0);
+}
+if (process.arch !== "arm64" && process.arch !== "x64") {
+  throw new Error(`[whisper] unsupported macOS architecture: ${process.arch}`);
 }
 
 const whisperPrefix = brewPrefix("whisper-cpp");
@@ -171,4 +186,4 @@ writeFileSync(
   )}\n`,
 );
 
-console.log(`[whisper] bundled macOS arm64 engine -> ${outputRoot}`);
+console.log(`[whisper] bundled macOS ${targetArch} engine -> ${outputRoot}`);
