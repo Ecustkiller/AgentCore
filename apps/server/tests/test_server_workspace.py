@@ -6,6 +6,7 @@ contract are exercised without touching the real repo. The ``execute`` test also
 pins the cwd fix: code runs in the workspace root and can read workspace files.
 """
 
+import asyncio
 import contextlib
 import os
 import time
@@ -41,6 +42,50 @@ def _ws(root: Path) -> ServerWorkspace:
 async def test_read_returns_content(tmp_path: Path):
     (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
     assert await _ws(tmp_path).read("a.txt") == "hello"
+
+
+async def test_read_keeps_event_loop_responsive(tmp_path: Path, monkeypatch):
+    from agentcore.workspace import server as server_mod
+
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+
+    def slow_read(path: Path) -> str:
+        time.sleep(0.08)
+        return path.read_text(encoding="utf-8")
+
+    marker = asyncio.Event()
+
+    async def tick() -> None:
+        await asyncio.sleep(0.01)
+        marker.set()
+
+    monkeypatch.setattr(server_mod, "_read_text_sync", slow_read)
+    task = asyncio.create_task(tick())
+    assert await _ws(tmp_path).read("a.txt") == "hello"
+    assert marker.is_set()
+    await task
+
+
+async def test_read_bytes_keeps_event_loop_responsive(tmp_path: Path, monkeypatch):
+    from agentcore.workspace import server as server_mod
+
+    (tmp_path / "a.bin").write_bytes(b"hello")
+
+    def slow_read(path: Path) -> bytes:
+        time.sleep(0.08)
+        return path.read_bytes()
+
+    marker = asyncio.Event()
+
+    async def tick() -> None:
+        await asyncio.sleep(0.01)
+        marker.set()
+
+    monkeypatch.setattr(server_mod, "_read_bytes_sync", slow_read)
+    task = asyncio.create_task(tick())
+    assert await _ws(tmp_path).read_bytes("a.bin") == b"hello"
+    assert marker.is_set()
+    await task
 
 
 async def test_read_missing_raises_path_not_found(tmp_path: Path):

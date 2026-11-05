@@ -200,6 +200,16 @@ def _read_bytes_with_mtime_sync(path: Path) -> tuple[bytes, int]:
     return path.read_bytes(), path.stat().st_mtime_ns // 1_000_000
 
 
+def _read_text_sync(path: Path) -> str:
+    """Whole UTF-8 text read — must run off the asyncio event-loop thread."""
+    return path.read_text(encoding="utf-8")
+
+
+def _read_bytes_sync(path: Path) -> bytes:
+    """Whole binary read — must run off the asyncio event-loop thread."""
+    return path.read_bytes()
+
+
 def _list_entries_sync(
     base: Path,
     *,
@@ -587,7 +597,7 @@ class ServerWorkspace:
             raise NotAFile(path)
         self._reject_oversized_file(target)
         try:
-            return target.read_text(encoding="utf-8")
+            return await asyncio.to_thread(_read_text_sync, target)
         except (OSError, UnicodeDecodeError) as e:
             raise WorkspaceIOError(str(e)) from e
 
@@ -673,7 +683,7 @@ class ServerWorkspace:
             raise NotAFile(path)
         self._reject_oversized_file(target, max_bytes=max_bytes)
         try:
-            return target.read_bytes()
+            return await asyncio.to_thread(_read_bytes_sync, target)
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
 
@@ -866,7 +876,7 @@ class ServerWorkspace:
             raise NotAFile(path)
         self._reject_oversized_file(target)
         try:
-            content = target.read_text(encoding="utf-8")
+            content = await asyncio.to_thread(_read_text_sync, target)
         except (OSError, UnicodeDecodeError) as e:
             raise WorkspaceIOError(str(e)) from e
 
