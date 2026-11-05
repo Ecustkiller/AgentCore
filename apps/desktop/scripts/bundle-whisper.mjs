@@ -27,7 +27,13 @@ function run(command, args, opts = {}) {
 }
 
 function brewPrefix(name) {
-  return run("brew", ["--prefix", name]);
+  try {
+    return run("brew", ["--prefix", name]);
+  } catch {
+    throw new Error(
+      `[whisper] missing Homebrew package "${name}". Run: brew install whisper-cpp ggml libomp`,
+    );
+  }
 }
 
 function installName(args) {
