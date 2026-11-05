@@ -52,7 +52,7 @@ import {
 } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useServerHealthStore } from "@/stores/serverHealth";
-import { AtSign, Loader2, Send, Square, X } from "lucide-react";
+import { AtSign, Loader2, Send, Sparkles, Square, X } from "lucide-react";
 import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -684,10 +684,14 @@ export function TurnComposer({
       iconOnly={!isBar}
     />
   );
+  const skillButton = (
+    <ComposerSkillButton onOpen={mention.openSkillPicker} iconOnly={!isBar} />
+  );
 
   const leftCluster = (
     <>
       {sessionChrome}
+      {liveDebate ? null : skillButton}
       {liveDebate ? null : mentionButton}
     </>
   );
@@ -918,6 +922,7 @@ export function TurnComposer({
               <div className={COMPOSER_BAR_CLUSTER}>
                 <ComposerPlusMenu>
                   {sessionChrome}
+                  {liveDebate ? null : skillButton}
                   {liveDebate ? null : mentionButton}
                 </ComposerPlusMenu>
               </div>
@@ -990,6 +995,46 @@ function ComposerMentionButton({
     >
       <AtSign size={14} className="shrink-0" aria-hidden />
       <span>引用</span>
+    </button>
+  );
+}
+
+/** 技能按钮：直接进入技能搜索，不再要求用户先把技能名称猜准。 */
+function ComposerSkillButton({
+  onOpen,
+  iconOnly = true,
+}: {
+  onOpen: () => void;
+  iconOnly?: boolean;
+}) {
+  const plusHost = useComposerPlusHost();
+  const closePlus = useComposerPlusClose();
+  const onClick = () => {
+    closePlus?.();
+    onOpen();
+  };
+  if (plusHost && plusHost.panel !== "list") return null;
+  if (iconOnly) {
+    return (
+      <IconButton
+        size="md"
+        onClick={onClick}
+        aria-label="选择技能"
+        title="选择技能"
+      >
+        <Sparkles size={16} />
+      </IconButton>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="选择技能"
+      className="inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
+      <Sparkles size={14} className="shrink-0" aria-hidden />
+      <span>技能</span>
     </button>
   );
 }

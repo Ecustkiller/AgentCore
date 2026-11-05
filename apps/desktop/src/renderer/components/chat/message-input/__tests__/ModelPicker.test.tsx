@@ -44,7 +44,10 @@ import {
 import { useLlmModelProfiles } from "@/hooks/useLlmModelProfiles";
 import { useLlmProviders } from "@/hooks/useLlmProviders";
 import { useModels } from "@/hooks/useModels";
-import { useComposerProfileDraftStore } from "@/lib/composerModelProfile";
+import {
+  useComposerModelPickerOpenStore,
+  useComposerProfileDraftStore,
+} from "@/lib/composerModelProfile";
 import { __setUiStorageBackendForTests } from "@/lib/uiStorage";
 import { setConversationModelProfile } from "@/services/conversations";
 import type { LlmModelProfileListResponse } from "@/services/llmModelProfiles";
@@ -156,6 +159,7 @@ beforeEach(() => {
   });
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useComposerProfileDraftStore.setState({ profileId: null });
+  useComposerModelPickerOpenStore.setState({ requestToken: 0 });
   useConversationsMock.mockReturnValue([]);
   useModelsMock.mockReturnValue({
     data: {
@@ -177,7 +181,7 @@ beforeEach(() => {
           display_name: "GPT-4o",
           vendor: "OpenAI",
           provider_id: "p2",
-          capabilities: [],
+          capabilities: ["vision"],
           available: true,
         },
         {
@@ -264,6 +268,14 @@ describe("ModelPicker", () => {
     expect(panelClasses).not.toContain("w-72");
     // No bare model catalog rows.
     expect(screen.queryByText("自带 Key")).toBeNull();
+    expect(screen.getAllByText("看图").length).toBeGreaterThan(0);
+  });
+
+  it("can be opened by the composer vision warning", async () => {
+    mockProfiles(profiles());
+    useComposerModelPickerOpenStore.getState().requestOpen();
+    renderPicker();
+    expect(await screen.findByText("系统预置")).toBeTruthy();
   });
 
   it("persists the pick via PATCH model_profile_id", async () => {

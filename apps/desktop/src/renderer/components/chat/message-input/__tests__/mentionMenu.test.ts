@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseMentionFilter,
-  pickOnDemandSettings,
+  pickOnDemandSkills,
   pickRecentConversations,
 } from "../composerAttachments";
 import {
@@ -38,12 +38,20 @@ describe("parseMentionFilter", () => {
       filter: "a.ts",
     });
     expect(parseMentionFilter("设定 简短")).toEqual({
-      section: "setting",
+      section: "skill",
       filter: "简短",
     });
     expect(parseMentionFilter("提示词 简短")).toEqual({
-      section: "setting",
+      section: "skill",
       filter: "简短",
+    });
+    expect(parseMentionFilter("技能 基金")).toEqual({
+      section: "skill",
+      filter: "基金",
+    });
+    expect(parseMentionFilter("skill stock")).toEqual({
+      section: "skill",
+      filter: "stock",
     });
   });
 
@@ -65,7 +73,7 @@ describe("parseMentionFilter", () => {
       filter: "x",
     });
     expect(parseMentionFilter("note foo")).toEqual({
-      section: "setting",
+      section: "skill",
       filter: "foo",
     });
   });
@@ -142,12 +150,13 @@ describe("showMentionCategoryLevel", () => {
 });
 
 describe("buildMentionCategoryRows", () => {
-  it("附件置顶，文件/文件夹前移，空团队整档隐藏", () => {
+  it("附件和技能置顶，空团队整档隐藏", () => {
     const rows = buildMentionCategoryRows({
-      counts: { team: 0, conversation: 3, folder: 0, file: 12, setting: 0 },
+      counts: { team: 0, conversation: 3, folder: 0, file: 12, skill: 0 },
     });
     expect(rows.map((r) => r.id)).toEqual([
       "attach",
+      "skill",
       "file",
       "folder",
       "conversation",
@@ -159,9 +168,10 @@ describe("buildMentionCategoryRows", () => {
       disabled: false,
     });
     expect(rows.find((r) => r.id === "team")).toBeUndefined();
-    expect(rows[1]).toMatchObject({ id: "file", count: 12, disabled: false });
-    expect(rows[2]).toMatchObject({ id: "folder", count: 0, disabled: false });
-    expect(rows[3]).toMatchObject({
+    expect(rows[1]).toMatchObject({ id: "skill", count: 0, disabled: false });
+    expect(rows[2]).toMatchObject({ id: "file", count: 12, disabled: false });
+    expect(rows[3]).toMatchObject({ id: "folder", count: 0, disabled: false });
+    expect(rows[4]).toMatchObject({
       id: "conversation",
       count: 3,
       disabled: false,
@@ -170,52 +180,55 @@ describe("buildMentionCategoryRows", () => {
 
   it("有团队时沉到最后，不置灰", () => {
     const rows = buildMentionCategoryRows({
-      counts: { team: 2, conversation: 1, folder: 4, file: 8, setting: 0 },
+      counts: { team: 2, conversation: 1, folder: 4, file: 8, skill: 0 },
     });
     expect(rows.map((r) => r.id)).toEqual([
       "attach",
+      "skill",
       "file",
       "folder",
       "conversation",
       "team",
     ]);
-    expect(rows[4]).toMatchObject({ id: "team", count: 2, disabled: false });
+    expect(rows[5]).toMatchObject({ id: "team", count: 2, disabled: false });
   });
 
-  it("有提示词时插在对话和团队之间", () => {
+  it("有技能时紧跟在附件之后", () => {
     const rows = buildMentionCategoryRows({
-      counts: { team: 1, conversation: 1, folder: 0, file: 0, setting: 2 },
+      counts: { team: 1, conversation: 1, folder: 0, file: 0, skill: 2 },
     });
     expect(rows.map((r) => r.id)).toEqual([
       "attach",
+      "skill",
       "file",
       "folder",
       "conversation",
-      "setting",
       "team",
     ]);
-    expect(rows.find((r) => r.id === "setting")).toMatchObject({
-      label: "提示词",
+    expect(rows.find((r) => r.id === "skill")).toMatchObject({
+      label: "技能",
       count: 2,
     });
   });
 
   it("marks file/folder loading when index is still empty", () => {
     const rows = buildMentionCategoryRows({
-      counts: { team: 1, conversation: 0, folder: 0, file: 0, setting: 0 },
+      counts: { team: 1, conversation: 0, folder: 0, file: 0, skill: 0 },
       loadingFiles: true,
+      loadingSkills: true,
     });
-    expect(rows[1]).toMatchObject({ id: "file", loading: true });
-    expect(rows[2]).toMatchObject({ id: "folder", loading: true });
-    expect(rows[4]).toMatchObject({ id: "team", disabled: false });
+    expect(rows[1]).toMatchObject({ id: "skill", loading: true });
+    expect(rows[2]).toMatchObject({ id: "file", loading: true });
+    expect(rows[3]).toMatchObject({ id: "folder", loading: true });
+    expect(rows[5]).toMatchObject({ id: "team", disabled: false });
   });
 });
 
-describe("pickOnDemandSettings", () => {
+describe("pickOnDemandSkills", () => {
   const list = [
     {
       id: "d1",
-      name: "说话简短",
+      name: "说话简短.md",
       description: "回复短句",
       applyMode: "on_demand",
       disputedAt: null,
@@ -243,13 +256,14 @@ describe("pickOnDemandSettings", () => {
   ];
 
   it("只列出可点名的按需条目", () => {
-    const items = pickOnDemandSettings(list, "", 10);
+    const items = pickOnDemandSkills(list, "", 10);
     expect(items.map((i) => i.relPath)).toEqual(["d1"]);
     expect(items[0]?.kind).toBe("document");
+    expect(items[0]?.name).toBe("说话简短");
   });
 
   it("按名字或摘要过滤", () => {
-    const items = pickOnDemandSettings(list, "短句");
+    const items = pickOnDemandSkills(list, "短句");
     expect(items.map((i) => i.relPath)).toEqual(["d1"]);
   });
 });

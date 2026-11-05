@@ -71,9 +71,11 @@ export type MentionSectionId =
   | "conversation"
   | "folder"
   | "file"
-  | "setting";
+  | "skill";
 
 export const TEXT_PREVIEW_CAP = 256 * 1024;
+/** `MessageAttachment.path` 的稳定标记：kind=document 且路径为此值时按强制技能处理。 */
+export const SKILL_ATTACHMENT_PATH = "技能";
 
 export const CONV_MENTION_MSG_LIMIT = 40;
 export const CONV_MENTION_CHAR_CAP = 60 * 1024;
@@ -136,8 +138,9 @@ export function detectMention(
 }
 
 /**
- * `@` 类型前缀：以「团队/对话/文件/文件夹/提示词/设定」或英文 agent/file/dir/folder/conv/setting 开头时
- * 只保留对应分区；前缀后的剩余串作过滤词。
+ * `@` 类型前缀：以「团队/对话/文件/文件夹/技能」或英文
+ * agent/file/dir/folder/conv/skill 开头时只保留对应分区；旧「提示词/设定/
+ * setting」继续作为技能别名，避免已有输入习惯失效。
  */
 export function parseMentionFilter(rawQuery: string): {
   section: MentionSectionId | null;
@@ -149,7 +152,10 @@ export function parseMentionFilter(rawQuery: string): {
     { re: /^(文件夹|folder|dir)\s*/i, section: "folder" },
     { re: /^(文件|file)\s*/i, section: "file" },
     { re: /^(对话|conv(?:ersation)?)\s*/i, section: "conversation" },
-    { re: /^(提示词|设定|setting|笔记|note)\s*/i, section: "setting" },
+    {
+      re: /^(技能|提示词|设定|skill|setting|笔记|note)\s*/i,
+      section: "skill",
+    },
     { re: /^(团队|agent)\s*/i, section: "team" },
   ];
   for (const { re, section } of rules) {
@@ -181,8 +187,8 @@ export function pickRecentConversations(
   }));
 }
 
-/** 按需设定（disputed / 解析失败 / 常驻条目不进菜单）。 */
-export function pickOnDemandSettings(
+/** 按需技能（disputed / 解析失败 / 常驻条目不进菜单）。 */
+export function pickOnDemandSkills(
   list: ReadonlyArray<{
     id: string;
     name: string;
@@ -211,11 +217,11 @@ export function pickOnDemandSettings(
     );
   }
   return rows.slice(0, limit).map((e) => ({
-    sourceId: "setting",
-    sourceLabel: "提示词",
+    sourceId: "skill",
+    sourceLabel: "技能",
     relPath: e.id,
-    name: e.name,
-    display: e.description || "提示词",
+    name: e.name.replace(/\.md$/i, ""),
+    display: e.description || "技能",
     kind: "document" as const,
   }));
 }

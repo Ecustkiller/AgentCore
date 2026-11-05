@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/useLlmModelProfiles", () => ({
@@ -16,6 +16,7 @@ import { useLlmModelProfiles } from "@/hooks/useLlmModelProfiles";
 import { useModels } from "@/hooks/useModels";
 import {
   COMPOSER_VISION_HINT,
+  useComposerModelPickerOpenStore,
   useComposerProfileDraftStore,
 } from "@/lib/composerModelProfile";
 import type { LlmModelProfileListResponse } from "@/services/llmModelProfiles";
@@ -85,6 +86,7 @@ beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
   useConversationsMock.mockReturnValue([]);
   useComposerProfileDraftStore.setState({ profileId: null });
+  useComposerModelPickerOpenStore.setState({ requestToken: 0 });
   useComposerDraftStore.setState({
     drafts: {},
     fillToken: 0,
@@ -133,9 +135,11 @@ describe("ComposerVisionHint", () => {
   it("有图 + 文本主且无槽 → 展示轻提示", () => {
     useComposerDraftStore.getState().setAttachments("__draft__", [png]);
     render(<ComposerVisionHint />);
-    expect(screen.getByTestId("composer-vision-hint").textContent).toBe(
+    expect(screen.getByTestId("composer-vision-hint").textContent).toContain(
       COMPOSER_VISION_HINT,
     );
+    fireEvent.click(screen.getByRole("button", { name: "切换看图模型" }));
+    expect(useComposerModelPickerOpenStore.getState().requestToken).toBe(1);
   });
 
   it("无图 → 不展示", () => {

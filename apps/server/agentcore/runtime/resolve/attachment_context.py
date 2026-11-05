@@ -49,10 +49,23 @@ _ATTACH_THIS_MESSAGE_FRAME = (
 
 # @ 点名按需设定：本回合当常驻。单独成段，不进 <附件>，以免触发附件收窄场面。
 _PINNED_ENTRIES_FRAME = (
-    "用户本条点名了下列按需设定，本回合当作常驻遵守。"
-    "不是本条上传的附件，不必落盘。"
+    "用户本条显式选择了下列按需技能或设定，本回合作为权威指引遵守。"
+    "它们不是本条上传的附件，不必落盘。"
 )
 _PINNED_MISS = "（点名的设定未能加载，本回合不按该条执行。）"
+_EXPLICIT_SKILL_PATH = "技能"
+_EXPLICIT_SKILL_CONTRACT = (
+    "The user explicitly selected this skill for this turn. Treat it as the "
+    "authoritative procedure. Do not scan the skill catalog, search prior chats "
+    "for another skill, or infer a substitute. Do not begin broad or "
+    "network-intensive universe scans before validating required inputs. If the "
+    "user explicitly allows any item (for example, any fund), choose one "
+    "representative item, state the choice, and proceed with that item instead "
+    "of enumerating the universe. If full-universe coverage is genuinely "
+    "required, state the scope, sample, and estimated cost, then ask before "
+    "expanding. During execution, report only key decisions, blockers, and "
+    "results; do not narrate internal discovery or trial-and-error."
+)
 
 _INLINE_ORDER_FACT = (
     "Materials are inlined in the user message in the order the user placed them."
@@ -224,7 +237,7 @@ async def _load_pinned_document_body(
 
 
 async def _render_pinned_document(
-    att: dict, *, user_id: str | None, name: str
+    att: dict, *, user_id: str | None, name: str, explicit_skill: bool = False
 ) -> str:
     """Body from the documents tree when ``document_id`` is set; else client ``text`` (tests)."""
     doc_id = str(att.get("document_id") or "").strip()
@@ -235,9 +248,16 @@ async def _render_pinned_document(
     elif raw_text:
         body = raw_text
     if not body:
-        return f"--- 设定: {name} ---\n{_PINNED_MISS}"
+        label = "技能" if explicit_skill else "设定"
+        return f"--- {label}: {name} ---\n{_PINNED_MISS}"
     clipped_body, clipped = truncate_for_prompt(body)
     note = " (truncated)" if clipped or att.get("truncated") else ""
+    if explicit_skill:
+        return (
+            f"--- 显式技能: {name}{note} ---\n"
+            f"{_EXPLICIT_SKILL_CONTRACT}\n\n"
+            f"{clipped_body}"
+        )
     return f"--- 设定: {name}{note} ---\n{clipped_body}"
 
 
@@ -328,7 +348,12 @@ async def _build_attachment_prompt(
 
         if kind == "document":
             pinned_blocks.append(
-                await _render_pinned_document(att, user_id=user_id, name=name)
+                await _render_pinned_document(
+                    att,
+                    user_id=user_id,
+                    name=name,
+                    explicit_skill=att.get("path") == _EXPLICIT_SKILL_PATH,
+                )
             )
             slots.append("")
             continue

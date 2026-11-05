@@ -13,7 +13,9 @@ import { useLlmProviders } from "@/hooks/useLlmProviders";
 import { useModels } from "@/hooks/useModels";
 import {
   lookupComposerProfile,
+  profileCanSeeImages,
   resolveComposerProfileId,
+  useComposerModelPickerOpenStore,
   useComposerProfileDraftStore,
 } from "@/lib/composerModelProfile";
 import { notifyError } from "@/lib/toast";
@@ -30,6 +32,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  Eye,
   Layers,
   Loader2,
   Settings2,
@@ -68,10 +71,12 @@ function PresetBadge() {
 function ProfileRow({
   profile,
   selected,
+  vision,
   onPick,
 }: {
   profile: LlmModelProfileView;
   selected: boolean;
+  vision: boolean;
   onPick: (id: string) => void;
 }) {
   return (
@@ -88,6 +93,15 @@ function ProfileRow({
         {profile.is_default && (
           <span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 text-xs text-primary">
             默认
+          </span>
+        )}
+        {vision && (
+          <span
+            className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent px-1 py-0.5 text-xs text-accent-foreground"
+            title="主模型支持读取图片"
+          >
+            <Eye size={10} aria-hidden />
+            看图
           </span>
         )}
         {profile.kind === "system" && <PresetBadge />}
@@ -129,11 +143,20 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
   const [pending, setPending] = useState(false);
   const draftProfileId = useComposerProfileDraftStore((s) => s.profileId);
   const setDraftProfileId = useComposerProfileDraftStore((s) => s.setProfileId);
+  const pickerRequestToken = useComposerModelPickerOpenStore(
+    (s) => s.requestToken,
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is the reset key
   useEffect(() => {
     setDraftProfileId(null);
   }, [conversationId, setDraftProfileId]);
+
+  useEffect(() => {
+    if (pickerRequestToken === 0) return;
+    if (plus.mode === "row") plus.drill();
+    else if (plus.mode === "popover") setOpen(true);
+  }, [pickerRequestToken, plus]);
 
   const catalogModels = useMemo(() => catalog?.models ?? [], [catalog]);
   const profiles = profileList?.data ?? [];
@@ -280,6 +303,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
                     key={p.id}
                     profile={p}
                     selected={highlightId === p.id}
+                    vision={profileCanSeeImages(p, catalogModels)}
                     onPick={applyProfile}
                   />
                 ))}
@@ -294,6 +318,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
                     key={p.id}
                     profile={p}
                     selected={highlightId === p.id}
+                    vision={profileCanSeeImages(p, catalogModels)}
                     onPick={applyProfile}
                   />
                 ))}

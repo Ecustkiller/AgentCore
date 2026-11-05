@@ -52,6 +52,7 @@ vi.mock("../resideAttachment", async (importOriginal) => {
 import { loadFileIndex } from "@/lib/fileIndex";
 import { insertInlineToken } from "@/lib/inlineBody";
 import { logEvent } from "@/lib/log";
+import { listScopeEntries } from "@/services/documents";
 import type { ComposerBodyHandle } from "../ComposerBodyEditor";
 import type {
   PendingAgentMention,
@@ -89,7 +90,7 @@ function useMentionHarness(conversationId: string | null, initial = "@") {
     setAgentMentions,
     bodyRef,
   });
-  return { mention, value };
+  return { mention, value, attachments };
 }
 
 function key(name: string): KeyboardEvent {
@@ -116,6 +117,7 @@ describe("useMentionMenu 二级目录", () => {
     expect(result.current.mention.showCategoryLevel).toBe(true);
     expect(result.current.mention.categories.map((c) => c.id)).toEqual([
       "attach",
+      "skill",
       "file",
       "folder",
       "conversation",
@@ -125,12 +127,12 @@ describe("useMentionMenu 二级目录", () => {
       label: "附件",
       hint: "从本机添加",
     });
-    expect(result.current.mention.categories[3]).toMatchObject({
+    expect(result.current.mention.categories[4]).toMatchObject({
       id: "conversation",
       count: 1,
       disabled: false,
     });
-    expect(result.current.mention.activeIndex).toBe(1);
+    expect(result.current.mention.activeIndex).toBe(2);
     expect(logged).toHaveBeenCalledWith("info", "mention.menu_open", {
       mode: "mention",
     });
@@ -140,6 +142,9 @@ describe("useMentionMenu 二级目录", () => {
     const { result } = renderHook(() => useMentionHarness("c1"));
     await act(async () => {
       result.current.mention.syncMention("@", 1);
+    });
+    await act(async () => {
+      result.current.mention.handleMenuNavKey(key("ArrowDown"));
     });
     await act(async () => {
       result.current.mention.handleMenuNavKey(key("ArrowDown"));
@@ -201,6 +206,63 @@ describe("useMentionMenu 二级目录", () => {
     });
     expect(result.current.mention.showCategoryLevel).toBe(false);
     expect(result.current.mention.canGoBack).toBe(false);
+  });
+
+  it("技能按钮直接进入技能分区搜索", async () => {
+    const { result } = renderHook(() => useMentionHarness("c1", ""));
+    await act(async () => {
+      result.current.mention.openSkillPicker();
+    });
+    expect(result.current.mention.menuMode).toBe("browse");
+    expect(result.current.mention.showCategoryLevel).toBe(false);
+    expect(result.current.mention.focusedSectionLabel).toBe("技能");
+    expect(result.current.mention.canGoBack).toBe(true);
+
+    await act(async () => {
+      result.current.mention.setQuery("基金");
+    });
+    expect(result.current.mention.focusedSectionLabel).toBe("技能");
+    expect(result.current.mention.sections.map((s) => s.id)).toEqual(["skill"]);
+  });
+
+  it("选择技能后作为固定技能附件发送，不要求手打名称", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValueOnce([
+      {
+        id: "skill-1",
+        name: "active-equity-report-analysis",
+        description: "主动权益分析",
+        applyMode: "on_demand",
+        parentId: null,
+        folderId: null,
+        role: "rule",
+        aiMaintained: false,
+        alwaysChars: null,
+        disputedAt: null,
+        frontmatterError: null,
+        kind: "document",
+      },
+    ]);
+    const { result } = renderHook(() => useMentionHarness("c1", ""));
+    await act(async () => {
+      result.current.mention.openSkillPicker();
+      await Promise.resolve();
+    });
+    const skill = result.current.mention.sections.find((s) => s.id === "skill");
+    expect(skill?.items).toHaveLength(1);
+    const selectedSkill = skill?.items[0];
+    if (!selectedSkill) throw new Error("技能列表未返回可选项");
+
+    await act(async () => {
+      result.current.mention.selectItem(selectedSkill);
+    });
+    expect(result.current.attachments[0]).toMatchObject({
+      name: "active-equity-report-analysis",
+      kind: "document",
+      path: "技能",
+      documentId: "skill-1",
+    });
+    expect(result.current.value).toContain("\uFFFC");
+    expect(result.current.mention.menuMode).toBeNull();
   });
 
   it("工具栏 @ 插入并高亮附件；再点关菜单留下 @", async () => {

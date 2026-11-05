@@ -3,7 +3,6 @@ import { Button, SearchField } from "@/components/ui";
 import { hasLocalFiles } from "@/lib/capabilities";
 import type { IndexedEntry } from "@/lib/fileIndex";
 import {
-  Bookmark,
   ChevronLeft,
   ChevronRight,
   File,
@@ -11,6 +10,7 @@ import {
   FolderPlus,
   MessageSquare,
   Paperclip,
+  Sparkles,
   Users,
 } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -91,8 +91,8 @@ function categoryIcon(id: MentionCategoryId) {
       return (
         <MessageSquare size={14} className="shrink-0 text-muted-foreground" />
       );
-    case "setting":
-      return <Bookmark size={14} className="shrink-0 text-muted-foreground" />;
+    case "skill":
+      return <Sparkles size={14} className="shrink-0 text-muted-foreground" />;
     case "folder":
       return <Folder size={14} className="shrink-0 text-muted-foreground" />;
     case "file":
@@ -181,8 +181,8 @@ export function MentionMenu({
             value={query}
             onValueChange={onQueryChange}
             onKeyDown={onKeyDown}
-            placeholder="筛选文件、对话或角色…"
-            aria-label="筛选文件、对话或角色"
+            placeholder="筛选技能、文件、对话或角色…"
+            aria-label="筛选技能、文件、对话或角色"
             clearable={false}
             escapeClears={false}
           />
@@ -261,7 +261,7 @@ export function MentionMenu({
       ) : showEmpty ? (
         <div className="px-3 py-4 text-center text-sm text-muted-foreground">
           {query.trim()
-            ? "没有匹配的文件、目录、对话或角色"
+            ? "没有匹配的技能、文件、目录、对话或角色"
             : "暂无可引用的内容"}
         </div>
       ) : (
@@ -339,7 +339,7 @@ export function MentionMenu({
                               className="shrink-0 text-muted-foreground"
                             />
                           ) : item.kind === "document" ? (
-                            <Bookmark
+                            <Sparkles
                               size={14}
                               className="shrink-0 text-muted-foreground"
                             />
@@ -361,7 +361,7 @@ export function MentionMenu({
                               : item.kind === "conversation"
                                 ? "对话"
                                 : item.kind === "document"
-                                  ? "提示词"
+                                  ? item.display || "技能"
                                   : item.display}
                           </span>
                         </span>

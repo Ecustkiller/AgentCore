@@ -1,11 +1,11 @@
 import type { MentionSectionId } from "./composerAttachments";
 
-/** 按实际频率：文件/文件夹前移，团队下沉。附件仍由调用方置顶。 */
+/** 技能紧跟附件；文件/文件夹随后，团队下沉。 */
 export const MENTION_CATEGORY_ORDER: MentionSectionId[] = [
+  "skill",
   "file",
   "folder",
   "conversation",
-  "setting",
   "team",
 ];
 
@@ -17,7 +17,7 @@ export const MENTION_CATEGORY_LABEL: Record<MentionSectionId, string> = {
   conversation: "对话",
   folder: "文件夹",
   file: "文件",
-  setting: "提示词",
+  skill: "技能",
 };
 
 /** 一级目录行：顶行「附件」+ 四类。附件不是 MentionSectionId，禁止 drill。 */
@@ -62,12 +62,13 @@ export function showMentionCategoryLevel(opts: {
 export function buildMentionCategoryRows(input: {
   counts: Record<MentionSectionId, number>;
   loadingFiles?: boolean;
+  loadingSkills?: boolean;
 }): MentionCategoryRow[] {
   return [
     MENTION_ATTACH_CATEGORY,
     ...MENTION_CATEGORY_ORDER.flatMap((id): MentionCategoryRow[] => {
       const count = input.counts[id];
-      if ((id === "team" || id === "setting") && count === 0) return [];
+      if (id === "team" && count === 0) return [];
       return [
         {
           id,
@@ -75,9 +76,10 @@ export function buildMentionCategoryRows(input: {
           count,
           disabled: false,
           loading:
-            Boolean(input.loadingFiles) &&
-            (id === "folder" || id === "file") &&
-            count === 0,
+            count === 0 &&
+            ((id === "skill" && Boolean(input.loadingSkills)) ||
+              ((id === "folder" || id === "file") &&
+                Boolean(input.loadingFiles))),
         },
       ];
     }),

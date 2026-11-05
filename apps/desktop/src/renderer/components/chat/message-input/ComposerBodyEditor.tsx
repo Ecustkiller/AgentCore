@@ -15,6 +15,7 @@ import {
   Bookmark,
   Loader2,
   MessageSquare,
+  Sparkles,
   Users,
   X,
 } from "lucide-react";
@@ -35,6 +36,7 @@ import type {
   PendingAgentMention,
   PendingAttachment,
 } from "./composerAttachments";
+import { SKILL_ATTACHMENT_PATH } from "./composerAttachments";
 
 export type ComposerBodyHandle = {
   focus: () => void;
@@ -432,6 +434,7 @@ function EditorAttachmentPill({
 }) {
   const uploading = att.uploadState === "uploading";
   const failed = att.uploadState === "error";
+  const isSkill = att.kind === "document" && att.path === SKILL_ATTACHMENT_PATH;
   return (
     <span
       data-upload-state={att.uploadState}
@@ -454,6 +457,8 @@ function EditorAttachmentPill({
         <DirTypeIcon name={att.name} path={att.path} size={12} />
       ) : att.kind === "conversation" ? (
         <MessageSquare size={12} className="shrink-0" />
+      ) : isSkill ? (
+        <Sparkles size={12} className="shrink-0" />
       ) : att.kind === "document" ? (
         <Bookmark size={12} className="shrink-0" />
       ) : (
@@ -465,6 +470,7 @@ function EditorAttachmentPill({
         </span>
       )}
       <span className="truncate">
+        {isSkill && <span className="mr-1 text-muted-foreground">技能</span>}
         {att.name}
         {att.kind === "dir" ? "/" : ""}
       </span>

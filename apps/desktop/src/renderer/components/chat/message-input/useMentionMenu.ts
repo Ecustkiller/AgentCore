@@ -38,11 +38,12 @@ import {
   type MentionSectionId,
   type PendingAgentMention,
   type PendingAttachment,
+  SKILL_ATTACHMENT_PATH,
   buildMentionSources,
   detectMention,
   formatConversationContext,
   parseMentionFilter,
-  pickOnDemandSettings,
+  pickOnDemandSkills,
   pickRecentConversations,
 } from "./composerAttachments";
 import {
@@ -133,12 +134,15 @@ export function useMentionMenu({
   const [indexTruncated, setIndexTruncated] = useState(false);
   const [indexLoading, setIndexLoading] = useState(false);
   const [convTick, setConvTick] = useState(0);
-  const [settingPool, setSettingPool] = useState<
+  const [skillPool, setSkillPool] = useState<
     Awaited<ReturnType<typeof listScopeEntries>>
   >([]);
+  const [skillPoolLoading, setSkillPoolLoading] = useState(false);
   const indexLoadedRef = useRef(false);
   const sourcesRef = useRef<Map<string, FileSource>>(new Map());
   const mentionRangeRef = useRef<{ start: number; end: number } | null>(null);
+  /** 工具栏「技能」进入的搜索只搜技能；普通 browse 仍可按关键词跨类搜索。 */
+  const browseSkillOnlyRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   /** 手打 @ → 团队；工具栏 @ → 附件。打开后不因索引加载改高亮。 */
   const highlightPrefRef = useRef<"team" | "attach">("team");
@@ -175,6 +179,7 @@ export function useMentionMenu({
   useEffect(() => {
     if (!menuMode) return;
     let cancelled = false;
+    setSkillPoolLoading(true);
     const folderId = conversationId
       ? (getConversations().find((c) => c.id === conversationId)?.folderId ??
         null)
@@ -187,10 +192,13 @@ export function useMentionMenu({
         if (cancelled) return;
         const byId = new Map<string, (typeof global)[number]>();
         for (const n of [...global, ...project]) byId.set(n.id, n);
-        setSettingPool([...byId.values()]);
+        setSkillPool([...byId.values()]);
       })
       .catch(() => {
-        if (!cancelled) setSettingPool([]);
+        if (!cancelled) setSkillPool([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSkillPoolLoading(false);
       });
     return () => {
       cancelled = true;
@@ -229,15 +237,14 @@ export function useMentionMenu({
     emptyLimit,
   ]);
 
-  const settingItems = useMemo(
-    () => pickOnDemandSettings(settingPool, filterText, emptyLimit),
-    [settingPool, filterText, emptyLimit],
+  const skillItems = useMemo(
+    () => pickOnDemandSkills(skillPool, filterText, emptyLimit),
+    [skillPool, filterText, emptyLimit],
   );
-  const settingCount = useMemo(
+  const skillCount = useMemo(
     () =>
-      pickOnDemandSettings(settingPool, filterText, Number.MAX_SAFE_INTEGER)
-        .length,
-    [settingPool, filterText],
+      pickOnDemandSkills(skillPool, filterText, Number.MAX_SAFE_INTEGER).length,
+    [skillPool, filterText],
   );
 
   const convCount = useMemo(() => {
@@ -300,16 +307,18 @@ export function useMentionMenu({
           conversation: convCount,
           folder: folderCount,
           file: fileCount,
-          setting: settingCount,
+          skill: skillCount,
         },
         loadingFiles: indexLoading,
+        loadingSkills: skillPoolLoading,
       }),
     [
       agentItems.length,
       convCount,
       folderCount,
       fileCount,
-      settingCount,
+      skillCount,
+      skillPoolLoading,
       indexLoading,
     ],
   );
@@ -345,16 +354,20 @@ export function useMentionMenu({
     }
 
     if (
-      show("setting") &&
-      (settingItems.length > 0 || focusedSection === "setting")
+      show("skill") &&
+      (skillItems.length > 0 || focusedSection === "skill")
     ) {
       out.push({
-        id: "setting",
-        label: MENTION_CATEGORY_LABEL.setting,
-        items: settingItems,
-        truncated:
-          settingItems.length > 0 && settingItems.length < settingCount,
-        emptyHint: settingItems.length === 0 ? "没有可点名的提示词" : undefined,
+        id: "skill",
+        label: MENTION_CATEGORY_LABEL.skill,
+        items: skillItems,
+        truncated: skillItems.length > 0 && skillItems.length < skillCount,
+        emptyHint:
+          skillItems.length === 0
+            ? skillPoolLoading
+              ? "正在读取技能…"
+              : "没有匹配的技能"
+            : undefined,
       });
     }
 
@@ -390,8 +403,9 @@ export function useMentionMenu({
     agentItems,
     convItems,
     convCount,
-    settingItems,
-    settingCount,
+    skillItems,
+    skillCount,
+    skillPoolLoading,
     folderItems,
     fileItems,
     folderTruncated,
@@ -453,6 +467,7 @@ export function useMentionMenu({
     setMenuMode(null);
     setMenuError(null);
     setActiveCategory(null);
+    browseSkillOnlyRef.current = false;
     mentionRangeRef.current = null;
   }, []);
 
@@ -613,6 +628,7 @@ export function useMentionMenu({
       return;
     }
     mentionRangeRef.current = null;
+    browseSkillOnlyRef.current = false;
     setQuery("");
     setActiveCategory(null);
     setMenuMode("browse");
@@ -621,6 +637,22 @@ export function useMentionMenu({
     void ensureIndex();
     requestAnimationFrame(() => searchInputRef.current?.focus());
   }, [menuMode, closeMenu, ensureIndex]);
+
+  /** 技能按钮：直接进入技能分区搜索，不要求用户先理解 `@技能` 前缀。 */
+  const openSkillPicker = useCallback(() => {
+    mentionRangeRef.current = null;
+    browseSkillOnlyRef.current = true;
+    setQuery("");
+    setActiveCategory("skill");
+    setMenuMode("browse");
+    setMenuError(null);
+    logEvent("info", "mention.menu_open", {
+      mode: "browse",
+      category: "skill",
+    });
+    void ensureIndex();
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [ensureIndex]);
 
   const syncMention = useCallback(
     (text: string, caret: number) => {
@@ -702,7 +734,7 @@ export function useMentionMenu({
           id: crypto.randomUUID(),
           key,
           name: entry.name,
-          path: "提示词",
+          path: SKILL_ATTACHMENT_PATH,
           text: "",
           truncated: false,
           kind: "document",
@@ -835,7 +867,7 @@ export function useMentionMenu({
           : entry.kind === "conversation"
             ? "conversation"
             : entry.kind === "document"
-              ? "setting"
+              ? "skill"
               : "file";
       logEvent("info", "mention.select", { category });
       const index = attachments.length;
@@ -942,7 +974,9 @@ export function useMentionMenu({
 
   const setMenuQuery = useCallback(
     (q: string) => {
-      if (menuMode === "browse" && q.trim()) setActiveCategory(null);
+      if (menuMode === "browse" && q.trim() && !browseSkillOnlyRef.current) {
+        setActiveCategory(null);
+      }
       setQuery(q);
     },
     [menuMode],
@@ -957,6 +991,7 @@ export function useMentionMenu({
   const goBack = useCallback(() => {
     if (activeCategory) {
       setActiveCategory(null);
+      browseSkillOnlyRef.current = false;
       setActiveIndex(0);
       return;
     }
@@ -1071,6 +1106,7 @@ export function useMentionMenu({
     setQuery: setMenuQuery,
     setActiveIndex,
     openBrowse,
+    openSkillPicker,
     toggleAtMention,
     clearActiveMention,
     syncMention,

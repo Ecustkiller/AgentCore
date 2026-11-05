@@ -1,9 +1,10 @@
+import { SKILL_ATTACHMENT_PATH } from "@/components/chat/message-input/composerAttachments";
 import { DirTypeIcon, FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { MessageAttachmentMeta } from "@/stores/conversation";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { Bookmark, MessageSquare } from "lucide-react";
+import { Bookmark, MessageSquare, Sparkles } from "lucide-react";
 
 const chipClass =
   "inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground";
@@ -27,11 +28,14 @@ export function AttachmentChip({
 }) {
   const showFile = useSidePanelStore((s) => s.showFile);
   const openable = interactive && canOpenPreview(att);
+  const isSkill = att.kind === "document" && att.path === SKILL_ATTACHMENT_PATH;
   const icon =
     att.kind === "dir" ? (
       <DirTypeIcon name={att.name} path={att.path} size={12} />
     ) : att.kind === "conversation" ? (
       <MessageSquare size={12} className="shrink-0" />
+    ) : isSkill ? (
+      <Sparkles size={12} className="shrink-0" />
     ) : att.kind === "document" ? (
       <Bookmark size={12} className="shrink-0" />
     ) : (
@@ -40,13 +44,16 @@ export function AttachmentChip({
   const tooltip =
     att.kind === "conversation"
       ? "引用对话"
-      : att.kind === "document"
-        ? "本句点名提示词"
-        : att.path;
+      : isSkill
+        ? "本回合固定使用此技能"
+        : att.kind === "document"
+          ? "本句点名提示词"
+          : att.path;
   const face = (
     <>
       {icon}
       <span className="truncate">
+        {isSkill && <span className="mr-1 text-muted-foreground">技能</span>}
         {att.name}
         {att.kind === "dir" ? "/" : ""}
       </span>

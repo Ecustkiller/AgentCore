@@ -875,6 +875,27 @@ async def test_document_pin_is_not_uploaded_material():
 
 
 @pytest.mark.asyncio
+async def test_explicit_skill_is_mandatory_and_blocks_catalog_scanning():
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "active-equity-report-analysis",
+                "path": "技能",
+                "kind": "document",
+                "text": "先确认基金，再生成报告。",
+            }
+        ]
+    )
+    assert out is not None
+    assert "<钉住条目>" in out
+    assert "--- 显式技能: active-equity-report-analysis ---" in out
+    assert "Do not scan the skill catalog" in out
+    assert "choose one representative item" in out
+    assert "先确认基金，再生成报告。" in out
+    assert "<附件>" not in out
+
+
+@pytest.mark.asyncio
 async def test_document_pin_keeps_inline_slot_without_file_body():
     from agentcore.runtime.resolve.attachment_context import _build_attachment_prompt
 

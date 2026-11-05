@@ -29,6 +29,19 @@ export const useComposerProfileDraftStore = create<ComposerProfileDraftState>(
   }),
 );
 
+type ComposerModelPickerOpenState = {
+  requestToken: number;
+  requestOpen: () => void;
+};
+
+/** Other composer hints can open the same model picker without duplicating its list. */
+export const useComposerModelPickerOpenStore =
+  create<ComposerModelPickerOpenState>((set) => ({
+    requestToken: 0,
+    requestOpen: () =>
+      set((state) => ({ requestToken: state.requestToken + 1 })),
+  }));
+
 /** Session / new-chat profile id: conversation pin → draft pick → last-used. */
 export function resolveComposerProfileId(args: {
   conversationId: string | null;
@@ -107,5 +120,7 @@ export function shouldShowComposerVisionHint(opts: {
   return !profileCanSeeImages(opts.profile, opts.catalogModels);
 }
 
-/** Pre-send muted line; does not block send. */
-export const COMPOSER_VISION_HINT = "当前主模型不能看图";
+/** Pre-send warning; does not block send, but can open the model picker. */
+export const COMPOSER_VISION_HINT =
+  "当前主模型不能读取图片，图片内容不会进入上下文";
+export const COMPOSER_VISION_ACTION = "切换看图模型";

@@ -7,6 +7,7 @@ import {
   Bookmark,
   Loader2,
   MessageSquare,
+  Sparkles,
   Users,
   X,
 } from "lucide-react";
@@ -14,6 +15,7 @@ import type {
   PendingAgentMention,
   PendingAttachment,
 } from "./composerAttachments";
+import { SKILL_ATTACHMENT_PATH } from "./composerAttachments";
 
 export function AttachmentChips({
   attachments,
@@ -54,6 +56,8 @@ export function AttachmentChips({
       {attachments.map((a) => {
         const uploading = a.uploadState === "uploading";
         const failed = a.uploadState === "error";
+        const isSkill =
+          a.kind === "document" && a.path === SKILL_ATTACHMENT_PATH;
         return (
           <span
             key={a.id}
@@ -77,6 +81,8 @@ export function AttachmentChips({
               <DirTypeIcon name={a.name} path={a.path} size={12} />
             ) : a.kind === "conversation" ? (
               <MessageSquare size={12} className="shrink-0" />
+            ) : isSkill ? (
+              <Sparkles size={12} className="shrink-0" />
             ) : a.kind === "document" ? (
               <Bookmark size={12} className="shrink-0" />
             ) : (
@@ -93,12 +99,17 @@ export function AttachmentChips({
                   ? (a.uploadError ?? "上传失败，发送时会重试")
                   : a.kind === "conversation"
                     ? "引用对话"
-                    : a.kind === "document"
-                      ? "本句点名提示词"
-                      : a.path
+                    : isSkill
+                      ? "本回合固定使用此技能"
+                      : a.kind === "document"
+                        ? "本句点名提示词"
+                        : a.path
               }
             >
               <span className="truncate">
+                {isSkill && (
+                  <span className="mr-1 text-muted-foreground">技能</span>
+                )}
                 {a.name}
                 {a.kind === "dir" ? "/" : ""}
               </span>
