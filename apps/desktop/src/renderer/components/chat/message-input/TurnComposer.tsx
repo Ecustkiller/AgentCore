@@ -12,6 +12,7 @@ import {
   useClassicToolStepOpen,
   useLiveCoordinatingTurn,
 } from "@/lib/composerDelivery";
+import { useComposerModelPickerOpenStore } from "@/lib/composerModelProfile";
 import { connectivityEscalationSuffix } from "@/lib/errors";
 import {
   dropInlineIndex,
@@ -19,10 +20,12 @@ import {
   migrateLegacyDraft,
   plainText,
 } from "@/lib/inlineBody";
+import { startNewConversation } from "@/lib/newConversation";
 import {
   assistantHasTeamStrip,
   turnOutcomeForAssistant,
 } from "@/lib/turnOutcome";
+import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { selectVisibleColdResumes } from "@/services/resume";
 import { warmLlmHttpOnComposerFocus } from "@/services/warmLlmHttp";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
@@ -55,10 +58,12 @@ import { useServerHealthStore } from "@/stores/serverHealth";
 import { AtSign, Loader2, Send, Sparkles, Square, X } from "lucide-react";
 import type { ChangeEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ComposerBodyEditor,
   type ComposerBodyHandle,
 } from "./ComposerBodyEditor";
+import { ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
 import { ComposerFailureBanner } from "./ComposerFailureBanner";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
@@ -81,6 +86,12 @@ import type {
   PendingAttachment,
 } from "./composerAttachments";
 import { composerHasSendableDraft } from "./composerAttachments";
+import {
+  type ComposerCommand,
+  detectSlashCommand,
+  matchComposerCommands,
+  removeSlashCommand,
+} from "./composerCommands";
 import {
   COMPOSER_FOLDER_READ_ONLY_HINT,
   isComposerFolderWriteBlocked,
@@ -318,9 +329,19 @@ export function TurnComposer({
     [draftKey],
   );
 
+  const navigate = useNavigate();
   const bodyRef = useRef<ComposerBodyHandle | null>(null);
   const bodyHostRef = useRef<HTMLDivElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
+  const [commandRange, setCommandRange] = useState<{
+    start: number;
+    query: string;
+  } | null>(null);
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0);
+  const commandItems = useMemo(
+    () => (commandRange ? matchComposerCommands(commandRange.query) : []),
+    [commandRange],
+  );
   const folders = useFolders();
   const conversations = useConversations();
   const draftIntent = useFoldersStore((s) => s.draftWorkspaceIntent);
@@ -539,24 +560,46 @@ export function TurnComposer({
     setAssignHint(null);
   }, [assignHint]);
 
+  const syncSlashCommands = useCallback(
+    (next: string, caret: number) => {
+      setCommandRange(liveDebate ? null : detectSlashCommand(next, caret));
+    },
+    [liveDebate],
+  );
+
   const handleBodyChange = useCallback(
     (next: string) => {
       setValue(next);
       if (!liveDebate) {
         mention.syncMention(next, bodyRef.current?.getCaret() ?? next.length);
+        syncSlashCommands(next, bodyRef.current?.getCaret() ?? next.length);
       }
       if (drop.dropError) drop.clearDropError();
     },
-    [drop, liveDebate, mention, setValue],
+    [drop, liveDebate, mention, setValue, syncSlashCommands],
   );
 
   const handleCaret = useCallback(
     (caret: number) => {
       if (liveDebate) return;
       mention.syncMention(value, caret);
+      syncSlashCommands(value, caret);
     },
-    [liveDebate, mention, value],
+    [liveDebate, mention, syncSlashCommands, value],
   );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commandRange.query is the reset key
+  useEffect(() => {
+    setActiveCommandIndex(0);
+  }, [commandRange?.query]);
+
+  // Programmatic edits (initial draft, skill insert, voice transcript, clear)
+  // must recompute or close the menu without waiting for a key event.
+  useEffect(() => {
+    setCommandRange(
+      liveDebate ? null : detectSlashCommand(value, value.length),
+    );
+  }, [liveDebate, value]);
 
   const handleReconcile = useCallback(
     (nextAtts: PendingAttachment[], nextMents: PendingAgentMention[]) => {
@@ -597,6 +640,56 @@ export function TurnComposer({
     useConversationStore.getState().stopGeneration();
   }, []);
 
+  const runCommand = useCallback(
+    (command: ComposerCommand) => {
+      if (!commandRange) return;
+      const next = removeSlashCommand(
+        value,
+        commandRange.start,
+        commandRange.query,
+      );
+      const caret = commandRange.start;
+      setValue(next);
+      setCommandRange(null);
+      setActiveCommandIndex(0);
+
+      switch (command.id) {
+        case "skill":
+          mention.openSkillPicker();
+          return;
+        case "model":
+          useComposerModelPickerOpenStore.getState().requestOpen();
+          return;
+        case "new":
+          startNewConversation(navigate);
+          return;
+        case "mcp":
+          navigate(APP_PATHS.toolbox.mcp);
+          return;
+        case "settings":
+          navigate(APP_PATHS.more.general);
+          return;
+        case "stop":
+          if (deskOccupied) stopGeneration();
+          break;
+      }
+
+      requestAnimationFrame(() => {
+        bodyRef.current?.focus();
+        bodyRef.current?.setCaret(caret);
+      });
+    },
+    [
+      commandRange,
+      deskOccupied,
+      mention,
+      navigate,
+      setValue,
+      stopGeneration,
+      value,
+    ],
+  );
+
   useEffect(() => {
     if (voice.isRecording) mention.closeMenu();
   }, [voice.isRecording, mention.closeMenu]);
@@ -617,6 +710,12 @@ export function TurnComposer({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [voice.isSupported, voice.toggle]);
 
+  const commandMenuOpen =
+    !liveDebate &&
+    mention.menuMode === null &&
+    commandRange !== null &&
+    commandItems.length > 0;
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
 
@@ -629,6 +728,29 @@ export function TurnComposer({
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         voice.stop();
+        return;
+      }
+    }
+
+    if (commandMenuOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        setActiveCommandIndex(
+          (index) =>
+            (index + delta + commandItems.length) % commandItems.length,
+        );
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const command = commandItems[activeCommandIndex] ?? commandItems[0];
+        if (command) runCommand(command);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setCommandRange(null);
         return;
       }
     }
@@ -863,6 +985,15 @@ export function TurnComposer({
                 <X size={12} />
               </button>
             </output>
+          )}
+          {commandMenuOpen && (
+            <ComposerCommandMenu
+              placement={isBar ? "above" : "below"}
+              commands={commandItems}
+              activeIndex={activeCommandIndex}
+              onHover={setActiveCommandIndex}
+              onSelect={runCommand}
+            />
           )}
           {menuOpen && !liveDebate && (
             <MentionMenu

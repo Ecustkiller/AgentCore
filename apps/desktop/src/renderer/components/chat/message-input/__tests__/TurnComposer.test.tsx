@@ -228,6 +228,7 @@ vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
     clearActiveMention: vi.fn(),
     drillCategory: vi.fn(),
     goBack: vi.fn(),
+    openSkillPicker: vi.fn(),
   }),
 }));
 
@@ -240,7 +241,10 @@ import {
   COMPOSER_CONTINUE_PLACEHOLDER,
   COMPOSER_EMPTY_INTERRUPTED_HINT,
 } from "@/lib/composerContinueHint";
-import { useComposerProfileDraftStore } from "@/lib/composerModelProfile";
+import {
+  useComposerModelPickerOpenStore,
+  useComposerProfileDraftStore,
+} from "@/lib/composerModelProfile";
 import { LLM_RATE_LIMIT_MESSAGE, LLM_RATE_LIMIT_WHY } from "@/lib/errors";
 import type { FolderMeta } from "@/services/folders";
 import {
@@ -474,6 +478,7 @@ beforeEach(async () => {
     dockFlipToken: 0,
   });
   useComposerProfileDraftStore.setState({ profileId: null });
+  useComposerModelPickerOpenStore.setState({ requestToken: 0 });
   useFoldersStore.setState({ draftWorkspaceIntent: { kind: "quick_cloud" } });
   folderLists.accessible = [];
   folderLists.grouped = [];
@@ -769,6 +774,20 @@ describe("TurnComposer variants", () => {
     expect(screen.queryByRole("button", { name: "排队" })).toBeNull();
     expect(screen.queryByRole("button", { name: "排队发送" })).toBeNull();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
+  });
+
+  it("slash command menu opens model picker and clears its query", async () => {
+    const { useComposerDraftStore } = await import("@/stores/composer");
+    useComposerDraftStore.getState().setValue("__draft__", "/mod");
+    renderComposer("bar");
+
+    expect(await screen.findByTestId("composer-command-menu")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /切换模型/ })).toBeTruthy();
+    fireEvent.keyDown(screen.getByTestId("composer-body"), { key: "Enter" });
+    expect(useComposerModelPickerOpenStore.getState().requestToken).toBe(1);
+    expect(useComposerDraftStore.getState().drafts.__draft__?.value ?? "").toBe(
+      "",
+    );
   });
 
   it("generating + draft: Ctrl/Cmd+Enter queues like Enter on classic prose", async () => {

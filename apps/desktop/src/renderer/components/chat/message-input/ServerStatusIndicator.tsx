@@ -26,7 +26,7 @@ export function ComposerConnectionNotice() {
       className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2 text-xs text-muted-foreground"
     >
       <Loader2 size={12} className="shrink-0 animate-spin" />
-      <span className="min-w-0 flex-1">
+      <span className="min-w-0 flex-1 text-muted-foreground">
         与服务器断开连接。可浏览已缓存的对话与本机文件（只读）；暂不能发送或运行
         AI。
       </span>
