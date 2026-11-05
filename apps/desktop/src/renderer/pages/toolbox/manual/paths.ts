@@ -5,6 +5,7 @@
 
 export const APP_PATHS = {
   files: "/files",
+  tasks: "/tasks",
   /** opt-in 人侧文档 / 表格编辑器；默认关闭，见 lib/labsFlags.ts。 */
   docs: "/docs",
   tables: "/tables",

@@ -95,6 +95,23 @@ class HandoffJobRepository:
         )
         return result.scalars().all()
 
+    async def list_for_user(
+        self, user_id: str, *, limit: int = 200
+    ) -> Sequence[HandoffJob]:
+        """The account's handoff jobs across conversations, newest first.
+
+        Backs the global task center. Every row is owner-scoped here, so the
+        aggregate endpoint never has to trust conversation ids coming from the
+        client.
+        """
+        result = await self._session.execute(
+            select(HandoffJob)
+            .where(HandoffJob.user_id == user_id)
+            .order_by(HandoffJob.created_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def list_open_past_retention(
         self, *, before: datetime, limit: int
     ) -> Sequence[HandoffJob]:

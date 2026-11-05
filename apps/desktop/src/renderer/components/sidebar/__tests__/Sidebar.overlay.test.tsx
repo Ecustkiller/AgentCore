@@ -6,6 +6,15 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../Sidebar";
 
+vi.mock("@/hooks/useHandoffTasks", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/useHandoffTasks")>();
+  return {
+    ...actual,
+    useHandoffTasks: () => ({ data: [] }),
+  };
+});
+
 vi.mock("@/lib/newConversation", () => ({
   startNewConversation: vi.fn(),
 }));
@@ -66,6 +75,7 @@ describe("Sidebar · overlay", () => {
 
     expect(screen.getByRole("dialog", { name: "侧栏" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "新对话" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "任务" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "文件" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "消息" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "工具箱" })).toBeNull();

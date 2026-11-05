@@ -34,6 +34,7 @@ import {
   Info,
   KeyRound,
   Keyboard,
+  ListChecks,
   type LucideIcon,
   Mail,
   MessagesSquare,
@@ -341,6 +342,14 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Files,
       keywords: ["files", "workspace", "wenjian", "gongzuoqu"],
       run: go("/files"),
+    },
+    {
+      id: "nav-tasks",
+      title: "任务",
+      category: "前往",
+      icon: ListChecks,
+      keywords: ["tasks", "background", "handoff", "renwu", "后台任务"],
+      run: go(APP_PATHS.tasks),
     },
     {
       id: "nav-messages",

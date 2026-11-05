@@ -13,6 +13,19 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../Sidebar";
 
+const taskState = vi.hoisted(() => ({
+  jobs: [] as Array<{ status: string }>,
+}));
+
+vi.mock("@/hooks/useHandoffTasks", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/useHandoffTasks")>();
+  return {
+    ...actual,
+    useHandoffTasks: () => ({ data: taskState.jobs }),
+  };
+});
+
 vi.mock("@/lib/newConversation", () => ({
   startNewConversation: vi.fn(),
 }));
@@ -63,6 +76,7 @@ function renderSidebar() {
 beforeEach(() => {
   useSidebarStore.setState({ collapsed: false });
   useUIStore.setState({ searchOpen: false, searchInitialQuery: "" });
+  taskState.jobs = [];
 });
 
 afterEach(() => {
@@ -75,6 +89,7 @@ describe("Sidebar · 折叠导航可达性", () => {
     renderSidebar();
 
     expect(screen.getByRole("button", { name: "新对话" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "任务" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "文件" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "消息" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "工具箱" })).toBeTruthy();
@@ -85,6 +100,14 @@ describe("Sidebar · 折叠导航可达性", () => {
     renderSidebar();
 
     expect(screen.getByRole("button", { name: "搜索或运行命令" })).toBeTruthy();
+  });
+
+  it("折叠态显示后台任务数量", () => {
+    useSidebarStore.setState({ collapsed: true });
+    taskState.jobs = [{ status: "running" }, { status: "succeeded" }];
+    renderSidebar();
+
+    expect(screen.getByLabelText("2 个后台任务")).toBeTruthy();
   });
 });
 
@@ -106,5 +129,6 @@ describe("Sidebar · 桌面搜索假入口", () => {
       within(nav).getByRole("button", { name: /搜索或运行命令/ }),
     ).toBeTruthy();
     expect(within(nav).getByRole("button", { name: "新对话" })).toBeTruthy();
+    expect(within(nav).getByRole("button", { name: "任务" })).toBeTruthy();
   });
 });

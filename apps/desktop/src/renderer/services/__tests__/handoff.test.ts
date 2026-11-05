@@ -8,6 +8,7 @@ import {
   discardHandoffJob,
   dispatchHandoffJob,
   getHandoffDiff,
+  listUserHandoffJobs,
   readLocalShas,
   resolveHandoffCardPhase,
 } from "../handoff";
@@ -463,6 +464,42 @@ describe("discardHandoffJob", () => {
     );
     expect(job.status).toBe("discarded");
     expect(job.id).toBe("job-1");
+  });
+});
+
+describe("listUserHandoffJobs", () => {
+  it("reads the account task feed and maps jobs to camelCase", async () => {
+    apiGet.mockResolvedValueOnce({
+      data: [
+        {
+          id: "job-2",
+          source_conversation_id: "c-source",
+          job_conversation_id: "c-job",
+          base_snapshot_id: "snap-base",
+          result_snapshot_id: "snap-result",
+          task: "整理报告",
+          status: "succeeded",
+          error: null,
+          created_at: "2026-07-10T00:00:00Z",
+          updated_at: "2026-07-10T01:00:00Z",
+          finished_at: "2026-07-10T01:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    const jobs = await listUserHandoffJobs();
+
+    expect(apiGet).toHaveBeenCalledWith("/v1/tasks");
+    expect(jobs).toEqual([
+      expect.objectContaining({
+        id: "job-2",
+        sourceConversationId: "c-source",
+        jobConversationId: "c-job",
+        resultSnapshotId: "snap-result",
+        status: "succeeded",
+      }),
+    ]);
   });
 });
 

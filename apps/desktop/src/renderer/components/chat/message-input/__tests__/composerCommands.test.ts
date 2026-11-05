@@ -24,6 +24,9 @@ describe("composer commands", () => {
     expect(matchComposerCommands("model").map((item) => item.id)).toEqual([
       "model",
     ]);
+    expect(matchComposerCommands("后台").map((item) => item.id)).toEqual([
+      "tasks",
+    ]);
     expect(matchComposerCommands("").map((item) => item.id)).toContain("stop");
   });
 

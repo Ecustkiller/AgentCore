@@ -5160,6 +5160,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Background Tasks
+         * @description List the caller's background jobs across all conversations.
+         *
+         *     The task center starts with local-to-cloud handoff jobs because they are the
+         *     background work with a durable lifecycle today. The route is deliberately
+         *     account-scoped: opening the center does not require the client to enumerate
+         *     conversations or make one list request per conversation.
+         */
+        get: operations["list_background_tasks_v1_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -22981,6 +23006,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TableOpsResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_background_tasks_v1_tasks_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandoffJobListResponse"];
                 };
             };
             /** @description Validation Error */

@@ -36,6 +36,12 @@ export const workspaceKeys = {
   list: ["workspaces", "list"] as const,
 };
 
+/** Cross-conversation background tasks shown in the account task center. */
+export const taskKeys = {
+  all: ["tasks"] as const,
+  handoff: ["tasks", "handoff"] as const,
+};
+
 /** Conversation-scoped external directory grants (`external/<alias>/`). */
 export const externalGrantKeys = {
   all: ["external-grants"] as const,

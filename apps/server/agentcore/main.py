@@ -41,6 +41,7 @@ from agentcore.api.routes import (
     skill_store,
     system,
     tables,
+    tasks,
     usage,
     users,
     workspaces,
@@ -633,6 +634,7 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 
 app.include_router(system.router)
 app.include_router(tables.router, prefix="/v1")
+app.include_router(tasks.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(account.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")

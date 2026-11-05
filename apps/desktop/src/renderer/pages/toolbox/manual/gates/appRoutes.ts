@@ -11,6 +11,7 @@ import { APP_PATHS } from "../paths";
 export const APP_STATIC_ROUTES: readonly string[] = [
   "/",
   "/conversations",
+  "/tasks",
   "/files",
   "/whiteboard",
   "/messages",

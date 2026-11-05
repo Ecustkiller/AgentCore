@@ -1,5 +1,6 @@
 import {
   Bot,
+  ListChecks,
   MessageSquarePlus,
   Settings,
   Sparkles,
@@ -20,6 +21,10 @@ function commandIcon(id: ComposerCommand["id"]) {
           size={14}
           className="shrink-0 text-muted-foreground"
         />
+      );
+    case "tasks":
+      return (
+        <ListChecks size={14} className="shrink-0 text-muted-foreground" />
       );
     case "mcp":
       return <Unplug size={14} className="shrink-0 text-muted-foreground" />;

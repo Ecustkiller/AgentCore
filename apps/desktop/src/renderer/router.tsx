@@ -17,6 +17,7 @@ import { PreviewPage } from "@/pages/PreviewPage";
 import { TableEditorPage } from "@/pages/TableEditorPage";
 import { TablesPage } from "@/pages/TablesPage";
 import { TablesPreviewPage } from "@/pages/TablesPreviewPage";
+import { TaskCenterPage } from "@/pages/TaskCenterPage";
 import { TurnDetailPage } from "@/pages/TurnDetailPage";
 import { LegalSettingsPage } from "@/pages/legal/LegalSettingsPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
@@ -74,6 +75,7 @@ export const router = createHashRouter([
         path: "conversations",
         element: <ConversationsPage />,
       },
+      { path: "tasks", element: <TaskCenterPage /> },
       { path: "files", element: <FilesPage /> },
       // opt-in：人侧文档 / 表格编辑器。默认关闭时这些路径收向 /files（跟随上游）。
       {

@@ -663,6 +663,9 @@ export function TurnComposer({
         case "new":
           startNewConversation(navigate);
           return;
+        case "tasks":
+          navigate(APP_PATHS.tasks);
+          return;
         case "mcp":
           navigate(APP_PATHS.toolbox.mcp);
           return;

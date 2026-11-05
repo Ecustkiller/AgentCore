@@ -226,6 +226,7 @@ export const REST_PATH_TEMPLATES = [
   "/v1/tables/{table_id}",
   "/v1/tables/{table_id}/conversation",
   "/v1/tables/{table_id}/ops",
+  "/v1/tasks",
   "/v1/usage/summary",
   "/v1/users/me/autonomy",
   "/v1/users/me/avatar",

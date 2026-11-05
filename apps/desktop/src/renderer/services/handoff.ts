@@ -323,6 +323,14 @@ export async function listHandoffJobs(
   return res.data.map(toJob);
 }
 
+/** All of the signed-in account's handoff jobs, newest first (`GET /v1/tasks`). */
+export async function listUserHandoffJobs(): Promise<HandoffJob[]> {
+  const res = await api.get<{ data: HandoffJobWire[]; total: number }>(
+    "/v1/tasks",
+  );
+  return res.data.map(toJob);
+}
+
 /**
  * 一个已完成交接的结果 diff（双模式工作区 P2e / e3）：result 对 base 快照的变更集，
  * 每条携 base 哈希供客户端三方判定。作业未成功时后端返回 409。

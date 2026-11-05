@@ -38071,6 +38071,84 @@
         ]
       }
     },
+    "/v1/tasks": {
+      "get": {
+        "description": "List the caller's background jobs across all conversations.\n\nThe task center starts with local-to-cloud handoff jobs because they are the\nbackground work with a durable lifecycle today. The route is deliberately\naccount-scoped: opening the center does not require the client to enumerate\nconversations or make one list request per conversation.",
+        "operationId": "list_background_tasks_v1_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffJobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Background Tasks",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
     "/v1/usage/summary": {
       "get": {
         "description": "Account dashboard: today's tokens/cost, the month's cost, the recent\ndaily-cost trend, and the quota.\n\nWindows are bounded at the current UTC day / month start (MVP — a per-user\ntimezone is a later refinement). ``recent_daily_cost`` is the last\n``_TREND_DAYS`` UTC days (zero-filled, oldest-first) for the sparkline.\nMoney is nano-CNY; ``CostBreakdown.cny_total`` is already yuan (no FX).\nPer-role split lives on the turn payroll\n(``GET /messages/{id}/cost``), not this monthly account view.\n\nThis is the account total, so it also carries spend that belongs to no\nconversation at all (AI 改写 / 文档 description — ``role=assist`` ledger rows).\n``requests`` counts assistant turns only, so those rows raise 花销 without\nraising 请求数.\n\n``quota`` mirrors what ``enforce_quota`` will actually apply to this user:\nper-user override columns first, else global ``quota_*`` — so the meters\nnever show a cap the gate wouldn't enforce.",

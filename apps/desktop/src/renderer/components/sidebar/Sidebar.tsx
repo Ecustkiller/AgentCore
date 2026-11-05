@@ -6,6 +6,11 @@ import {
   SurfaceRowButton,
 } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  isHandoffTaskAwaitingUser,
+  isHandoffTaskRunning,
+  useHandoffTasks,
+} from "@/hooks/useHandoffTasks";
 import { isWebClient } from "@/lib/capabilities";
 import { useHumanDocsTablesEnabled } from "@/lib/labsFlags";
 import { startNewConversation } from "@/lib/newConversation";
@@ -18,6 +23,7 @@ import { useUIStore } from "@/stores/ui";
 import {
   FileText,
   Files,
+  ListChecks,
   type LucideIcon,
   Mail,
   MessageSquare,
@@ -42,6 +48,7 @@ type NavItem = { icon: LucideIcon; label: string; route: string };
 
 const NAV_ITEMS: NavItem[] = [
   { icon: MessageSquare, label: "新对话", route: "/" },
+  { icon: ListChecks, label: "任务", route: APP_PATHS.tasks },
   { icon: Files, label: "文件", route: APP_PATHS.files },
   { icon: Mail, label: "消息", route: "/messages" },
   { icon: Wrench, label: "工具箱", route: "/toolbox" },
@@ -85,6 +92,7 @@ export function Sidebar({
   const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed);
   const openSearch = useUIStore((s) => s.openSearch);
   const unread = useUnreadTotal();
+  const tasks = useHandoffTasks();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
@@ -92,6 +100,11 @@ export function Sidebar({
   // 搜索假入口两端都在侧栏（桌面顶栏不再放）。桌面 & 离线预览仍用顶栏放品牌/折叠。
   const webClient = isWebClient();
   const docsTablesEnabled = useHumanDocsTablesEnabled();
+  const runningTasks = (tasks.data ?? []).filter(isHandoffTaskRunning).length;
+  const awaitingTasks = (tasks.data ?? []).filter(
+    isHandoffTaskAwaitingUser,
+  ).length;
+  const taskCount = runningTasks + awaitingTasks;
   const navItems = useMemo(() => {
     const base: NavItem[] = overlay
       ? NAV_ITEMS.filter((item) => item.route !== "/toolbox")
@@ -216,6 +229,7 @@ export function Sidebar({
         {navItems.map((item) => {
           const active = isNavActive(item.route);
           const showBadge = item.route === "/messages" && unread > 0;
+          const taskBadge = item.route === APP_PATHS.tasks && taskCount > 0;
           // 折叠仅图标：补 aria-label + SimpleTooltip，与用户区习惯一致。
           if (collapsed) {
             return (
@@ -232,6 +246,14 @@ export function Sidebar({
                       aria-label={`${unread} 条未读`}
                       className="absolute right-2 top-1.5 size-2 rounded-full bg-primary"
                     />
+                  )}
+                  {taskBadge && (
+                    <span
+                      aria-label={`${taskCount} 个后台任务`}
+                      className="absolute right-2 top-0.5 min-w-3 rounded-full bg-primary px-0.5 text-center text-[9px] leading-3 text-primary-foreground"
+                    >
+                      {taskCount > 9 ? "9+" : taskCount}
+                    </span>
                   )}
                 </SurfaceRowButton>
               </CollapsedNavTip>
@@ -253,6 +275,11 @@ export function Sidebar({
                   {unread > 99 ? "99+" : unread}
                 </span>
               )}
+              {taskBadge && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs font-medium text-primary-foreground">
+                  {taskCount > 99 ? "99+" : taskCount}
+                </span>
+              )}
             </SurfaceRowButton>
           );
         })}
@@ -266,10 +293,10 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto">
         {!collapsed && (
           <RailHotkeySlotsProvider>
-            <PinnedConversations onActivate={onDismiss} />
-            <WorkspaceGroups onActivate={onDismiss} />
-            <RecentConversations onActivate={onDismiss} />
-            <ViewAllConversations onActivate={onDismiss} />
+            <PinnedConversations key="pinned" onActivate={onDismiss} />
+            <WorkspaceGroups key="workspaces" onActivate={onDismiss} />
+            <RecentConversations key="recent" onActivate={onDismiss} />
+            <ViewAllConversations key="all" onActivate={onDismiss} />
           </RailHotkeySlotsProvider>
         )}
       </div>

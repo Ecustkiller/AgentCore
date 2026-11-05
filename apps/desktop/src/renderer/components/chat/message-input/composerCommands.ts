@@ -2,6 +2,7 @@ export type ComposerCommandId =
   | "skill"
   | "model"
   | "new"
+  | "tasks"
   | "mcp"
   | "settings"
   | "stop";
@@ -32,6 +33,12 @@ export const COMPOSER_COMMANDS: ComposerCommand[] = [
     label: "新对话",
     description: "保留当前草稿并开始新对话",
     keywords: ["new", "新对话", "chat"],
+  },
+  {
+    id: "tasks",
+    label: "后台任务",
+    description: "查看运行中任务与待处理结果",
+    keywords: ["tasks", "task", "background", "任务", "后台", "运行"],
   },
   {
     id: "mcp",

@@ -1,3 +1,5 @@
+import { queryClient } from "@/lib/queryClient";
+import { taskKeys } from "@/lib/queryKeys";
 import { type HandoffJob, listHandoffJobs } from "@/services/handoff";
 import {
   type WorkspaceMode,
@@ -74,7 +76,7 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
         byConversation: { ...s.byConversation, [conversationId]: jobs },
       }));
     },
-    upsert: (conversationId, job) =>
+    upsert: (conversationId, job) => {
       set((s) => {
         const prev = s.byConversation[conversationId] ?? [];
         const next = prev.some((j) => j.id === job.id)
@@ -83,7 +85,12 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
         return {
           byConversation: { ...s.byConversation, [conversationId]: next },
         };
-      }),
+      });
+      // A newly dispatched job or an apply/discard result changes the global
+      // task feed even when its page is not open. Refresh the shared cache now
+      // rather than waiting for the next poll cycle.
+      void queryClient.invalidateQueries({ queryKey: taskKeys.handoff });
+    },
     markMerged: (jobId) =>
       set((s) =>
         s.mergedJobIds[jobId]

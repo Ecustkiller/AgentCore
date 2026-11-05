@@ -23,6 +23,7 @@ async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
 
 async def test_handoff_requires_auth(client):
     cid = "00000000-0000-0000-0000-000000000000"
+    assert (await client.get("/v1/tasks")).status_code == 401
     assert (
         await client.post(
             f"/v1/conversations/{cid}/workspace/handoff/dispatch",
@@ -89,6 +90,49 @@ async def _seed_job(session_factory, *, user_id, source_conversation_id, succeed
         if succeeded:
             await repo.mark_succeeded(job.id, result_snapshot_id="result-snap")
         return job.id
+
+
+async def test_task_center_lists_own_jobs_across_conversations(
+    client, new_client, session_factory
+):
+    owner_id = await register_and_login(client, "taskcenterowner")
+    first = await _new_conversation(client, "first")
+    second = await _new_conversation(client, "second")
+    await _seed_job(
+        session_factory,
+        user_id=owner_id,
+        source_conversation_id=first,
+    )
+    await _seed_job(
+        session_factory,
+        user_id=owner_id,
+        source_conversation_id=second,
+        succeeded=True,
+    )
+
+    async with new_client() as other:
+        other_id = await register_and_login(other, "taskcenterintruder")
+        other_conv = await _new_conversation(other, "not mine")
+        await _seed_job(
+            session_factory,
+            user_id=other_id,
+            source_conversation_id=other_conv,
+        )
+
+        own = await client.get("/v1/tasks")
+        assert own.status_code == 200, own.text
+        own_rows = own.json()["data"]
+        assert own.json()["total"] == 2
+        assert {row["source_conversation_id"] for row in own_rows} == {
+            first,
+            second,
+        }
+        assert {row["status"] for row in own_rows} == {"pending", "succeeded"}
+
+        theirs = await other.get("/v1/tasks")
+        assert theirs.status_code == 200, theirs.text
+        assert theirs.json()["total"] == 1
+        assert theirs.json()["data"][0]["source_conversation_id"] == other_conv
 
 
 async def test_diff_unknown_job_is_404(client):
