@@ -101,8 +101,29 @@ async def _reset_llm_http_pool():
     await aclose_llm_http_pool()
 
 
-@pytest.fixture(autouse=True)
-def _isolate_coordination_registry():
+async def _drain_coordination_registry() -> None:
+    import asyncio
+
+    from agentcore.runtime.coordination import session as session_mod
+
+    sessions = list(session_mod._sessions.values())
+    tasks: set[asyncio.Task] = set()
+    for session in sessions:
+        session.close()
+        tasks.update(session._settle_tasks)
+        if session.drive_task is not None:
+            tasks.add(session.drive_task)
+        tasks.update(session._timeout_tasks.values())
+    session_mod.clear_active_coordination()
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _isolate_coordination_registry():
     """Clear the module-global coordination session registry around every test.
 
     Delegate tests share ``execution_id="e"`` — a leaked active session makes later
@@ -113,11 +134,9 @@ def _isolate_coordination_registry():
     file — pytest collects the directory as two Package nodes and the second loses
     the directory conftest's autouse binding). Root autouse survives any order.
     """
-    from agentcore.runtime.coordination.session import clear_active_coordination
-
-    clear_active_coordination()
+    await _drain_coordination_registry()
     yield
-    clear_active_coordination()
+    await _drain_coordination_registry()
 
 
 @pytest.fixture(autouse=True)
