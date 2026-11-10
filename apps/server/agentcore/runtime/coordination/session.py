@@ -647,11 +647,20 @@ def _retain_settle_task(
         # 能从日志读出 harvest 是否执行、是否异常、以何种方式结算（settled_via）。
         exc = done.exception()
         if exc is not None:
+            # A failed settle must not leave the session flagged as "harvest
+            # scheduled": that is what turns R-19 into a green graph with no answer
+            # and no path to re-settle. Keep the evidence, clear the flag.
+            session.harvest_scheduled = False
             logger.error(
                 "coordination.harvest_task_exception",
                 execution_id=session.execution_id,
                 conversation_id=session.conversation_id or "",
                 error=repr(exc),
+                settled_via=session.settled_via,
+                terminal_posted=getattr(session, "terminal_posted", None),
+                visible_close=attached_inject_closed_visibly(session),
+                completed=len(session.completed_run_ids),
+                total=session.total_workers,
             )
             return
         logger.info(
@@ -660,6 +669,8 @@ def _retain_settle_task(
             conversation_id=session.conversation_id or "",
             settled_via=session.settled_via,
             harvest_scheduled=session.harvest_scheduled,
+            terminal_posted=getattr(session, "terminal_posted", None),
+            visible_close=attached_inject_closed_visibly(session),
             completed=len(session.completed_run_ids),
             total=session.total_workers,
         )
@@ -918,6 +929,7 @@ async def _run_settle(session: CoordinationSession) -> None:
             _log_settle_cancelled(session, task)
         raise
     except Exception:  # noqa: BLE001 — settle must never leak into drive task
+        session.harvest_scheduled = False
         logger.exception(
             "coordination.settle_failed",
             execution_id=session.execution_id,

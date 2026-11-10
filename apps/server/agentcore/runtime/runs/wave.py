@@ -126,6 +126,7 @@ class WaveScheduler:
         cancel_run_ids: Callable[[], frozenset[str]] | None = None,
         stop_run_ids: Callable[[], frozenset[str]] | None = None,
         timeout_run_ids: Callable[[], frozenset[str]] | None = None,
+        deadline_mono: float | None = None,
         on_progress: OnProgress | None = None,
         on_node_done: OnNodeDone | None = None,
         on_boundary: OnBoundary | None = None,
@@ -177,6 +178,12 @@ class WaveScheduler:
           absorbed + salvaged exactly like redirect but recorded as the timeout kill it
           is (the cancel channel is shared with ``cancel_worker``, so without this the
           face would claim the CEO re-tasked the worker).
+        - ``deadline_mono`` is an absolute ``time.monotonic()`` deadline for the
+          whole drive. On expiry dispatch freezes, in-flight nodes are cancelled
+          through the ``worker_timeout`` channel, and never-dispatched nodes are
+          materialised SKIPPED — so the CEO still gets a complete terminal map and
+          can close with a gaps-annotated partial answer instead of draining
+          forever. Enabling it also puts the wait loop on a 50ms poll.
         - ``on_progress`` fires after *each* node finishes with the completed-so-far
           map, so the host gets smooth progress (one increment per node).
         - ``on_node_done`` (optional, additive) fires once per *executed* node with
@@ -227,6 +234,8 @@ class WaveScheduler:
         running: dict[asyncio.Task[RunState], str] = {}
         aborted = False
         stopped = False
+        wall_timed_out: set[str] = set()
+        deadline_hit = False
 
         # Materialise never-ran nodes as SKIPPED + emit on_skipped. Shared by graceful
         # abort close and terminal-cancel unwind (1B). Seeded entries stay put.
@@ -325,6 +334,22 @@ class WaveScheduler:
             while True:
                 # Freeze dispatch while aborting or soft-stopping (we must quiesce
                 # in-flight work before the pause so a resume re-runs only the un-run tail).
+                if (
+                    deadline_mono is not None
+                    and not deadline_hit
+                    and running
+                    and time.monotonic() >= deadline_mono
+                ):
+                    deadline_hit = True
+                    stopped = True
+                    wall_timed_out.update(running.values())
+                    _materialise_undispatched_tails()
+                    logger.warning(
+                        "wave.turn_wall_clock_expired",
+                        elapsed_s=round(time.monotonic() - wall_start, 2),
+                        in_flight=len(running),
+                        timed_out=sorted(wall_timed_out),
+                    )
                 holding = aborted or stopped
                 if not holding and should_stop is not None and should_stop():
                     stopped = True  # soft pause: stop launching, drain in-flight
@@ -410,12 +435,14 @@ class WaveScheduler:
                 # Per-run user cancel (redirect / run-stop): cancel specific in-flight tasks
                 # without aborting the whole batch. Checked each cycle; a cancelled task
                 # resolves on the next wait and is recorded as CANCELLED (not re-raised).
-                if cancel_run_ids is not None and running:
-                    pending_cancel = cancel_run_ids()
+                if running and (cancel_run_ids is not None or wall_timed_out):
+                    pending_cancel = (
+                        cancel_run_ids() if cancel_run_ids is not None else frozenset()
+                    ) | wall_timed_out
                     stops = stop_run_ids() if stop_run_ids is not None else frozenset()
                     timeouts = (
                         timeout_run_ids() if timeout_run_ids is not None else frozenset()
-                    )
+                    ) | wall_timed_out
                     for target_id in pending_cancel:
                         for task, rid in list(running.items()):
                             # msg=redirect|user_stop|worker_timeout so executor.agent
@@ -440,7 +467,13 @@ class WaveScheduler:
                 try:
                     done, _ = await asyncio.wait(
                         set(running),
-                        timeout=0.05 if cancel_run_ids is not None else None,
+                        timeout=0.05
+                        if (
+                            cancel_run_ids is not None
+                            or wall_timed_out
+                            or deadline_mono is not None
+                        )
+                        else None,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                 except asyncio.CancelledError:

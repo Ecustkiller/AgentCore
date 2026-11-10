@@ -124,5 +124,9 @@ class EngineSettings(BaseModel):
     # 默认 120：保留防挂死墙，给大上下文健康长收尾留余地（巡检 60s 误砍偏多）。≤0 关闭。
     # 不改 mark_llm_inflight 暂停语义。
     engine_force_finalize_wall_seconds: float = 120.0
+    # 整回合墙钟（秒）：从回合锚点起算。命中后冻结派发、把在飞 worker 以
+    # worker_timeout 收敛、未派发节点标 SKIPPED，让收口链路照常产出带 gaps 的
+    # 部分终稿，而不是无限 drain。≤0 关闭（conformance / 压测可显式关闭）。
+    engine_turn_wall_clock_seconds: float = 900.0
 
     observability_span_export_enabled: bool = True

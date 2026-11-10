@@ -6,6 +6,7 @@ external imports remain stable. Phase helpers live in sibling ``drive_*`` module
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -553,6 +554,17 @@ async def _drive_body(
     # 从这里到 post-wave drain 之间，本循环会按波排干 stop / redirect 队列——「引擎够得着
     # 这个 run」的窗口正是这一段，登记给 run-stop / run-redirect 路由据实回话。
     reach_token = register_drive(execution_id, plan)
+    from agentcore.config.settings import settings
+    from agentcore.runtime.turn.latency import get_turn_latency
+
+    budget_s = settings.engine_turn_wall_clock_seconds
+    probe = get_turn_latency()
+    anchor = getattr(probe, "anchor_mono", None) if probe is not None else None
+    deadline_mono = (
+        (anchor if anchor is not None else time.monotonic()) + budget_s
+        if budget_s > 0
+        else None
+    )
     try:
         results = await WaveScheduler(tool._max_parallel or resolve_max_parallel()).run(
             plan,
@@ -568,6 +580,7 @@ async def _drive_body(
             metrics_sink=batch_metrics,
             # 触顶后禁新波：在飞 drain，不 cancel。
             should_stop=should_stop,
+            deadline_mono=deadline_mono,
         )
 
         # soft should_stop 默认把未跑尾留给 resume；turn 顶是硬停，物化为 SKIPPED。

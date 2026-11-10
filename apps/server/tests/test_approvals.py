@@ -196,13 +196,13 @@ async def test_gate_per_tool_timeout_override():
     assert time.monotonic() - t0 < 1.0
 
 
-def test_approval_settings_default_infinite_wait():
-    """提问确认交互统一 D2：默认无限等，overrides 清空。"""
+def test_approval_settings_default_finite_wait():
+    """审批卡默认 15 分钟墙钟，避免整回合无限挂起；overrides 清空。"""
     settings = ApprovalSettings()
-    assert settings.approval_timeout_seconds is None
+    assert settings.approval_timeout_seconds == 900.0
     assert settings.approval_timeout_overrides == {}
-    assert settings.approval_timeout_for("write") is None
-    assert settings.approval_timeout_for("run") is None
+    assert settings.approval_timeout_for("write") == 900.0
+    assert settings.approval_timeout_for("run") == 900.0
 
 
 async def test_gate_approve_always_skips_second_prompt():

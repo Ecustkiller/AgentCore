@@ -136,6 +136,14 @@ async def _notify_team_settled(session: CoordinationSession) -> None:
         return
     kind = execution_terminal_kind(session)
     title, body = _SETTLE_PUSH[kind]
+    completed = len(session.completed_run_ids)
+    total = session.total_workers
+    failed = len(getattr(session, "failed_run_ids", ()) or ())
+    if total and (completed < total or failed):
+        body = f"{body}（{completed}/{total} 名队员完成"
+        if failed:
+            body += f"，{failed} 名失败"
+        body += "）"
     user_id = await _conversation_user_id(conversation_id)
     if not user_id:
         logger.warning(

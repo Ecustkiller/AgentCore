@@ -3050,6 +3050,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='wave.bad_topology'),
     EventSpec(name='wave.cancel_cascade_skip'),
     EventSpec(name='wave.hold_inflight_hot_pending'),
+    EventSpec(name='wave.turn_wall_clock_expired'),
     EventSpec(name='wave.width_recomputed'),
     EventSpec(
         name='worker.escalate',
