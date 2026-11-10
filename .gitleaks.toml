@@ -1,0 +1,15 @@
+title = "AgentCore secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixtures, examples, lockfiles and docs are not live credentials"
+paths = [
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)uv\.lock$''',
+  '''\.example$''',
+  '''(^|/)apps/server/agentcore/evals/fixtures/''',
+  '''(^|/)apps/server/tests/''',
+  '''(^|/)docs/''',
+]

@@ -11,6 +11,10 @@ on:
         required: false
         default: master
 
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: deploy-backend
   cancel-in-progress: false
@@ -31,14 +35,29 @@ jobs:
           echo "sha=$sha" >>"$GITHUB_OUTPUT"
           echo "Deploy target: $ref → $sha"
 
-      - name: Verify backend image build for SHA
+      # A batch push only creates one CI run (head SHA); the ancestor check
+      # proves the target commit is covered instead of requiring a run per commit.
+      - name: Verify CI and backend image build for SHA
         run: |
-          if ! gh run list --workflow=build-backend.yml --commit "$(git rev-parse "${{ inputs.ref }}^{commit}")" \
-            --json conclusion --jq '.[0].conclusion' 2>/dev/null | grep -q success; then
-            echo "::warning::No successful build-backend run found for this commit; finish-server may fall back to latest"
-          else
-            echo "build-backend succeeded for this commit"
+          set -euo pipefail
+          sha="$(git rev-parse "${{ inputs.ref }}^{commit}")"
+          ci_sha="$(gh run list --workflow=ci.yml --branch master --limit 20 \
+            --json conclusion,headSha --jq '[.[] | select(.conclusion=="success")][0].headSha // ""')"
+          if [ -z "$ci_sha" ]; then
+            echo "::error::No successful CI run found on master; refusing to deploy" >&2
+            exit 1
           fi
+          if ! git merge-base --is-ancestor "$sha" "$ci_sha"; then
+            echo "::error::Target $sha is not covered by the latest green CI run ($ci_sha)" >&2
+            exit 1
+          fi
+          build="$(gh run list --workflow=build-backend.yml --commit "$sha" \
+            --json conclusion --jq '.[0].conclusion // "missing"')"
+          if [ "$build" != "success" ]; then
+            echo "::error::build-backend conclusion for $sha is '$build'" >&2
+            exit 1
+          fi
+          echo "CI ($ci_sha) and build-backend succeeded for $sha"
         env:
           GH_TOKEN: ${{ github.token }}
 
