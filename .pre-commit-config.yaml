@@ -25,3 +25,10 @@ repos:
         entry: node scripts/pre-commit-biome.mjs
         files: ^apps/(desktop|mobile)/src/.*\.(ts|tsx|js|jsx|css|json)$
         pass_filenames: true
+
+      # Requires gitleaks on PATH (brew install gitleaks); scans staged content only.
+      - id: gitleaks
+        name: gitleaks (staged secrets)
+        language: system
+        entry: gitleaks protect --staged --config .gitleaks.toml --redact
+        pass_filenames: false

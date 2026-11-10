@@ -1,0 +1,3 @@
+# Upstream-history false positives: plain code, not credentials.
+fd5db3470b9f75d11996114ff3dc5c94e54f9c51:apps/server/agentcore/memory/episode_store.py:generic-api-key:350
+4d9799a24bc03021a8b4d0f33da81fc8a49fd6e9:apps/server/agentcore/security/refresh.py:generic-api-key:9

@@ -9,18 +9,21 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+const serverDir = path.join(repoRoot, "apps/server");
 const files = process.argv
   .slice(2)
   .map((f) => f.replace(/\\/g, "/"))
-  .filter((f) => f.startsWith("apps/server/") && /\.pyi?$/.test(f));
+  .filter((f) => f.startsWith("apps/server/") && /\.pyi?$/.test(f))
+  .map((f) => path.relative(serverDir, path.resolve(repoRoot, f)));
 
 if (files.length === 0) process.exit(0);
 
+// Explicit file lists bypass extend-exclude unless --force-exclude is set.
 const result = spawnSync(
   "uv",
-  ["run", "ruff", "check", "--config", "apps/server/pyproject.toml", ...files],
+  ["run", "ruff", "check", "--config", "pyproject.toml", "--force-exclude", ...files],
   {
-    cwd: repoRoot,
+    cwd: serverDir,
     stdio: "inherit",
     shell: true,
     env: process.env,

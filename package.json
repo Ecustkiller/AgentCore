@@ -20,7 +20,7 @@
     "release:notice": "node scripts/release-notice.mjs",
     "ports:free": "node scripts/free-listen-port.mjs",
     "audit:deps:py": "cd apps/server && uv run --with pip-audit pip-audit",
-    "audit:deps:js": "pnpm audit --prod",
+    "audit:deps:js": "pnpm audit --prod --registry=https://registry.npmjs.org/",
     "audit:deps": "node scripts/audit-deps.mjs",
     "test:server": "cd apps/server && uv run pytest --tb=short -q",
     "test:server:unit": "cd apps/server && uv run pytest --ignore=tests/integration --tb=short -q -n auto",
