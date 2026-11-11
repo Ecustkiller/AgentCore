@@ -1941,6 +1941,7 @@ EVENTS: list[EventSpec] = [
             'hook': FieldType('str'),
         },
     ),
+    EventSpec(name='llm.prompt_cache_breakpoints_omitted_retry'),
     EventSpec(
         name='llm.rate_limit_no_retry',
         description=(

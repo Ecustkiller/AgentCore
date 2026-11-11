@@ -42,6 +42,7 @@ from agentcore.llm.provider.anthropic_messages import (
     AnthropicSseAssembler,
     build_messages_payload,
     parse_unary_message,
+    strip_prompt_cache_breakpoints,
     usage_from_anthropic,
 )
 from agentcore.llm.provider.call_budget import provider_retry_ceiling
@@ -69,6 +70,28 @@ from agentcore.llm.provider.protocol import (
 logger = get_logger(__name__)
 
 _MESSAGES_PATH = "/messages"
+
+# A relay that rejects cache_control is remembered for the process lifetime so
+# every subsequent call does not pay a failing 400 before falling back.
+_PROMPT_CACHE_REJECTED: set[str] = set()
+
+
+def _prompt_cache_enabled(base_url: str) -> bool:
+    if base_url in _PROMPT_CACHE_REJECTED:
+        return False
+    try:
+        from agentcore.config.settings import settings
+
+        return bool(settings.engine_prompt_cache_breakpoints)
+    except Exception:  # noqa: BLE001 — settings unavailable ⇒ feature off
+        return False
+
+
+def _is_cache_control_rejection(status_code: int, body: bytes | None) -> bool:
+    if status_code != 400 or not body:
+        return False
+    lowered = body.lower()
+    return b"cache_control" in lowered or b"prompt caching" in lowered
 
 
 class AnthropicMessagesProvider:
@@ -134,6 +157,26 @@ class AnthropicMessagesProvider:
             **_outbound_call_headers(self._base_url),
             "anthropic-version": ANTHROPIC_VERSION,
         }
+
+    def _drop_cache_breakpoints_for_retry(
+        self, payload: dict, status_code: int, body: bytes | None
+    ) -> bool:
+        """Relay rejects ``cache_control`` → strip it and retry once, plain payload.
+
+        Latches the origin so no later call pays the same 400. Returns True when
+        the caller should ``continue`` its retry loop.
+        """
+        if not _is_cache_control_rejection(status_code, body):
+            return False
+        if not strip_prompt_cache_breakpoints(payload):
+            return False
+        _PROMPT_CACHE_REJECTED.add(self._base_url)
+        logger.info(
+            "llm.prompt_cache_breakpoints_omitted_retry",
+            provider=self._name,
+            base_url=self._base_url,
+        )
+        return True
 
     def _insufficient_balance(self, *, status: int, body: bytes | None) -> LLMError:
         from agentcore.core.errors import LLMInsufficientBalanceError
@@ -240,7 +283,9 @@ class AnthropicMessagesProvider:
         raise LLMError(f"{self._display_name} 调用失败（HTTP {status_code}）")
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        payload = build_messages_payload(request, stream=False)
+        payload = build_messages_payload(
+            request, stream=False, prompt_cache=_prompt_cache_enabled(self._base_url)
+        )
         start = time.monotonic()
         data = await self._request_with_retry(
             payload, scenario=request.scenario, patience=request.retry_patience_seconds
@@ -260,7 +305,9 @@ class AnthropicMessagesProvider:
         )
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
-        payload = build_messages_payload(request, stream=True)
+        payload = build_messages_payload(
+            request, stream=True, prompt_cache=_prompt_cache_enabled(self._base_url)
+        )
         last_error: Exception | None = None
         backoff = _INITIAL_BACKOFF
         connect_max, connect_backoff = connect_retry_policy(request.scenario)
@@ -290,6 +337,10 @@ class AnthropicMessagesProvider:
                 ) as response:
                     in_flight = response
                     body = await response.aread() if response.status_code >= 400 else None
+                    if self._drop_cache_breakpoints_for_retry(
+                        payload, response.status_code, body
+                    ):
+                        continue
                     self._raise_for_status(
                         response.status_code,
                         response.headers,
@@ -394,6 +445,10 @@ class AnthropicMessagesProvider:
                     headers=self._call_headers() or None,
                 )
                 body = response.content if response.status_code >= 400 else None
+                if self._drop_cache_breakpoints_for_retry(
+                    payload, response.status_code, body
+                ):
+                    continue
                 self._raise_for_status(
                     response.status_code,
                     response.headers,

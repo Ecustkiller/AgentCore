@@ -251,7 +251,9 @@ def fold_history(messages: list[LLMMessage]) -> tuple[str, list[dict]]:
     return system, wire
 
 
-def build_messages_payload(request: LLMRequest, *, stream: bool) -> dict[str, Any]:
+def build_messages_payload(
+    request: LLMRequest, *, stream: bool, prompt_cache: bool = False
+) -> dict[str, Any]:
     system, messages = fold_history(request.messages)
     payload: dict[str, Any] = {
         "model": request.model,
@@ -260,7 +262,15 @@ def build_messages_payload(request: LLMRequest, *, stream: bool) -> dict[str, An
         "stream": stream,
     }
     if system:
-        payload["system"] = system
+        if prompt_cache:
+            # Anthropic caches only up to an explicit breakpoint. The frozen
+            # system block is the byte-stable prefix every worker of a fan-out
+            # shares — mark it so the first request writes it and the rest read it.
+            payload["system"] = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+            ]
+        else:
+            payload["system"] = system
     dialect = resolve_wire_dialect(request.model)
     if not dialect.omit_temperature:
         payload["temperature"] = request.temperature
@@ -269,9 +279,38 @@ def build_messages_payload(request: LLMRequest, *, stream: bool) -> dict[str, An
         payload["thinking"] = thinking
     tools = convert_tools(request.tools)
     if tools:
+        if prompt_cache:
+            # Last tool is the outer boundary of the frozen prefix. Two
+            # breakpoints (system + tools) stay inside Anthropic's 4-block cap.
+            tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
         payload["tools"] = tools
         payload["tool_choice"] = convert_tool_choice(request.tool_choice)
     return payload
+
+
+def strip_prompt_cache_breakpoints(payload: dict[str, Any]) -> bool:
+    """Remove ``cache_control`` after a relay rejects it. True if anything was removed."""
+    removed = False
+    system = payload.get("system")
+    if isinstance(system, list):
+        for block in system:
+            if isinstance(block, dict) and block.pop("cache_control", None) is not None:
+                removed = True
+        if (
+            removed
+            and len(system) == 1
+            and isinstance(system[0], dict)
+            and system[0].get("type") == "text"
+        ):
+            # Collapse back to the plain-string shape the default builder emits,
+            # so the retry is byte-identical to a cache-off request.
+            payload["system"] = system[0].get("text", "")
+    tools = payload.get("tools")
+    if isinstance(tools, list):
+        for tool in tools:
+            if isinstance(tool, dict) and tool.pop("cache_control", None) is not None:
+                removed = True
+    return removed
 
 
 def usage_from_anthropic(data: dict[str, Any] | None) -> TokenUsage:

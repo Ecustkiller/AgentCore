@@ -51,6 +51,12 @@ from agentcore.runtime.runs.concurrency import (
     set_budget,
 )
 from agentcore.runtime.runs.plan import RunPlan, RunPlanError
+from agentcore.runtime.runs.prefix_warm import (
+    PrefixWarmGate,
+    bind_prefix_warm_gate,
+    reset_prefix_warm_gate,
+    warm_window_seconds,
+)
 from agentcore.runtime.runs.redrive_sites import (
     ResumeHint,
     bind_resume_hints,
@@ -114,6 +120,10 @@ class WaveScheduler:
         resolved = max_parallel if max_parallel is not None else resolve_max_parallel()
         self._max_parallel = max(1, resolved)
         self._resume_hints: Mapping[str, ResumeHint] | None = None
+        window = warm_window_seconds()
+        self._warm_gate: PrefixWarmGate | None = (
+            PrefixWarmGate(window=window) if window > 0 else None
+        )
 
     async def run(
         self,
@@ -698,6 +708,9 @@ class WaveScheduler:
         set_budget(budget)
         hints = self._resume_hints
         hints_token = bind_resume_hints(hints) if hints else None
+        gate_token = (
+            bind_prefix_warm_gate(self._warm_gate) if self._warm_gate is not None else None
+        )
         try:
             state = await executor(spec, completed)
             if state.phase is RunPhase.FAILED and not state.error_retryable:
@@ -715,6 +728,8 @@ class WaveScheduler:
         finally:
             if hints_token is not None:
                 reset_resume_hints(hints_token)
+            if gate_token is not None:
+                reset_prefix_warm_gate(gate_token)
 
     def _select_ready(
         self,

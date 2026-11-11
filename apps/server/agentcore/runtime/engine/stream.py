@@ -171,6 +171,18 @@ async def stream_llm_round(
     (see ``_LiveContentHold``); content that arrives before any reasoning is live.
     """
 
+    from agentcore.runtime.runs.prefix_warm import (
+        mark_shared_prefix_warmed,
+        wait_for_shared_prefix,
+    )
+
+    # Shared-prefill warm gate: the first worker of a fan-out opens the stream
+    # alone; the rest wait (bounded) until its first chunk lands and the provider
+    # has written the frozen prefix to cache. No gate ⇒ no-op (captain / solo /
+    # later ReAct rounds). Opt-in, see engine_prefix_warm_window_seconds.
+    is_prefix_leader = await wait_for_shared_prefix()
+    prefix_marked = False
+
     idle = settings.engine_llm_stream_idle_timeout_seconds
     start = time.monotonic()
     budget = (idle * _STALL_BUDGET_IDLE_MULTIPLIER) if idle > 0 else None
@@ -264,6 +276,11 @@ async def stream_llm_round(
                 # stall retries (below) then raises.
                 async with asyncio.timeout(idle if idle > 0 else None) as cm:
                     async for chunk in llm.stream(request):
+                        if is_prefix_leader and not prefix_marked:
+                            # First streamed byte ⇒ prefill done, cache written.
+                            # Release the rest of the fan-out immediately.
+                            mark_shared_prefix_warmed()
+                            prefix_marked = True
                         if idle > 0 and _chunk_resets_idle_timer(chunk):
                             cm.reschedule(loop.time() + idle)
 
@@ -410,6 +427,10 @@ async def stream_llm_round(
             if last_stall_error is not None:
                 raise last_stall_error
     finally:
+        # Leader dying before any chunk (error / cancel / empty stream) must not
+        # strand followers for the whole window. Idempotent.
+        if is_prefix_leader:
+            mark_shared_prefix_warmed()
         if record_ttft and latency_probe is not None:
             latency_probe.end_captain_stream()
 
