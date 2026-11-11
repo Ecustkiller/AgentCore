@@ -558,9 +558,33 @@ class TurnFactLog:
     def __init__(self, inherited_entries: list[dict] | None = None) -> None:
         self._inherited: list[dict] = list(inherited_entries) if inherited_entries else []
         self._facts: list[Fact] = []
+        self._last_by_kind_run: dict[tuple[str, str], int] = {}
+        for position, entry in enumerate(self._inherited):
+            self._remember(entry.get("kind"), entry.get("payload"), position)
+
+    def _remember(self, kind: object, payload: object, position: int) -> None:
+        if not isinstance(kind, str) or not isinstance(payload, dict):
+            return
+        run_id = payload.get("run_id")
+        if isinstance(run_id, str):
+            self._last_by_kind_run[(kind, run_id)] = position
 
     def record_fact(self, fact: Fact) -> None:
         self._facts.append(fact)
+        position = len(self._inherited) + len(self._facts) - 1
+        self._remember(fact.kind, fact.payload, position)
+
+    def last_payload(self, kind: str, run_id: str) -> dict[str, Any] | None:
+        """Last ``(kind, run_id)`` payload, without rebuilding the full journal."""
+        position = self._last_by_kind_run.get((kind, run_id))
+        if position is None:
+            return None
+        inherited_len = len(self._inherited)
+        if position < inherited_len:
+            payload = self._inherited[position].get("payload")
+        else:
+            payload = self._facts[position - inherited_len].payload
+        return payload if isinstance(payload, dict) else None
 
     def seed_from_entries(self, entries: list[dict[str, Any]]) -> None:
         """Pre-load a persisted §8.3 journal stream into the segment (legacy/test helper).

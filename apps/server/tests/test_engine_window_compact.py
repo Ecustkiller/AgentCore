@@ -16,6 +16,8 @@ from agentcore.runtime.engine.window_compact import (
     assistant_round_spans,
     estimate_span_tokens,
     head_end,
+    last_prompt_tokens_from_facts,
+    latest_window_compact,
     maybe_compact_worker_window,
     near_window_ceiling,
     preamble_end,
@@ -26,6 +28,7 @@ from agentcore.runtime.engine.window_compact import (
     window_compact_due,
 )
 from agentcore.runtime.facts import (
+    Fact,
     LlmCallFact,
     RoundBoundaryFact,
     RunHeadFact,
@@ -309,6 +312,49 @@ def test_apply_stored_compact_from_fact_log() -> None:
         assert apply_stored_window_compact(msgs, "other") is msgs
     finally:
         current_fact_log.reset(token)
+
+
+def test_run_scoped_fact_queries_use_index_and_preserve_last_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inherited = [
+        {
+            "kind": "window_compact",
+            "payload": {"run_id": "w1", "summary": "inherited", "folded_rounds": 1},
+        },
+        {"kind": "llm_call", "payload": {"run_id": "w1", "usage": {"last_prompt": 100}}},
+    ]
+    log = TurnFactLog(inherited_entries=inherited)
+    log.record_fact(
+        WindowCompactFact(run_id="w1", summary="最新摘要", folded_rounds=4).to_fact()
+    )
+    log.record_fact(
+        Fact(kind="llm_call", payload={"run_id": "w1", "usage": {"last_prompt": 4096}})
+    )
+    log.record_fact(
+        Fact(kind="llm_call", payload={"run_id": "w2", "usage": {"last_prompt": 9999}})
+    )
+    token = current_fact_log.set(log)
+    calls = 0
+
+    def _forbidden_entries(self: TurnFactLog) -> list[dict]:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("run-scoped lookup rebuilt the full fact log")
+
+    monkeypatch.setattr(TurnFactLog, "entries", _forbidden_entries)
+    try:
+        compact = latest_window_compact("w1")
+        assert compact is not None and compact["summary"] == "最新摘要"
+        assert last_prompt_tokens_from_facts("w1") == 4096
+        assert last_prompt_tokens_from_facts("w2") == 9999
+        out = apply_stored_window_compact(_worker_window(6), "w1")
+        assert "最新摘要" in str(out[2].content)
+        log.record_fact(Fact(kind="llm_call", payload={"run_id": "w1"}))
+        assert last_prompt_tokens_from_facts("w1") == 0
+    finally:
+        current_fact_log.reset(token)
+    assert calls == 0
 
 
 def test_build_request_window_applies_compact_after_clears() -> None:

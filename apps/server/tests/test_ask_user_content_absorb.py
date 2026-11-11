@@ -290,6 +290,8 @@ def test_absorb_clears_assistant_content_and_journal_on_suspend():
     assert resets == ["ask_user"]
     llm_facts = [f for f in log.entries() if f["kind"] == FactKind.LLM_CALL.value]
     assert llm_facts[-1]["payload"]["content"] == ""
+    indexed = log.last_payload(FactKind.LLM_CALL.value, "cap")
+    assert indexed is not None and indexed["content"] == ""
 
 
 def test_absorb_noop_when_ask_user_failed():

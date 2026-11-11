@@ -239,44 +239,33 @@ def project_compacted_window(
     return out
 
 
-def latest_window_compact(run_id: str) -> dict | None:
-    """Last ``window_compact`` payload for ``run_id`` on the ambient fact log."""
+def _last_run_payload(kind: str, run_id: str) -> dict | None:
     if not run_id:
         return None
-    from agentcore.runtime.facts import FactKind, current_fact_log
+    from agentcore.runtime.facts import current_fact_log
 
     log = current_fact_log.get()
     if log is None:
         return None
-    last: dict | None = None
-    for entry in log.entries():
-        if (entry.get("kind") or "") != FactKind.WINDOW_COMPACT.value:
-            continue
-        payload = entry.get("payload") or {}
-        if payload.get("run_id") == run_id and isinstance(payload, dict):
-            last = payload
-    return last
+    return log.last_payload(kind, run_id)
+
+
+def latest_window_compact(run_id: str) -> dict | None:
+    """Last ``window_compact`` payload for ``run_id`` on the ambient fact log."""
+    from agentcore.runtime.facts import FactKind
+
+    return _last_run_payload(FactKind.WINDOW_COMPACT.value, run_id)
 
 
 def last_prompt_tokens_from_facts(run_id: str) -> int:
     """Most recent worker LLM ``last_prompt`` for this run (resume seed)."""
-    if not run_id:
-        return 0
-    from agentcore.runtime.facts import FactKind, current_fact_log
+    from agentcore.runtime.facts import FactKind
 
-    log = current_fact_log.get()
-    if log is None:
+    payload = _last_run_payload(FactKind.LLM_CALL.value, run_id)
+    if not payload:
         return 0
-    last = 0
-    for entry in log.entries():
-        if (entry.get("kind") or "") != FactKind.LLM_CALL.value:
-            continue
-        payload = entry.get("payload") or {}
-        if payload.get("run_id") != run_id:
-            continue
-        usage = payload.get("usage") or {}
-        last = int(usage.get("last_prompt") or usage.get("input") or 0)
-    return last
+    usage = payload.get("usage") or {}
+    return int(usage.get("last_prompt") or usage.get("input") or 0)
 
 
 def apply_stored_window_compact(messages: list[LLMMessage], run_id: str) -> list[LLMMessage]:

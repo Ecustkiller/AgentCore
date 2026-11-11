@@ -8,6 +8,7 @@ property that makes adding them a pure, non-disturbing change.
 
 from agentcore.runtime.facts import (
     EXECUTION_ONLY_KINDS,
+    Fact,
     FactKind,
     FactRecorder,
     LlmCallFact,
@@ -453,6 +454,58 @@ def test_turn_fact_log_seed_from_entries():
         "round_boundary",
         "llm_call",
     ]
+
+
+def test_turn_fact_log_last_payload_matches_journal_order():
+    inherited = [
+        {
+            "kind": "window_compact",
+            "payload": {"run_id": "w1", "summary": "inherited", "folded_rounds": 1},
+        },
+        {"kind": "llm_call", "payload": {"run_id": "w1", "usage": {"last_prompt": 100}}},
+        {
+            "kind": "window_compact",
+            "payload": {"run_id": "w2", "summary": "other", "folded_rounds": 2},
+        },
+    ]
+    log = TurnFactLog(inherited_entries=inherited)
+    log.record_fact(
+        Fact(kind="llm_call", payload={"run_id": "w1", "usage": {"last_prompt": 200}})
+    )
+    log.record_fact(
+        Fact(
+            kind="window_compact",
+            payload={"run_id": "w1", "summary": "latest", "folded_rounds": 3},
+        )
+    )
+    log.seed_from_entries(
+        [
+            {"kind": "note", "payload": {"run_id": "w1", "content": "noise"}},
+            {
+                "kind": "window_compact",
+                "payload": {"run_id": "w2", "summary": "latest-other", "folded_rounds": 4},
+            },
+        ]
+    )
+
+    def legacy(kind: str, run_id: str) -> dict | None:
+        matches = [
+            entry["payload"]
+            for entry in log.entries()
+            if entry.get("kind") == kind
+            and isinstance(entry.get("payload"), dict)
+            and entry["payload"].get("run_id") == run_id
+        ]
+        return matches[-1] if matches else None
+
+    for kind in ("llm_call", "window_compact", "note"):
+        for run_id in ("w1", "w2", "missing"):
+            assert log.last_payload(kind, run_id) == legacy(kind, run_id)
+    latest_w1 = log.last_payload("window_compact", "w1")
+    assert latest_w1 is not None and latest_w1["summary"] == "latest"
+    latest_w2 = log.last_payload("window_compact", "w2")
+    assert latest_w2 is not None and latest_w2["summary"] == "latest-other"
+    assert log.last_payload("window_compact", "missing") is None
 
 
 def test_snapshot_fact_log_after_resume_seed_includes_turn_started():
