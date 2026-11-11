@@ -251,6 +251,7 @@ class ObservingLLMProvider:
             else None,
             tools=request.tools,
             provider_name=self._provider_name(),
+            base_url=self.base_url,
             attempt=1,
         )
         return response
@@ -342,6 +343,7 @@ class ObservingLLMProvider:
                     tool_names=tool_names or None,
                     tools=request.tools,
                     provider_name=self._provider_name(),
+                    base_url=self.base_url,
                     attempt=1,
                 )
             elif outcome == "closed":
@@ -360,6 +362,7 @@ class ObservingLLMProvider:
                         tool_names=tool_names or None,
                         tools=request.tools,
                         provider_name=self._provider_name(),
+                        base_url=self.base_url,
                         attempt=1,
                     )
                 else:
@@ -389,6 +392,7 @@ class ObservingLLMProvider:
                     tool_names=tool_names or None,
                     tools=request.tools,
                     provider_name=self._provider_name(),
+                    base_url=self.base_url,
                     attempt=1,
                 )
 

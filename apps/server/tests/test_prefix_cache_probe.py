@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pytest
 
+from agentcore.config import settings
 from agentcore.core.log_context import bind_log_context, log_context
+from agentcore.llm.observability import log_llm_call
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.observability.prefix_cache import (
     BASIS_ESTIMATED,
@@ -44,6 +46,8 @@ _CHAIN_LOG_KEYS = (
     "cost_role",
     "message_id",
 )
+
+_ZEN = "https://opencode.ai/zen/v1"
 
 
 def _drop_chain_log_ids() -> None:
@@ -593,6 +597,91 @@ def test_section_attribution_rides_only_a_system_prompt_breach():
 
 
 # --- emit seam --------------------------------------------------------------------------
+
+
+def _capture_probe_levels(monkeypatch) -> list[dict]:
+    captured: list[dict] = []
+
+    class _Spy:
+        def debug(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, "level": "debug", **kwargs})
+
+        def info(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, "level": "info", **kwargs})
+
+    monkeypatch.setattr("agentcore.observability.prefix_cache.logger", _Spy())
+    return captured
+
+
+def _observe_once(*, model: str, base_url: str | None = None) -> None:
+    bind_log_context(
+        conversation_id="conv-dialect",
+        trace_id="t1",
+        agent_id="ceo",
+    )
+    observe_prefix_cache(
+        scenario="chat",
+        model=model,
+        messages=[
+            LLMMessage(role="system", content="SYS"),
+            LLMMessage(role="user", content="q"),
+        ],
+        input_tokens=100,
+        cache_hit_tokens=0,
+        cache_miss_tokens=100,
+        base_url=base_url,
+    )
+
+
+def test_observe_promotes_anthropic_route_key_to_info(monkeypatch):
+    captured = _capture_probe_levels(monkeypatch)
+    _observe_once(model="platform/claude-haiku-4-5", base_url=_ZEN)
+    assert [row["level"] for row in captured] == ["info"]
+
+
+def test_observe_preserves_upstream_vendor_model_slugs(monkeypatch):
+    captured = _capture_probe_levels(monkeypatch)
+    _observe_once(model="anthropic/claude-sonnet-4", base_url=_ZEN)
+    assert [row["level"] for row in captured] == ["debug"]
+
+
+def test_observe_without_base_url_does_not_infer_dialect(monkeypatch):
+    captured = _capture_probe_levels(monkeypatch)
+    _observe_once(model="claude-haiku-4-5")
+    assert [row["level"] for row in captured] == ["debug"]
+
+
+def test_observe_explicit_off_keeps_anthropic_debug(monkeypatch):
+    monkeypatch.setattr(settings, "engine_prefix_cache_observability", False)
+    captured = _capture_probe_levels(monkeypatch)
+    _observe_once(model="claude-haiku-4-5", base_url=_ZEN)
+    assert [row["level"] for row in captured] == ["debug"]
+
+
+def test_observe_explicit_on_promotes_non_anthropic(monkeypatch):
+    monkeypatch.setattr(settings, "engine_prefix_cache_observability", True)
+    captured = _capture_probe_levels(monkeypatch)
+    _observe_once(model="deepseek-v4.1-flash", base_url="https://api.deepseek.com")
+    assert [row["level"] for row in captured] == ["info"]
+
+
+def test_log_llm_call_forwards_base_url_to_probe(monkeypatch):
+    captured = _capture_probe_levels(monkeypatch)
+    bind_log_context(conversation_id="conv-log-call", trace_id="t1", agent_id="ceo")
+    log_llm_call(
+        scenario="chat",
+        model="claude-haiku-4-5",
+        usage=TokenUsage(input_tokens=100, cache_miss_tokens=100),
+        finish_reason="stop",
+        latency_ms=1,
+        stream=False,
+        messages=[
+            LLMMessage(role="system", content="SYS"),
+            LLMMessage(role="user", content="q"),
+        ],
+        base_url=_ZEN,
+    )
+    assert [row["level"] for row in captured] == ["info"]
 
 
 def test_observe_emits_one_line_and_advances_the_chain(monkeypatch):

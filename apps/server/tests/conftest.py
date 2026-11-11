@@ -223,6 +223,17 @@ def _pin_smtp_unconfigured(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _pin_prompt_cache_defaults(monkeypatch):
+    """A machine-local ``.env`` must not rewrite dialect defaults under pytest."""
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "engine_prompt_cache_breakpoints", None)
+    monkeypatch.setattr(settings, "engine_prefix_warm_window_seconds", None)
+    monkeypatch.setattr(settings, "engine_prefix_cache_observability", None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_cloud_sandbox_health():
     """Clear the boot-probe cache so a failed/ok injection cannot leak across tests."""
     from agentcore.tools.sandbox.cloud_health import reset_cloud_sandbox_health_for_tests

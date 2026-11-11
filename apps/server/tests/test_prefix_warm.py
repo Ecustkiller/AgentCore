@@ -1,32 +1,38 @@
 """Shared-prefill warm gate + explicit Anthropic cache breakpoints.
 
-Both features are opt-in (default off); these tests pin the byte-identical
-default wire and the bounded, fail-open enabled behaviour.
+Provider-aware defaults turn the Anthropic-Messages wire on; explicit settings
+still override every path, and the 400 strip fallback stays byte-identical.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
+from typing import cast
 
 import httpx
 
 from agentcore.config import settings
+from agentcore.config.engine import DEFAULT_ANTHROPIC_MESSAGES_WARM_WINDOW_SECONDS
 from agentcore.llm.provider import anthropic as anthropic_leaf
 from agentcore.llm.provider.anthropic import AnthropicMessagesProvider
 from agentcore.llm.provider.anthropic_messages import (
     build_messages_payload,
     strip_prompt_cache_breakpoints,
 )
-from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
+from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest
+from agentcore.llm.provider.router import ProviderRouter
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.prefix_warm import (
     PrefixWarmGate,
     bind_prefix_warm_gate,
     current_prefix_warm_gate,
     mark_shared_prefix_warmed,
+    request_uses_anthropic_messages,
     reset_prefix_warm_gate,
     wait_for_shared_prefix,
+    warm_gate_policy,
     warm_window_seconds,
 )
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
@@ -56,20 +62,110 @@ def _request(*, system: str = "constitution", tools: bool = True) -> LLMRequest:
     )
 
 
+def _anthropic_response() -> dict:
+    return {
+        "id": "msg_1",
+        "model": "claude-haiku-4-5",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "pong"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 3, "output_tokens": 1},
+    }
+
+
+async def _provider_with_handler(handler) -> AnthropicMessagesProvider:
+    provider = AnthropicMessagesProvider(name="user", api_key="sk-test", base_url=_ZEN)
+    await provider._client.aclose()
+    provider._client = httpx.AsyncClient(
+        base_url=_ZEN, transport=httpx.MockTransport(handler)
+    )
+    return provider
+
+
 # ---------------------------------------------------------------------------
-# Default wire is untouched
+# Dialect-aware defaults + explicit overrides
 # ---------------------------------------------------------------------------
 
 
-def test_default_payload_has_no_cache_control():
+def test_default_payload_builder_stays_plain():
     payload = build_messages_payload(_request(), stream=True)
     assert isinstance(payload["system"], str)
     assert "cache_control" not in json.dumps(payload)
 
 
-def test_default_warm_window_is_off():
-    assert warm_window_seconds() == 0.0
+def test_engine_resolvers_preserve_explicit_overrides(monkeypatch):
+    assert settings.resolve_prompt_cache_breakpoints(anthropic_messages=True) is True
+    assert settings.resolve_prompt_cache_breakpoints(anthropic_messages=False) is False
+    assert settings.resolve_prefix_cache_observability(anthropic_messages=True) is True
+    assert settings.resolve_prefix_cache_observability(anthropic_messages=False) is False
+    assert (
+        settings.resolve_prefix_warm_window_seconds(anthropic_messages=True)
+        == DEFAULT_ANTHROPIC_MESSAGES_WARM_WINDOW_SECONDS
+    )
+    assert settings.resolve_prefix_warm_window_seconds(anthropic_messages=False) == 0.0
+
+    monkeypatch.setattr(settings, "engine_prompt_cache_breakpoints", False)
+    monkeypatch.setattr(settings, "engine_prefix_cache_observability", True)
+    monkeypatch.setattr(settings, "engine_prefix_warm_window_seconds", 0.25)
+    assert settings.resolve_prompt_cache_breakpoints(anthropic_messages=True) is False
+    assert settings.resolve_prefix_cache_observability(anthropic_messages=False) is True
+    assert settings.resolve_prefix_warm_window_seconds(anthropic_messages=False) == 0.25
+
+
+def test_default_warm_window_is_anthropic_scoped():
+    assert warm_window_seconds() == DEFAULT_ANTHROPIC_MESSAGES_WARM_WINDOW_SECONDS
+    policy = warm_gate_policy()
+    assert policy.window == DEFAULT_ANTHROPIC_MESSAGES_WARM_WINDOW_SECONDS
+    assert policy.anthropic_only is True
     assert current_prefix_warm_gate() is None
+
+
+def test_explicit_warm_window_is_provider_agnostic(monkeypatch):
+    monkeypatch.setattr(settings, "engine_prefix_warm_window_seconds", 0.05)
+    assert warm_window_seconds() == 0.05
+    assert warm_gate_policy().anthropic_only is False
+
+
+def test_prompt_cache_breakpoints_default_on_and_explicit_off(monkeypatch):
+    anthropic_leaf._PROMPT_CACHE_REJECTED.discard(_ZEN)
+    assert anthropic_leaf._prompt_cache_enabled(_ZEN) is True
+    monkeypatch.setattr(settings, "engine_prompt_cache_breakpoints", False)
+    assert anthropic_leaf._prompt_cache_enabled(_ZEN) is False
+
+
+async def test_anthropic_leaf_default_wire_marks_breakpoints():
+    anthropic_leaf._PROMPT_CACHE_REJECTED.discard(_ZEN)
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=_anthropic_response())
+
+    provider = await _provider_with_handler(handler)
+    try:
+        response = await provider.complete(_request())
+        assert response.content == "pong"
+        assert len(bodies) == 1
+        assert "cache_control" in json.dumps(bodies[0])
+    finally:
+        await provider.close()
+        anthropic_leaf._PROMPT_CACHE_REJECTED.discard(_ZEN)
+
+
+def test_request_uses_anthropic_messages_resolves_router_leaf():
+    zen_leaf = cast(LLMProvider, SimpleNamespace(base_url=_ZEN))
+    deepseek_leaf = cast(LLMProvider, SimpleNamespace(base_url="https://api.deepseek.com"))
+    router = ProviderRouter(
+        default=deepseek_leaf,
+        providers={"opencode_zen": zen_leaf, "platform": zen_leaf},
+    )
+    assert (
+        request_uses_anthropic_messages(router, "opencode_zen/claude-haiku-4-5") is True
+    )
+    assert request_uses_anthropic_messages(router, "platform/claude-sonnet-4-5") is True
+    assert request_uses_anthropic_messages(router, "deepseek-v4.1-flash") is False
+    assert request_uses_anthropic_messages(router, "unknown/claude-haiku-4-5") is False
+    assert request_uses_anthropic_messages(SimpleNamespace(), "claude-haiku-4-5") is False
 
 
 def test_enabled_payload_marks_system_and_last_tool_only():
@@ -148,6 +244,18 @@ async def test_wait_for_shared_prefix_first_call_only(monkeypatch):
         reset_prefix_warm_gate(token)
 
 
+async def test_dialect_scoped_gate_skips_non_anthropic_workers():
+    gate = PrefixWarmGate(window=0.01, anthropic_only=True)
+    token = bind_prefix_warm_gate(gate)
+    try:
+        assert await wait_for_shared_prefix(anthropic_messages=False) is False
+        assert gate._claimed is False
+        assert await wait_for_shared_prefix(anthropic_messages=True) is True
+        assert gate._claimed is True
+    finally:
+        reset_prefix_warm_gate(token)
+
+
 async def test_nested_fanout_gets_its_own_gate():
     outer = PrefixWarmGate(window=0.01)
     outer_token = bind_prefix_warm_gate(outer)
@@ -169,9 +277,9 @@ async def test_nested_fanout_gets_its_own_gate():
 # ---------------------------------------------------------------------------
 
 
-async def test_wave_default_does_not_bind_gate(monkeypatch):
+async def test_explicit_zero_window_does_not_bind_gate(monkeypatch):
     monkeypatch.setattr(settings, "engine_prefix_warm_window_seconds", 0.0)
-    seen: list[object] = []
+    seen: list[PrefixWarmGate | None] = []
 
     async def ex(spec: RunSpec, _completed) -> RunState:
         seen.append(current_prefix_warm_gate())
@@ -184,9 +292,33 @@ async def test_wave_default_does_not_bind_gate(monkeypatch):
     assert seen == [None, None, None]
 
 
+async def test_wave_default_gate_only_anthropic_worker_can_lead():
+    seen: list[PrefixWarmGate | None] = []
+    leaders: list[tuple[str, bool]] = []
+
+    async def ex(spec: RunSpec, _completed) -> RunState:
+        gate = current_prefix_warm_gate()
+        seen.append(gate)
+        is_anthropic = spec.run_id == "a"
+        leader = await wait_for_shared_prefix(anthropic_messages=is_anthropic)
+        leaders.append((spec.run_id, leader))
+        if leader:
+            mark_shared_prefix_warmed()
+        return RunState(phase=RunPhase.COMPLETED)
+
+    plan = RunPlan()
+    for x in ("a", "b", "c"):
+        plan.add(RunSpec(run_id=x, task="t", agent_id=x, role=x))
+    result = await WaveScheduler(max_parallel=3).run(plan, ex)
+    assert all(s.phase is RunPhase.COMPLETED for s in result.values())
+    assert all(g is not None and g.anthropic_only for g in seen)
+    assert [run_id for run_id, leader in leaders if leader] == ["a"]
+    assert all(not leader for run_id, leader in leaders if run_id != "a")
+
+
 async def test_wave_enabled_shares_one_gate_and_only_one_leader(monkeypatch):
     monkeypatch.setattr(settings, "engine_prefix_warm_window_seconds", 0.05)
-    seen: list[object] = []
+    seen: list[PrefixWarmGate | None] = []
     leaders: list[bool] = []
 
     async def ex(spec: RunSpec, _completed) -> RunState:
@@ -202,6 +334,7 @@ async def test_wave_enabled_shares_one_gate_and_only_one_leader(monkeypatch):
     result = await WaveScheduler(max_parallel=3).run(plan, ex)
     assert all(s.phase is RunPhase.COMPLETED for s in result.values())
     assert all(g is not None for g in seen)
+    assert all(not g.anthropic_only for g in seen if g is not None)
     assert seen[0] is seen[1] is seen[2]  # one gate for the whole fan-out
     assert sum(leaders) == 1  # exactly one warmer
 
@@ -223,23 +356,9 @@ async def test_anthropic_strips_cache_control_on_400_and_retries(monkeypatch):
             return httpx.Response(
                 400, json={"error": {"message": "unknown field cache_control"}}
             )
-        return httpx.Response(
-            200,
-            json={
-                "id": "msg_1",
-                "model": "claude-haiku-4-5",
-                "role": "assistant",
-                "content": [{"type": "text", "text": "pong"}],
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 3, "output_tokens": 1},
-            },
-        )
+        return httpx.Response(200, json=_anthropic_response())
 
-    provider = AnthropicMessagesProvider(name="user", api_key="sk-test", base_url=_ZEN)
-    await provider._client.aclose()
-    provider._client = httpx.AsyncClient(
-        base_url=_ZEN, transport=httpx.MockTransport(handler)
-    )
+    provider = await _provider_with_handler(handler)
     try:
         response = await provider.complete(_request())
         assert response.content == "pong"

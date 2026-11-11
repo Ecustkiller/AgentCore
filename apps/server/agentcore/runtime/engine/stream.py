@@ -173,14 +173,18 @@ async def stream_llm_round(
 
     from agentcore.runtime.runs.prefix_warm import (
         mark_shared_prefix_warmed,
+        request_uses_anthropic_messages,
         wait_for_shared_prefix,
     )
 
-    # Shared-prefill warm gate: the first worker of a fan-out opens the stream
-    # alone; the rest wait (bounded) until its first chunk lands and the provider
-    # has written the frozen prefix to cache. No gate ⇒ no-op (captain / solo /
-    # later ReAct rounds). Opt-in, see engine_prefix_warm_window_seconds.
-    is_prefix_leader = await wait_for_shared_prefix()
+    # Shared-prefill warm gate: the first eligible worker of a fan-out opens the
+    # stream alone; the rest wait (bounded) until its first chunk lands and the
+    # provider has written the frozen prefix to cache. No gate ⇒ no-op (captain /
+    # solo / later ReAct rounds). The None default is Anthropic-Messages-only;
+    # an explicit window keeps the legacy all-provider opt-in.
+    is_prefix_leader = await wait_for_shared_prefix(
+        anthropic_messages=request_uses_anthropic_messages(llm, request.model)
+    )
     prefix_marked = False
 
     idle = settings.engine_llm_stream_idle_timeout_seconds

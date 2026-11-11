@@ -55,7 +55,7 @@ from agentcore.runtime.runs.prefix_warm import (
     PrefixWarmGate,
     bind_prefix_warm_gate,
     reset_prefix_warm_gate,
-    warm_window_seconds,
+    warm_gate_policy,
 )
 from agentcore.runtime.runs.redrive_sites import (
     ResumeHint,
@@ -120,9 +120,14 @@ class WaveScheduler:
         resolved = max_parallel if max_parallel is not None else resolve_max_parallel()
         self._max_parallel = max(1, resolved)
         self._resume_hints: Mapping[str, ResumeHint] | None = None
-        window = warm_window_seconds()
+        policy = warm_gate_policy()
         self._warm_gate: PrefixWarmGate | None = (
-            PrefixWarmGate(window=window) if window > 0 else None
+            PrefixWarmGate(
+                window=policy.window,
+                anthropic_only=policy.anthropic_only,
+            )
+            if policy.window > 0
+            else None
         )
 
     async def run(

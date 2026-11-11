@@ -3,6 +3,7 @@
 from agentcore.llm.byok_provider_presets import (
     BYOK_OFF_PROTOCOL_MODELS,
     BYOK_PROVIDER_PRESETS,
+    anthropic_messages_dialect,
     chat_completions_seed,
     hide_from_picker_ids,
     is_opencode_byok_endpoint,
@@ -257,6 +258,31 @@ def test_uses_anthropic_messages_wire_only_on_opencode_endpoints():
     # /responses ids never take the /messages leaf.
     assert uses_anthropic_messages_wire("grok-4.5", zen) is False
     assert uses_anthropic_messages_wire("deepseek-v4.1-flash", zen) is False
+
+
+def test_anthropic_messages_dialect_strips_only_platform_route_prefix():
+    zen = "https://opencode.ai/zen/v1"
+    relay = "https://openrouter.ai/api/v1"
+    assert anthropic_messages_dialect(model_id="claude-haiku-4-5", base_url=zen) is True
+    assert (
+        anthropic_messages_dialect(model_id="platform/claude-haiku-4-5", base_url=zen)
+        is True
+    )
+    assert (
+        anthropic_messages_dialect(
+            model_id="opencode_zen/claude-sonnet-4-5", base_url=zen
+        )
+        is False
+    )
+    assert (
+        anthropic_messages_dialect(model_id="anthropic/claude-sonnet-4", base_url=zen)
+        is False
+    )
+    assert (
+        anthropic_messages_dialect(model_id="claude-haiku-4-5", base_url=relay)
+        is False
+    )
+    assert anthropic_messages_dialect(model_id="claude-haiku-4-5", base_url=None) is False
 
 
 def test_chat_completions_seed_is_the_opencode_exclusion_source():

@@ -91,6 +91,7 @@ def log_llm_call(
     tools: list[dict[str, Any]] | None = None,
     credential_source: str | None = None,
     provider_name: str | None = None,
+    base_url: str | None = None,
     attempt: int = 1,
 ) -> None:
     """Emit one ``llm.call`` metrics line (+ optional bodies when enabled).
@@ -121,7 +122,8 @@ def log_llm_call(
         extra["tool_names"] = tool_names
     extra.update(_platform_credential_log_fields(source=source))
     # Probe BEFORE the info line so compact breach fields can ride ``llm.call``.
-    # Full ``cost.prefix_cache`` stays debug (sidecar jsonl window). Never break the call.
+    # The full probe stays debug except for explicit override or the
+    # Anthropic-Messages dialect. Never break the call.
     try:
         from agentcore.observability.prefix_cache import observe_prefix_cache
 
@@ -133,6 +135,7 @@ def log_llm_call(
             cache_hit_tokens=u.cache_hit_tokens,
             cache_miss_tokens=u.cache_miss_tokens,
             tools=tools,
+            base_url=base_url,
         )
         if prefix_probe is not None:
             extra.update(prefix_probe.as_llm_call_fields())

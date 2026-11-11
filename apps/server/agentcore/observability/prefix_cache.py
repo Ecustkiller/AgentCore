@@ -545,6 +545,14 @@ def compute_probe(
     )
 
 
+def _anthropic_messages_dialect(*, model: str, base_url: str | None) -> bool:
+    if not base_url:
+        return False
+    from agentcore.llm.byok_provider_presets import anthropic_messages_dialect
+
+    return anthropic_messages_dialect(model_id=model, base_url=base_url)
+
+
 def observe_prefix_cache(
     *,
     scenario: str,
@@ -554,6 +562,7 @@ def observe_prefix_cache(
     cache_hit_tokens: int,
     cache_miss_tokens: int,
     tools: Sequence[object] | None = None,
+    base_url: str | None = None,
 ) -> PrefixCacheProbe | None:
     """Probe this call against the previous one on the same chain and emit ``cost.prefix_cache``.
 
@@ -604,10 +613,11 @@ def observe_prefix_cache(
         _MAX_CHAINS,
     )
     # Per-call probe: debug by default so a long sidecar session does not rotate
-    # llm.call out of the 20MB×5 jsonl window; engine_prefix_cache_observability
-    # (R-03) promotes it to info so D4 lines land in the default jsonl without a
-    # global LOG_LEVEL=DEBUG. Never raises into the LLM path.
-    if _prefix_cache_observability_enabled():
+    # llm.call out of the 20MB×5 jsonl window; explicit
+    # engine_prefix_cache_observability or the Anthropic-Messages dialect (R-03)
+    # promotes it to info. Never raises into the LLM path.
+    anthropic_messages = _anthropic_messages_dialect(model=model, base_url=base_url)
+    if _prefix_cache_observability_enabled(anthropic_messages=anthropic_messages):
         logger.info(
             "cost.prefix_cache",
             scenario=scenario,
@@ -624,12 +634,14 @@ def observe_prefix_cache(
     return probe
 
 
-def _prefix_cache_observability_enabled() -> bool:
+def _prefix_cache_observability_enabled(*, anthropic_messages: bool) -> bool:
     """Lazy settings read (module loads everywhere); False on unavailable settings."""
     try:
         from agentcore.config import settings
 
-        return bool(settings.engine_prefix_cache_observability)
+        return settings.resolve_prefix_cache_observability(
+            anthropic_messages=anthropic_messages
+        )
     except Exception:  # noqa: BLE001 — settings optional in unit stubs
         return False
 

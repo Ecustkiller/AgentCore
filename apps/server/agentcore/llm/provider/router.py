@@ -29,7 +29,8 @@ class ProviderRouter:
         url = getattr(self._default, "base_url", None)
         return str(url) if url else None
 
-    def _route(self, model: str) -> tuple[LLMProvider, str]:
+    def resolve_route(self, model: str) -> tuple[LLMProvider, str]:
+        """Resolve a route key to its leaf and the model sent on that leaf's wire."""
         if _PREFIX_SEP in model:
             prefix, _, rest = model.partition(_PREFIX_SEP)
             provider = self._providers.get(prefix)
@@ -38,13 +39,13 @@ class ProviderRouter:
         return self._default, model
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        provider, model = self._route(request.model)
+        provider, model = self.resolve_route(request.model)
         if model != request.model:
             request = replace(request, model=model)
         return await provider.complete(request)
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
-        provider, model = self._route(request.model)
+        provider, model = self.resolve_route(request.model)
         if model != request.model:
             request = replace(request, model=model)
         async for chunk in provider.stream(request):

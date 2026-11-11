@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel
 
+DEFAULT_ANTHROPIC_MESSAGES_WARM_WINDOW_SECONDS = 2.0
+
 
 class EngineSettings(BaseModel):
     tool_default_timeout_seconds: float = 60.0
@@ -19,19 +21,39 @@ class EngineSettings(BaseModel):
     engine_retrieval_budget: int = 14
     # R-03 前缀缓存观测（审计 D4，observability/prefix_cache.py）：观测已常驻（每
     # llm.call 一条 cost.prefix_cache 探针），默认 debug 级不落 jsonl（长会话避免挤掉
-    # llm.call 的 20MB×5 窗口）。置 True → 提升为 info 落盘，无需全局 LOG_LEVEL=DEBUG，
-    # 便于按需积累 D4 数据后再动装配结构。
-    engine_prefix_cache_observability: bool = False
-    # 同批 worker 共享一次 prefill 的两条 opt-in 杠杆（默认全关 → 开场报文逐字节不变）。
-    # (A) 预热窗：一次 fan-out 内让首个 worker 的第一跳落地（首字节 = prefill 已回写
-    # provider 隐式缓存）后再放开同批其余 worker，把 N × prefill 收敛成
-    # 1 × prefill + N × 尾段。单位秒，0 = 关。同时是有界等待上限：leader 失败/取消
-    # 也由 finally 释放，follower 最多等这么久就照常发（退回现状，绝不死锁）。
-    engine_prefix_warm_window_seconds: float = 0.0
+    # llm.call 的 20MB×5 窗口）。显式 True/False 覆盖；None → 仅 Anthropic-Messages
+    # dialect 提升为 info 落盘，无需全局 LOG_LEVEL=DEBUG。
+    engine_prefix_cache_observability: bool | None = None
+    # 同批 worker 共享一次 prefill 的两条杠杆：None 时只让 Anthropic-Messages
+    # worker 参与预热、拿断点，DeepSeek / OpenAI 兼容路径维持零等待、无断点。
+    # 显式值优先：>0 恢复全 provider 的旧 opt-in，0 全关。
+    # (A) 预热窗：一次 fan-out 内让首个 eligible worker 的第一跳落地（首字节 =
+    # provider 已写入共享前缀：隐式缓存或 /messages 显式断点）后再放开其余 worker，
+    # 把 N × prefill 收敛成 1 × prefill + N × 尾段。单位秒，0 = 关。同时是有界等待
+    # 上限：leader 失败/取消也由 finally 释放，follower 最多等这么久就照常发。
+    engine_prefix_warm_window_seconds: float | None = None
     # (B) Anthropic /messages 显式缓存断点：把 system 末块与 tools 末项标记为
     # cache_control ephemeral。Anthropic 无隐式缓存，不标就零复用。上游 400 拒绝时
     # 自动摘掉断点重试一次，退回隐式/无缓存，不影响可用性。
-    engine_prompt_cache_breakpoints: bool = False
+    engine_prompt_cache_breakpoints: bool | None = None
+
+    def resolve_prompt_cache_breakpoints(self, *, anthropic_messages: bool) -> bool:
+        explicit = self.engine_prompt_cache_breakpoints
+        return explicit if explicit is not None else anthropic_messages
+
+    def resolve_prefix_warm_window_seconds(self, *, anthropic_messages: bool) -> float:
+        explicit = self.engine_prefix_warm_window_seconds
+        if explicit is None:
+            return (
+                DEFAULT_ANTHROPIC_MESSAGES_WARM_WINDOW_SECONDS
+                if anthropic_messages
+                else 0.0
+            )
+        return max(0.0, float(explicit))
+
+    def resolve_prefix_cache_observability(self, *, anthropic_messages: bool) -> bool:
+        explicit = self.engine_prefix_cache_observability
+        return explicit if explicit is not None else anthropic_messages
 
     engine_tool_failure_warn: int = 2
     engine_tool_failure_disable: int = 3

@@ -82,7 +82,8 @@ def _prompt_cache_enabled(base_url: str) -> bool:
     try:
         from agentcore.config.settings import settings
 
-        return bool(settings.engine_prompt_cache_breakpoints)
+        # Only the /messages leaf reaches here, so its None default is dialect-on.
+        return settings.resolve_prompt_cache_breakpoints(anthropic_messages=True)
     except Exception:  # noqa: BLE001 — settings unavailable ⇒ feature off
         return False
 

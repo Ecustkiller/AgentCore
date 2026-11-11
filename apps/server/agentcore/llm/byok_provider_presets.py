@@ -30,6 +30,23 @@ _ALLOWED_OFF_PROTOCOL: frozenset[str] = frozenset(
 _OPENCODE_PRESET_IDS = frozenset({"opencode_go", "opencode_zen"})
 
 
+def anthropic_messages_dialect(*, model_id: str, base_url: str | None) -> bool:
+    """Resolve a model + endpoint to the OpenCode ``/messages`` wire.
+
+    Strip only the ``platform/`` router sentinel. BYOK route prefixes are removed
+    by ``ProviderRouter`` before the leaf sees the model; upstream namespaced ids
+    stay byte-exact.
+    """
+    from agentcore.llm.profiles import PLATFORM_PROVIDER_SENTINEL
+
+    raw = (model_id or "").strip()
+    if "/" in raw:
+        prefix, _, rest = raw.partition("/")
+        if prefix == PLATFORM_PROVIDER_SENTINEL and rest.strip():
+            raw = rest.strip()
+    return uses_anthropic_messages_wire(raw, base_url or "")
+
+
 def _load_raw() -> dict[str, Any]:
     if not _DATA_PATH.is_file():
         raise FileNotFoundError(

@@ -34,6 +34,7 @@ class _FakeLeaf:
     def __init__(self, name: str = "platform") -> None:
         self.name = name
         self._name = name
+        self.base_url: str | None = None
         self.complete = AsyncMock(
             return_value=LLMResponse(
                 content="ok",
@@ -73,6 +74,34 @@ async def test_fence_complete_success_emits_llm_call():
     assert isinstance(call["latency_ms"], int)
     assert call["latency_ms"] >= 0
     assert not any(c.get("event") == "llm.call_failed" for c in caps)
+
+
+@pytest.mark.asyncio
+async def test_fence_complete_forwards_leaf_base_url(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(
+        "agentcore.llm.call_fence.log_llm_call",
+        lambda **kwargs: seen.update(kwargs),
+    )
+    leaf = _FakeLeaf()
+    leaf.base_url = "https://opencode.ai/zen/v1"
+    provider = observe_provider(leaf)
+    await provider.complete(_req())
+    assert seen["base_url"] == "https://opencode.ai/zen/v1"
+
+
+@pytest.mark.asyncio
+async def test_fence_stream_forwards_leaf_base_url(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(
+        "agentcore.llm.call_fence.log_llm_call",
+        lambda **kwargs: seen.update(kwargs),
+    )
+    leaf = _FakeLeaf()
+    leaf.base_url = "https://opencode.ai/zen/v1"
+    provider = observe_provider(leaf)
+    _chunks = [c async for c in provider.stream(_req())]
+    assert seen["base_url"] == "https://opencode.ai/zen/v1"
 
 
 @pytest.mark.asyncio
