@@ -1389,3 +1389,160 @@ def test_observe_carries_per_section_digests_for_offline_diffing(monkeypatch):
         "tail", "TAIL-2", SectionOrder.ATTACHMENT
     ).observe(scope="unit", soft_cap=None)
     assert prompt_section_delta("conv-1").first_changed == "tail"
+
+
+# --- runtime cache-hit SLO (掉零才告警, 不误报冷启动/静默上游) -----------------------------
+
+
+def _should_hit_probe(*, hit: int, miss: int = 100, input_tokens: int = 1000):
+    """A pure-append call that reuses the previous prompt — a healthy cache must hit."""
+    previous = _chain(_m("system", "SYS"), _m("user", "q"), input_tokens=800, calls=1)
+    probe = _probe(
+        [_m("system", "SYS"), _m("user", "q"), _m("assistant", "a")],
+        previous=previous,
+        hit=hit,
+        miss=miss,
+        input_tokens=input_tokens,
+    )
+    assert probe.breach == BREACH_HISTORY_GROWTH
+    return probe
+
+
+def test_slo_no_alert_on_cold_chain_or_legitimate_breach():
+    from agentcore.observability.prefix_cache import note_prefix_cache_slo
+
+    cold = _probe([_m("system", "SYS")], previous=None, hit=0, miss=0)
+    assert cold.breach == BREACH_COLD_CHAIN
+    assert note_prefix_cache_slo(cold, model="m", scenario="chat") is None
+
+    tools = _probe(
+        [_m("system", "SYS")], previous=_chain(_m("system", "SYS"), input_tokens=800),
+        hit=0, miss=100, tools=[{"name": "x"}],
+    )
+    assert tools.breach == BREACH_TOOLS
+    assert note_prefix_cache_slo(tools, model="m2", scenario="chat") is None
+
+
+def test_slo_silent_upstream_never_counts_as_zero_hit():
+    from agentcore.observability.prefix_cache import note_prefix_cache_slo
+
+    previous = _chain(_m("system", "SYS"), _m("user", "q"), input_tokens=800, calls=1)
+    silent = _probe(
+        [_m("system", "SYS"), _m("user", "q"), _m("assistant", "a")],
+        previous=previous, hit=0, miss=0,
+    )
+    assert silent.cache_reported is False
+    for _ in range(10):
+        assert note_prefix_cache_slo(silent, model="m", scenario="chat") is None
+
+
+def test_slo_consecutive_zero_hit_alerts_once_then_resets():
+    from agentcore.observability.prefix_cache import note_prefix_cache_slo
+
+    zero = _should_hit_probe(hit=0)
+    assert note_prefix_cache_slo(zero, model="m", scenario="chat") is None
+    assert note_prefix_cache_slo(zero, model="m", scenario="chat") is None
+    alert = note_prefix_cache_slo(zero, model="m", scenario="chat")
+    assert alert is not None
+    assert alert["reason"] == "consecutive_zero_hit"
+    assert alert["zero_hit_streak"] == 3
+    assert alert["should_hit_calls"] == 3
+    assert alert["model"] == "m" and alert["scenario"] == "chat"
+    # Episode resets: no duplicate warning for the same sustained breach.
+    assert note_prefix_cache_slo(zero, model="m", scenario="chat") is None
+
+
+def test_slo_healthy_hits_never_alert():
+    from agentcore.observability.prefix_cache import note_prefix_cache_slo
+
+    hit = _should_hit_probe(hit=900)
+    for _ in range(12):
+        assert note_prefix_cache_slo(hit, model="m", scenario="chat") is None
+
+
+def test_slo_window_low_hit_ratio_alerts():
+    from agentcore.observability.prefix_cache import (
+        _SLO_WINDOW_CALLS,
+        note_prefix_cache_slo,
+    )
+
+    # Alternate hit / zero so the consecutive-zero latch never trips; the window
+    # ratio is what must catch a chronically under-performing cache.
+    hit = _should_hit_probe(hit=800)
+    zero = _should_hit_probe(hit=0)
+    alerts = []
+    for i in range(_SLO_WINDOW_CALLS):
+        out = note_prefix_cache_slo(
+            hit if i % 2 == 0 else zero, model="m", scenario="chat"
+        )
+        if out:
+            alerts.append(out)
+    assert len(alerts) == 1
+    assert alerts[0]["reason"] == "window_low_hit_ratio"
+    assert alerts[0]["window_hit_ratio"] < 0.5
+
+
+def test_slo_negative_usage_excluded_and_recorded():
+    from agentcore.observability.prefix_cache import note_prefix_cache_slo
+
+    previous = _chain(_m("system", "SYS"), _m("user", "q"), input_tokens=800, calls=1)
+    bad = compute_probe(
+        digests=message_fingerprints(
+            [_m("system", "SYS"), _m("user", "q"), _m("assistant", "a")]
+        )[0],
+        sizes=(10, 10, 10),
+        first_role="system",
+        input_tokens=1000,
+        cache_hit_tokens=-5,
+        cache_miss_tokens=100,
+        previous=previous,
+    )
+    assert note_prefix_cache_slo(bad, model="m", scenario="chat") is None
+    zero = _should_hit_probe(hit=0)
+    note_prefix_cache_slo(zero, model="m", scenario="chat")
+    note_prefix_cache_slo(zero, model="m", scenario="chat")
+    alert = note_prefix_cache_slo(zero, model="m", scenario="chat")
+    assert alert is not None
+    assert alert["negative_usage_calls"] == 1
+
+
+def test_slo_end_to_end_emits_warning_from_observe(monkeypatch):
+    captured: list[tuple[str, dict]] = []
+
+    class _Spy:
+        def debug(self, event: str, **kwargs: object) -> None:
+            pass
+
+        def info(self, event: str, **kwargs: object) -> None:
+            pass
+
+        def warning(self, event: str, **kwargs: object) -> None:
+            captured.append((event, dict(kwargs)))
+
+    monkeypatch.setattr("agentcore.observability.prefix_cache.logger", _Spy())
+    bind_log_context(conversation_id="conv-slo", trace_id="t1", agent_id="ceo")
+    window = [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="q"),
+    ]
+    observe_prefix_cache(  # cold chain — not judged
+        scenario="chat",
+        model="m",
+        messages=list(window),
+        input_tokens=100,
+        cache_hit_tokens=0,
+        cache_miss_tokens=100,
+    )
+    for extra in range(3):
+        window.append(LLMMessage(role="assistant" if extra % 2 == 0 else "user", content=f"a{extra}"))
+        observe_prefix_cache(  # pure append, zero hit
+            scenario="chat",
+            model="m",
+            messages=list(window),
+            input_tokens=100,
+            cache_hit_tokens=0,
+            cache_miss_tokens=100,
+        )
+    warnings = [kw for event, kw in captured if event == "cost.prefix_cache_slo"]
+    assert len(warnings) == 1
+    assert warnings[0]["reason"] == "consecutive_zero_hit"

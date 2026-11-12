@@ -72,6 +72,16 @@ _MAX_CONVERSATIONS = 256
 # Cap the reported change list so one wholesale prompt rewrite cannot blow up a log line.
 _MAX_CHANGED_REPORTED = 8
 
+# Runtime cache-hit SLO. Only calls that SHOULD hit are counted: a pure append or a
+# retry reuses the previous request's whole prompt, so a healthy provider cache must
+# report a hit. Cold chains, tools/system rewrites and silent (no-usage) providers are
+# excluded — counting them would manufacture a breach (see query/stats.py). A warning
+# fires once per breach episode, then the window resets so a long turn cannot spam.
+_SLO_WINDOW_CALLS = 8
+_SLO_CONSECUTIVE_ZERO = 3
+_SLO_MIN_HIT_RATIO = 0.5
+_SLO_MAX_KEYS = 256
+
 # ``breach`` values — why this request could not reuse the previous one's whole prefix.
 BREACH_COLD_CHAIN = "cold_chain"  # nothing seen before on this chain (first call / evicted)
 BREACH_IDENTICAL = "identical"  # same messages as last call (retry / re-ask)
@@ -80,6 +90,11 @@ BREACH_TOOLS = "tools"  # opening tools[] changed (renders before system + messa
 BREACH_SYSTEM_PROMPT = "system_prompt"  # message 0 changed → the whole request is a miss
 BREACH_HEAD_REWRITE = "head_rewrite"  # first message changed but it is not a system message
 BREACH_HISTORY_REWRITE = "history_rewrite"  # a mid-history message changed (compaction / edit)
+
+# Structural verdicts where the previous request's whole prompt is a literal prefix,
+# so a healthy provider cache MUST report a hit. A cold chain or a tools/system/
+# history rewrite is a legitimate miss and never counts toward the SLO.
+_SHOULD_HIT_BREACHES = frozenset({BREACH_HISTORY_GROWTH, BREACH_IDENTICAL})
 
 # ``reusable_basis`` values — how ``reusable_tokens`` was obtained.
 BASIS_MEASURED = "measured"  # the previous request's own input_tokens (pure append)
@@ -390,6 +405,86 @@ class PrefixCacheProbe:
         return fields
 
 
+@dataclass
+class _SloWindow:
+    should_hit_calls: int = 0
+    zero_hit_streak: int = 0
+    hit_tokens: int = 0
+    input_tokens: int = 0
+    silent_calls: int = 0
+    negative_usage_calls: int = 0
+
+
+_slo_windows: OrderedDict[str, _SloWindow] = OrderedDict()
+
+
+def note_prefix_cache_slo(
+    probe: PrefixCacheProbe, *, model: str, scenario: str
+) -> dict[str, object] | None:
+    """Slide one probe into a bounded (scenario, model) window; alert once per breach.
+
+    Only calls whose whole prompt is a literal prefix of the previous one can be
+    judged: a healthy cache MUST report a hit on them. Cold chains, tools/system
+    rewrites, and providers that reported no usage at all are excluded — treating a
+    silent upstream as a 0% hit would manufacture the exact false finding the
+    offline aggregator already avoids. A run of zero-hit should-hit calls is
+    ambiguous between a real breach and a broken read-side cache counter (the
+    ``Silent and Costly`` failure); the alert carries ``silent_calls`` and
+    ``negative_usage_calls`` so the two can be told apart.
+    """
+    key = f"{scenario}|{model}"
+    window = _slo_windows.get(key)
+    if window is None:
+        window = _SloWindow()
+    _lru_put(_slo_windows, key, window, _SLO_MAX_KEYS)
+
+    if min(probe.cache_hit_tokens, probe.input_tokens) < 0:
+        window.negative_usage_calls += 1
+        return None
+    if not probe.cache_reported:
+        window.silent_calls += 1
+        return None
+    if probe.breach not in _SHOULD_HIT_BREACHES or probe.input_tokens <= 0:
+        return None
+
+    window.should_hit_calls += 1
+    window.hit_tokens += probe.cache_hit_tokens
+    window.input_tokens += probe.input_tokens
+    window.zero_hit_streak = 0 if probe.cache_hit_tokens > 0 else window.zero_hit_streak + 1
+
+    reason = ""
+    if window.zero_hit_streak >= _SLO_CONSECUTIVE_ZERO:
+        reason = "consecutive_zero_hit"
+    elif window.should_hit_calls >= _SLO_WINDOW_CALLS:
+        window_ratio = window.hit_tokens / window.input_tokens if window.input_tokens else 0.0
+        if window_ratio < _SLO_MIN_HIT_RATIO:
+            reason = "window_low_hit_ratio"
+
+    if not reason:
+        if window.should_hit_calls >= _SLO_WINDOW_CALLS:
+            _slo_windows.pop(key, None)
+        return None
+
+    payload: dict[str, object] = {
+        "reason": reason,
+        "model": model,
+        "scenario": scenario,
+        "should_hit_calls": window.should_hit_calls,
+        "zero_hit_streak": window.zero_hit_streak,
+        "window_hit_ratio": round(
+            window.hit_tokens / window.input_tokens, 4
+        )
+        if window.input_tokens
+        else 0.0,
+        "window_hit_tokens": window.hit_tokens,
+        "window_input_tokens": window.input_tokens,
+        "silent_calls": window.silent_calls,
+        "negative_usage_calls": window.negative_usage_calls,
+    }
+    _slo_windows.pop(key, None)  # one alert per episode, not one per call
+    return payload
+
+
 def message_fingerprints(messages: Sequence[object]) -> tuple[tuple[str, ...], tuple[int, ...]]:
     """Per-message (digest, chars) for an ``LLMMessage`` list.
 
@@ -631,6 +726,9 @@ def observe_prefix_cache(
             model=model,
             **probe.as_log_fields(),
         )
+    slo_alert = note_prefix_cache_slo(probe, model=model, scenario=scenario)
+    if slo_alert is not None:
+        logger.warning("cost.prefix_cache_slo", **slo_alert)
     return probe
 
 
@@ -650,3 +748,4 @@ def reset_prefix_cache_state() -> None:
     """Drop all in-process probe state (test isolation)."""
     _chains.clear()
     _conversation_sections.clear()
+    _slo_windows.clear()

@@ -340,7 +340,8 @@ async def stream_llm_round(
                                     tc_accumulators[idx] = {
                                         "id": tc_delta.id or "",
                                         "name": tc_delta.function_name or "",
-                                        "arguments": "",
+                                        "arguments_parts": [],
+                                        "arguments_chars": 0,
                                     }
                                 else:
                                     if tc_delta.id:
@@ -348,10 +349,12 @@ async def stream_llm_round(
                                     if tc_delta.function_name:
                                         tc_accumulators[idx]["name"] = tc_delta.function_name
                                 if tc_delta.arguments_delta:
-                                    tc_accumulators[idx]["arguments"] += tc_delta.arguments_delta
+                                    acc = tc_accumulators[idx]
+                                    acc["arguments_parts"].append(tc_delta.arguments_delta)
+                                    acc["arguments_chars"] += len(tc_delta.arguments_delta)
                                 if on_tool_progress is not None:
                                     name = tc_accumulators[idx]["name"]
-                                    chars = len(tc_accumulators[idx]["arguments"])
+                                    chars = tc_accumulators[idx]["arguments_chars"]
                                     last = tc_progress_at.get(idx)
                                     if name and (
                                         last is None or chars - last >= TOOL_PROGRESS_STEP
@@ -458,7 +461,7 @@ async def stream_llm_round(
                     id=acc["id"],
                     function=ToolCallFunction(
                         name=acc["name"],
-                        arguments=acc["arguments"],
+                        arguments="".join(acc["arguments_parts"]),
                     ),
                 )
             )

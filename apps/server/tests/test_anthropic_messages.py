@@ -334,3 +334,65 @@ def test_sse_assembler_thinking_signature_on_finish():
     assert finish.thinking_blocks == [
         {"type": "thinking", "thinking": "hmm", "signature": "sig_z"}
     ]
+
+
+def test_sse_assembler_joins_long_thinking_without_loss():
+    assembler = AnthropicSseAssembler()
+    chunks = []
+    lines = [
+        "event: content_block_start",
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}',
+        "",
+    ]
+    parts = [f"seg{i}-" for i in range(3000)]
+    for p in parts:
+        lines.append("event: content_block_delta")
+        lines.append(
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"'
+            + p
+            + '"}}'
+        )
+        lines.append("")
+    lines += [
+        "event: content_block_delta",
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_long"}}',
+        "",
+        "event: content_block_stop",
+        'data: {"type":"content_block_stop","index":0}',
+        "",
+        "event: message_delta",
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}',
+        "",
+    ]
+    for line in lines:
+        chunks.extend(assembler.feed_line(line))
+    finish = next(c for c in chunks if c.finish_reason)
+    assert finish.thinking_blocks == [
+        {"type": "thinking", "thinking": "".join(parts), "signature": "sig_long"}
+    ]
+
+
+def test_sse_assembler_thinking_initial_text_is_kept():
+    assembler = AnthropicSseAssembler()
+    chunks = []
+    lines = [
+        "event: content_block_start",
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"PRE"}}',
+        "",
+        "event: content_block_delta",
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"+POST"}}',
+        "",
+        "event: content_block_delta",
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"s"}}',
+        "",
+        "event: content_block_stop",
+        'data: {"type":"content_block_stop","index":0}',
+        "",
+        "event: message_delta",
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}',
+        "",
+    ]
+    for line in lines:
+        chunks.extend(assembler.feed_line(line))
+    finish = next(c for c in chunks if c.finish_reason)
+    assert finish.thinking_blocks[0]["thinking"] == "PRE+POST"

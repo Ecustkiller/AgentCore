@@ -393,6 +393,7 @@ class AnthropicSseAssembler:
     _tool_index: dict[int, int] = field(default_factory=dict)
     _next_tool: int = 0
     _open: dict[int, dict] = field(default_factory=dict)
+    _thinking_parts: dict[int, list[str]] = field(default_factory=dict)
 
     def feed_line(self, line: str) -> list[LLMChunk]:
         stripped = line.strip()
@@ -446,6 +447,9 @@ class AnthropicSseAssembler:
 
     def _commit_open(self, index: int) -> None:
         block = self._open.pop(index, None)
+        parts = self._thinking_parts.pop(index, None)
+        if block is not None and parts is not None:
+            block["thinking"] = "".join(parts)
         echoed = normalize_thinking_blocks([block] if block else None)
         if echoed:
             self.thinking_blocks.extend(echoed)
@@ -455,11 +459,13 @@ class AnthropicSseAssembler:
         index = int(data.get("index") or 0)
         kind = block.get("type")
         if kind == "thinking":
+            initial = str(block.get("thinking") or "")
             self._open[index] = {
                 "type": "thinking",
-                "thinking": str(block.get("thinking") or ""),
+                "thinking": "",
                 "signature": str(block.get("signature") or ""),
             }
+            self._thinking_parts[index] = [initial] if initial else []
             return []
         if kind == "redacted_thinking":
             self._open[index] = {
@@ -496,7 +502,7 @@ class AnthropicSseAssembler:
         if kind == "thinking_delta":
             text = str(delta.get("thinking") or "")
             if open_block is not None and open_block.get("type") == "thinking":
-                open_block["thinking"] = str(open_block.get("thinking") or "") + text
+                self._thinking_parts.setdefault(index, []).append(text)
             return [LLMChunk(delta_reasoning=text)] if text else []
         if kind == "signature_delta":
             signature = str(delta.get("signature") or "")

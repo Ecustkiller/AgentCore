@@ -509,3 +509,32 @@ async def test_attach_generator_replays_then_tails_then_closes(monkeypatch):
     sink.close()
     with pytest.raises(StopAsyncIteration):
         await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+
+
+def test_history_coalesce_long_stream_keeps_full_text_and_key_order():
+    from agentcore.runtime.events.sink import _append_coalesced_delta
+
+    sink = EventSink()
+    parts = [f"s{i};" for i in range(6000)]
+    for p in parts:
+        sink.emit(content_delta(p))
+    hist = sink._history
+    assert len(hist) == 1
+    assert hist[0].payload["delta"] == "".join(parts)
+    assert list(hist[0].payload.keys()) == ["delta"]
+
+    # RUN deltas carry more keys — coalescing must not reorder them (SSE bytes).
+    payload = {"run_id": "r1", "agent_id": "a1", "delta": "x"}
+    _append_coalesced_delta(payload, "y")
+    assert payload == {"run_id": "r1", "agent_id": "a1", "delta": "xy"}
+    assert list(payload.keys()) == ["run_id", "agent_id", "delta"]
+
+
+def test_append_coalesced_delta_handles_empty_and_unicode():
+    from agentcore.runtime.events.sink import _append_coalesced_delta
+
+    payload: dict = {}
+    _append_coalesced_delta(payload, "héllo")
+    _append_coalesced_delta(payload, "")
+    _append_coalesced_delta(payload, "世界")
+    assert payload["delta"] == "héllo世界"

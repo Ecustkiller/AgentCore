@@ -44,6 +44,23 @@ from agentcore.runtime.terminal import RUN_CLOSE_EVENT_TYPES, is_live_settle_eve
 
 logger = get_logger(__name__)
 
+
+def _append_coalesced_delta(payload: dict[str, Any], delta: str) -> None:
+    """Append a replay-history delta without quadratic string copying.
+
+    ``payload["delta"]`` must stay a complete string at every emit boundary (SSE
+    replay frames and ``history_snapshot`` read it directly), so fragments cannot
+    be deferred to a join at snapshot time. Dropping the dict's reference before
+    ``+=`` makes the local the sole owner, so CPython grows the unicode object in
+    place (O(n) amortized over a coalesced run) while the key keeps its position —
+    replay frame bytes stay identical. Without that optimisation the result is
+    still correct, just slower; correctness never depends on it.
+    """
+    text = payload.get("delta") or ""
+    payload["delta"] = ""
+    text += delta
+    payload["delta"] = text
+
 # Dev-only observation seam (demo-tape recorder): installed by
 # ``agentcore.demo_tape.recorder`` under DEMO_TAPE_RECORD_ENABLED, None otherwise.
 # Called for every emitted event AFTER normal processing — purely observational;
@@ -648,7 +665,7 @@ class EventSink(SinkJournalMixin, SinkProcessMixin, SinkTerminalMixin):
                 return
             last = self._history[-1] if self._history else None
             if last is not None and last.type == t:
-                last.payload["delta"] = (last.payload.get("delta") or "") + delta
+                _append_coalesced_delta(last.payload, delta)
             else:
                 self._history.append(
                     SSEEvent(type=t, payload={"delta": delta}, timestamp=event.timestamp)
@@ -661,7 +678,7 @@ class EventSink(SinkJournalMixin, SinkProcessMixin, SinkTerminalMixin):
             run_id = event.payload.get("run_id")
             last = self._history[-1] if self._history else None
             if last is not None and last.type == t and last.payload.get("run_id") == run_id:
-                last.payload["delta"] = (last.payload.get("delta") or "") + delta
+                _append_coalesced_delta(last.payload, delta)
             else:
                 self._history.append(
                     SSEEvent(type=t, payload=dict(event.payload), timestamp=event.timestamp)

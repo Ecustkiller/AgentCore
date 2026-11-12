@@ -837,6 +837,7 @@ EVENTS: list[EventSpec] = [
             'tools_count': FieldType('int'),
         },
     ),
+    EventSpec(name='cost.prefix_cache_slo'),
     EventSpec(name='cost.pricing_fallback'),
     EventSpec(name='cost.pricing_prefix_match'),
     EventSpec(
